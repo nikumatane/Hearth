@@ -1,0 +1,25 @@
+{
+  "name": "hearth-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "check": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@lucide/vue": "1.27.0",
+    "lossless-json": "4.2.0",
+    "pako": "2.1.0",
+    "vue": "3.5.40"
+  },
+  "devDependencies": {
+    "@types/pako": "2.0.4",
+    "@vitejs/plugin-vue": "6.0.8",
+    "typescript": "6.0.3",
+    "vite": "8.1.5",
+    "vite-plugin-wasm": "3.5.0",
+    "vue-tsc": "3.3.8"
+  }
+}
