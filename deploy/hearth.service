@@ -1,0 +1,30 @@
+[Unit]
+Description=Hearth game server control panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gamepanel
+Group=gamepanel
+WorkingDirectory=/opt/hearth
+EnvironmentFile=/etc/hearth/environment
+ExecStart=/opt/hearth/hearth -config /etc/hearth/config.json
+Restart=on-failure
+RestartSec=3s
+
+# Baseline hardening. Filesystem permissions for game configuration are added
+# explicitly when the real game adapter is enabled.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

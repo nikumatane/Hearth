@@ -1,0 +1,30 @@
+{
+  "listen": "127.0.0.1:8080",
+  "demo": false,
+  "secureCookies": false,
+  "adminPasswordFile": "C:\\ProgramData\\Hearth\\admin-password.txt",
+  "accessFile": "C:\\ProgramData\\Hearth\\member-credentials.json",
+  "auditFile": "C:\\ProgramData\\Hearth\\login-audit.jsonl",
+  "games": {
+    "palworld": {
+      "enabled": true,
+      "installDir": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common\\PalServer",
+      "steamCmd": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamcmd.exe",
+      "settingsFile": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common\\PalServer\\Pal\\Saved\\Config\\WindowsServer\\PalWorldSettings.ini",
+      "defaultSettingsFile": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common\\PalServer\\DefaultPalWorldSettings.ini",
+      "executable": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common\\PalServer\\PalServer.exe",
+      "processName": "PalServer-Win64-Shipping-Cmd.exe",
+      "startArgs": [],
+      "backupDir": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common\\PalServer\\panel-backups",
+      "restUrl": "http://127.0.0.1:8212",
+      "restUsername": "admin",
+      "shutdownWaitSeconds": 30,
+      "port": 8211
+    },
+    "dontStarveTogether": {
+      "enabled": false,
+      "installDir": "",
+      "steamCmd": ""
+    }
+  }
+}
