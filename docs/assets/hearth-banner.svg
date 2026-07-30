@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title description">
+  <title id="title">Hearth</title>
+  <desc id="description">A quiet home for your game servers.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1200" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1018"/>
+      <stop offset=".55" stop-color="#111827"/>
+      <stop offset="1" stop-color="#171528"/>
+    </linearGradient>
+    <linearGradient id="ember" x1="205" y1="65" x2="365" y2="294" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5C16C"/>
+      <stop offset=".54" stop-color="#F08B61"/>
+      <stop offset="1" stop-color="#9A72F6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(282 190) rotate(90) scale(184 230)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F29A68" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#F29A68" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" fill="none" stroke="#FFFFFF" stroke-opacity=".025"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="360" rx="28" fill="url(#background)"/>
+  <rect width="1200" height="360" rx="28" fill="url(#grid)"/>
+  <ellipse cx="282" cy="190" rx="230" ry="184" fill="url(#glow)"/>
+  <rect x="168" y="62" width="224" height="224" rx="64" fill="#111923" stroke="#FFFFFF" stroke-opacity=".1"/>
+  <path d="M290 88c4 35-25 51-10 84 8-22 29-29 32-59 29 29 45 61 41 94-4 43-39 70-80 70s-72-30-69-73c3-37 30-62 55-88-3 29 8 43 18 56 0-36 19-52 13-84Z" fill="url(#ember)"/>
+  <path d="M276 251c-20 0-35-14-34-33 0-16 11-29 26-44-1 17 6 27 14 33-1-18 10-29 19-40 13 17 21 34 18 51-2 20-19 33-43 33Z" fill="#FFF4DB" fill-opacity=".93"/>
+  <text x="452" y="169" fill="#F7F8FA" font-family="Inter,Segoe UI,PingFang SC,sans-serif" font-size="78" font-weight="700" letter-spacing="-3">Hearth</text>
+  <text x="456" y="219" fill="#9AA5B6" font-family="Inter,Segoe UI,PingFang SC,sans-serif" font-size="24" font-weight="400">A quiet home for your game servers.</text>
+  <g transform="translate(456 250)">
+    <rect width="124" height="34" rx="17" fill="#7898FF" fill-opacity=".1" stroke="#7898FF" stroke-opacity=".22"/>
+    <circle cx="18" cy="17" r="4" fill="#48D39A"/>
+    <text x="31" y="22" fill="#AEBCEB" font-family="Inter,Segoe UI,sans-serif" font-size="14" font-weight="600">SELF-HOSTED</text>
+    <rect x="138" width="104" height="34" rx="17" fill="#FFFFFF" fill-opacity=".035" stroke="#FFFFFF" stroke-opacity=".08"/>
+    <text x="158" y="22" fill="#8793A7" font-family="Inter,Segoe UI,sans-serif" font-size="14" font-weight="600">WINDOWS</text>
+  </g>
+</svg>
