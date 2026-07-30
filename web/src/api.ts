@@ -93,16 +93,24 @@ export type PalworldSettingsPatch = {
   changes: Record<string, string | number | boolean>;
 };
 
+export type Permission =
+  | "game.control"
+  | "game.update"
+  | "game.backup"
+  | "palworld.settings";
+
 export type Session = {
   authenticated: boolean;
   name?: string;
   role?: "admin" | "member";
   credentialId?: string;
+  permissions?: Permission[];
   version: string;
 };
 
 export type MemberCredential = {
   id: string;
+  permissions: Permission[];
   createdAt: string;
   updatedAt: string;
   lastUsedAt?: string;
@@ -198,15 +206,18 @@ export const api = {
   logs: () => request<Logs>("/api/v1/logs"),
   members: () =>
     request<{ members: MemberCredential[] }>("/api/v1/access/members"),
-  createMember: (password: string) =>
+  createMember: (password: string, permissions: Permission[]) =>
     request<MemberCredential>("/api/v1/access/members", {
       method: "POST",
-      body: JSON.stringify({ password })
+      body: JSON.stringify({ password, permissions })
     }),
-  updateMember: (id: string, password: string) =>
+  updateMember: (
+    id: string,
+    update: { password?: string; permissions?: Permission[] }
+  ) =>
     request<MemberCredential>(`/api/v1/access/members/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      body: JSON.stringify({ password })
+      method: "PATCH",
+      body: JSON.stringify(update)
     }),
   deleteMember: (id: string) =>
     request<void>(`/api/v1/access/members/${encodeURIComponent(id)}`, {

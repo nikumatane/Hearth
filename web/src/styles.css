@@ -2165,13 +2165,92 @@ textarea:focus-visible {
   gap: 9px;
 }
 
+.member-create-form {
+  flex-direction: column;
+}
+
+.member-create-form > .button {
+  align-self: flex-start;
+}
+
+.permission-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.permission-presets button {
+  min-height: 31px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: #7f8ba0;
+  background: #10151d;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.permission-presets button:hover,
+.permission-presets button.active {
+  border-color: rgba(120, 152, 255, .38);
+  color: #c8d3f5;
+  background: rgba(120, 152, 255, .09);
+}
+
+.permission-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.permission-grid label {
+  min-height: 52px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  background: rgba(255, 255, 255, .012);
+  cursor: pointer;
+}
+
+.permission-grid label:has(input:checked) {
+  border-color: rgba(120, 152, 255, .26);
+  background: rgba(120, 152, 255, .055);
+}
+
+.permission-grid input {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  accent-color: var(--blue);
+}
+
+.permission-grid span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.permission-grid strong {
+  color: #c6cfdf;
+  font-size: 12px;
+}
+
+.permission-grid small {
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .member-create-form .input-with-icon {
   min-width: 0;
   flex: 1;
 }
 
-.member-create-form input,
-.member-inline-form input {
+.member-create-form .input-with-icon input,
+.member-editor-top input {
   width: 100%;
   height: 40px;
   border: 1px solid var(--border);
@@ -2180,17 +2259,17 @@ textarea:focus-visible {
   background: #0e1218;
 }
 
-.member-create-form input {
+.member-create-form .input-with-icon input {
   padding: 0 12px 0 43px;
 }
 
-.member-inline-form input {
+.member-editor-top input {
   min-width: 190px;
   padding: 0 11px;
 }
 
-.member-create-form input:focus,
-.member-inline-form input:focus {
+.member-create-form .input-with-icon input:focus,
+.member-editor-top input:focus {
   border-color: rgba(120, 152, 255, .65);
   box-shadow: 0 0 0 3px rgba(120, 152, 255, .09);
   outline: none;
@@ -2237,6 +2316,7 @@ textarea:focus-visible {
   border-top: 1px solid var(--border-soft);
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 14px;
 }
 
@@ -2282,12 +2362,61 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.member-permission-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.member-permission-chips span {
+  padding: 3px 7px;
+  border: 1px solid rgba(120, 152, 255, .13);
+  border-radius: 10px;
+  color: #8394bd;
+  background: rgba(120, 152, 255, .045);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
 .member-actions,
 .member-inline-form,
 .member-delete-confirm {
   display: flex;
   align-items: center;
   gap: 7px;
+}
+
+.member-permission-editor {
+  width: 100%;
+  padding: 13px;
+  border: 1px solid rgba(120, 152, 255, .14);
+  border-radius: 9px;
+  align-items: stretch;
+  flex: 1 0 100%;
+  flex-direction: column;
+  background: rgba(120, 152, 255, .025);
+}
+
+.member-editor-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.member-editor-top input {
+  flex: 1;
+}
+
+.permission-presets.compact button {
+  min-height: 28px;
+}
+
+.permission-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.permission-grid.compact label {
+  min-height: 46px;
 }
 
 .member-delete-confirm > span {
@@ -2750,6 +2879,15 @@ textarea:focus-visible {
 
   .member-actions {
     justify-content: flex-end;
+  }
+
+  .member-editor-top {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .permission-grid.compact {
+    grid-template-columns: 1fr;
   }
 
   .toast {

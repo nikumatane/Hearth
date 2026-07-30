@@ -48,6 +48,7 @@ import {
   type MemberCredential,
   type Overview,
   type PalworldSettings,
+  type Permission,
   type Setting
 } from "./api";
 import Sparkline from "./components/Sparkline.vue";
@@ -63,6 +64,27 @@ import {
 type Page = "overview" | "game" | "settings" | "logs" | "access";
 type ActionName = "start" | "stop" | "restart" | "update" | "backup";
 type SettingsSource = "world" | "ini";
+
+const permissionDefinitions: Array<{
+  id: Permission;
+  label: string;
+  description: string;
+}> = [
+  { id: "game.control", label: "控制运行状态", description: "启动、停止和重启游戏服务器" },
+  { id: "game.update", label: "更新服务端", description: "执行 SteamCMD 更新流程" },
+  { id: "game.backup", label: "创建存档备份", description: "手动创建游戏存档备份" },
+  { id: "palworld.settings", label: "修改帕鲁配置", description: "查看并保存两个帕鲁配置来源" }
+];
+
+const permissionPresets: Array<{
+  id: string;
+  label: string;
+  permissions: Permission[];
+}> = [
+  { id: "readonly", label: "只读", permissions: [] },
+  { id: "daily", label: "日常管理", permissions: ["game.control", "game.backup"] },
+  { id: "owner", label: "服主管理", permissions: permissionDefinitions.map((item) => item.id) }
+];
 
 const booting = ref(true);
 const loggedIn = ref(false);
@@ -103,13 +125,16 @@ const gameMenuOpen = ref(false);
 const buildVersion = ref("未知");
 const currentRole = ref<"admin" | "member" | "">("");
 const credentialId = ref("");
+const currentPermissions = ref<Permission[]>([]);
 const members = ref<MemberCredential[]>([]);
 const auditEntries = ref<LoginAuditEntry[]>([]);
 const accessLoading = ref(false);
 const accessTab = ref<"members" | "audit">("members");
 const newMemberPassword = ref("");
+const newMemberPermissions = ref<Permission[]>([]);
 const editingMemberId = ref("");
 const editingMemberPassword = ref("");
+const editingMemberPermissions = ref<Permission[]>([]);
 const deletingMemberId = ref("");
 let pollTimer: number | undefined;
 let toastTimer: number | undefined;
@@ -211,6 +236,7 @@ const selectedLog = computed(() =>
 );
 
 const isAdmin = computed(() => currentRole.value === "admin");
+const canManageSettings = computed(() => hasPermission("palworld.settings"));
 
 onMounted(async () => {
   try {
@@ -241,6 +267,7 @@ async function login() {
     buildVersion.value = session.version || buildVersion.value;
     currentRole.value = session.role ?? "";
     credentialId.value = session.credentialId ?? "";
+    currentPermissions.value = session.permissions ?? [];
     loggedIn.value = true;
     loginPassword.value = "";
     await refresh();
@@ -259,6 +286,7 @@ async function logout() {
   page.value = "overview";
   currentRole.value = "";
   credentialId.value = "";
+  currentPermissions.value = [];
   members.value = [];
   auditEntries.value = [];
   if (pollTimer) window.clearInterval(pollTimer);
@@ -295,7 +323,11 @@ async function refresh(silent = false) {
 }
 
 function navigate(next: Page, gameId?: string) {
-  if (!isAdmin.value && (next === "settings" || next === "logs" || next === "access")) {
+  if (next === "settings" && !canManageSettings.value) {
+    showToast("error", "当前成员密码没有修改帕鲁配置的权限");
+    return;
+  }
+  if (!isAdmin.value && (next === "logs" || next === "access")) {
     showToast("error", "仅管理员可以访问该页面");
     return;
   }
@@ -347,8 +379,12 @@ async function addMember() {
     return;
   }
   try {
-    const member = await api.createMember(newMemberPassword.value);
+    const member = await api.createMember(
+      newMemberPassword.value,
+      newMemberPermissions.value
+    );
     newMemberPassword.value = "";
+    newMemberPermissions.value = [];
     members.value = [member, ...members.value];
     showToast("success", `成员密码 ${member.id} 已添加`);
   } catch (error) {
@@ -359,20 +395,24 @@ async function addMember() {
 function beginMemberEdit(member: MemberCredential) {
   editingMemberId.value = member.id;
   editingMemberPassword.value = "";
+  editingMemberPermissions.value = [...(member.permissions ?? [])];
   deletingMemberId.value = "";
 }
 
-async function saveMemberPassword(member: MemberCredential) {
-  if (editingMemberPassword.value.length < 10) {
-    showToast("error", "成员密码至少需要 10 个字符");
+async function saveMember(member: MemberCredential) {
+  if (editingMemberPassword.value.length > 0 && editingMemberPassword.value.length < 10) {
+    showToast("error", "新密码留空表示不修改；填写时至少需要 10 个字符");
     return;
   }
   try {
-    const updated = await api.updateMember(member.id, editingMemberPassword.value);
+    const updated = await api.updateMember(member.id, {
+      ...(editingMemberPassword.value ? { password: editingMemberPassword.value } : {}),
+      permissions: editingMemberPermissions.value
+    });
     members.value = members.value.map((item) => item.id === member.id ? updated : item);
     editingMemberId.value = "";
     editingMemberPassword.value = "";
-    showToast("success", `成员密码 ${member.id} 已更新`);
+    showToast("success", `成员密码 ${member.id} 的密码或权限已更新，原会话已退出`);
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "成员密码更新失败");
   }
@@ -448,12 +488,37 @@ function selectSettingsSource(source: SettingsSource) {
   settingsGroup.value = settings.value?.groups[0]?.id ?? "";
 }
 
+function hasPermission(permission: Permission): boolean {
+  return isAdmin.value || currentPermissions.value.includes(permission);
+}
+
+function permissionForAction(action: ActionName): Permission {
+  if (action === "update") return "game.update";
+  if (action === "backup") return "game.backup";
+  return "game.control";
+}
+
+function hasActionPermission(action: ActionName): boolean {
+  return hasPermission(permissionForAction(action));
+}
+
+function actionDisabledReason(game: Game, action: ActionName): string | undefined {
+  if (!hasActionPermission(action)) return "当前成员密码没有此操作权限";
+  if (action !== "start" && game.state === "running" && !game.restAvailable) {
+    return "REST API 不可用，无法安全执行此操作";
+  }
+  return undefined;
+}
+
 function canRunSafeAction(game: Game, action: ActionName): boolean {
-  if (action === "start" || game.state !== "running") return true;
-  return game.restAvailable;
+  return !actionDisabledReason(game, action);
 }
 
 function askAction(game: Game, action: ActionName) {
+  if (!hasActionPermission(action)) {
+    showToast("error", "当前成员密码没有执行此操作的权限");
+    return;
+  }
   if (!canRunSafeAction(game, action)) {
     showToast("error", "REST API 当前不可用；为保护存档，运行中的停止、重启、更新和备份已锁定");
     return;
@@ -550,6 +615,33 @@ function hasSourceConflict(setting: Setting): boolean {
 function settingSourceLabel(setting: Setting): string {
   const source = settingsSource.value === "world" ? "WorldOption.sav" : "PalWorldSettings.ini";
   return setting.configured ? source : source + " · 默认值";
+}
+
+function applyPermissionPreset(target: "new" | "edit", permissions: Permission[]) {
+  const next = [...permissions];
+  if (target === "new") newMemberPermissions.value = next;
+  else editingMemberPermissions.value = next;
+}
+
+function toggleMemberPermission(
+  target: "new" | "edit",
+  permission: Permission,
+  enabled: boolean
+) {
+  const current = target === "new" ? newMemberPermissions.value : editingMemberPermissions.value;
+  const next = enabled
+    ? Array.from(new Set([...current, permission]))
+    : current.filter((item) => item !== permission);
+  if (target === "new") newMemberPermissions.value = next;
+  else editingMemberPermissions.value = next;
+}
+
+function presetSelected(current: Permission[], preset: Permission[]): boolean {
+  return current.length === preset.length && preset.every((item) => current.includes(item));
+}
+
+function permissionLabel(permission: Permission): string {
+  return permissionDefinitions.find((item) => item.id === permission)?.label ?? permission;
 }
 
 function showToast(type: "success" | "error", message: string) {
@@ -721,8 +813,8 @@ function gameAccent(id: string) {
           <i :class="['nav-state', game.state]"></i>
         </button>
 
-        <span v-if="isAdmin" class="nav-label nav-section">管理</span>
-        <button v-if="isAdmin" :class="{ active: page === 'settings' }" @click="navigate('settings', 'palworld')">
+        <span v-if="isAdmin || canManageSettings" class="nav-label nav-section">管理</span>
+        <button v-if="canManageSettings" :class="{ active: page === 'settings' }" @click="navigate('settings', 'palworld')">
           <SlidersHorizontal :size="18" />
           <span>帕鲁配置</span>
         </button>
@@ -909,7 +1001,11 @@ function gameAccent(id: string) {
                       <RefreshCw :size="16" />
                       <span><strong>有新版本</strong>{{ game.availableVersion }}</span>
                     </div>
-                    <button :disabled="!canRunSafeAction(game, 'update')" @click="askAction(game, 'update')">立即更新</button>
+                    <button
+                      :disabled="!canRunSafeAction(game, 'update')"
+                      :title="actionDisabledReason(game, 'update')"
+                      @click="askAction(game, 'update')"
+                    >立即更新</button>
                   </div>
                   <div v-else class="version-row">
                     <Check :size="15" />
@@ -919,6 +1015,8 @@ function gameAccent(id: string) {
                     <button
                       v-if="game.state === 'stopped'"
                       class="button primary small"
+                      :disabled="!canRunSafeAction(game, 'start')"
+                      :title="actionDisabledReason(game, 'start')"
                       @click="askAction(game, 'start')"
                     >
                       <Play :size="15" /> 启动
@@ -926,8 +1024,8 @@ function gameAccent(id: string) {
                     <button
                       v-else
                       class="button secondary small"
-                      :disabled="game.state !== 'running' || !game.restAvailable"
-                      :title="!game.restAvailable ? 'REST API 不可用，无法安全重启' : undefined"
+                      :disabled="game.state !== 'running' || !canRunSafeAction(game, 'restart')"
+                      :title="actionDisabledReason(game, 'restart')"
                       @click="askAction(game, 'restart')"
                     >
                       <RotateCw :size="15" /> 重启
@@ -1011,6 +1109,8 @@ function gameAccent(id: string) {
               <button
                 v-if="selectedGame.state === 'stopped'"
                 class="button primary"
+                :disabled="!canRunSafeAction(selectedGame, 'start')"
+                :title="actionDisabledReason(selectedGame, 'start')"
                 @click="askAction(selectedGame, 'start')"
               >
                 <Play :size="16" /> 启动服务器
@@ -1018,16 +1118,16 @@ function gameAccent(id: string) {
               <template v-else>
                 <button
                   class="button secondary"
-                  :disabled="selectedGame.state !== 'running' || !selectedGame.restAvailable"
-                  :title="!selectedGame.restAvailable ? 'REST API 不可用，无法安全重启' : undefined"
+                  :disabled="selectedGame.state !== 'running' || !canRunSafeAction(selectedGame, 'restart')"
+                  :title="actionDisabledReason(selectedGame, 'restart')"
                   @click="askAction(selectedGame, 'restart')"
                 >
                   <RotateCw :size="16" /> 重启
                 </button>
                 <button
                   class="button danger-ghost"
-                  :disabled="selectedGame.state !== 'running' || !selectedGame.restAvailable"
-                  :title="!selectedGame.restAvailable ? 'REST API 不可用，无法安全停止' : undefined"
+                  :disabled="selectedGame.state !== 'running' || !canRunSafeAction(selectedGame, 'stop')"
+                  :title="actionDisabledReason(selectedGame, 'stop')"
                   @click="askAction(selectedGame, 'stop')"
                 >
                   <Square :size="15" /> 停止
@@ -1038,10 +1138,14 @@ function gameAccent(id: string) {
                   <MoreHorizontal :size="19" />
                 </button>
                 <div v-if="gameMenuOpen" class="action-menu game-action-menu">
-                  <button :disabled="!canRunSafeAction(selectedGame, 'backup')" @click="askAction(selectedGame, 'backup'); gameMenuOpen = false">
+                  <button
+                    :disabled="!canRunSafeAction(selectedGame, 'backup')"
+                    :title="actionDisabledReason(selectedGame, 'backup')"
+                    @click="askAction(selectedGame, 'backup'); gameMenuOpen = false"
+                  >
                     <DatabaseBackup :size="15" />创建备份
                   </button>
-                  <button v-if="isAdmin" @click="navigate('settings', 'palworld')">
+                  <button v-if="canManageSettings" @click="navigate('settings', 'palworld')">
                     <Settings2 :size="15" />编辑配置
                   </button>
                   <button v-if="isAdmin" @click="navigate('logs')">
@@ -1058,7 +1162,12 @@ function gameAccent(id: string) {
               <strong>发现新的服务端版本</strong>
               <span>{{ selectedGame.version }} → {{ selectedGame.availableVersion }}</span>
             </div>
-            <button class="button primary small" :disabled="!canRunSafeAction(selectedGame, 'update')" @click="askAction(selectedGame, 'update')">
+            <button
+              class="button primary small"
+              :disabled="!canRunSafeAction(selectedGame, 'update')"
+              :title="actionDisabledReason(selectedGame, 'update')"
+              @click="askAction(selectedGame, 'update')"
+            >
               安全更新
             </button>
           </section>
@@ -1108,18 +1217,26 @@ function gameAccent(id: string) {
                 <div><h2>快捷操作</h2><p>安全任务会自动排队</p></div>
                 <CloudCog :size="19" />
               </div>
-              <button :disabled="!canRunSafeAction(selectedGame, 'backup')" @click="askAction(selectedGame, 'backup')">
+              <button
+                :disabled="!canRunSafeAction(selectedGame, 'backup')"
+                :title="actionDisabledReason(selectedGame, 'backup')"
+                @click="askAction(selectedGame, 'backup')"
+              >
                 <DatabaseBackup :size="18" />
                 <span><strong>创建备份</strong><small>存档与关键配置</small></span>
                 <ChevronRight :size="17" />
               </button>
-              <button :disabled="!canRunSafeAction(selectedGame, 'update')" @click="askAction(selectedGame, 'update')">
+              <button
+                :disabled="!canRunSafeAction(selectedGame, 'update')"
+                :title="actionDisabledReason(selectedGame, 'update')"
+                @click="askAction(selectedGame, 'update')"
+              >
                 <RefreshCw :size="18" />
                 <span><strong>安全更新服务端</strong><small>保存、停服、备份、SteamCMD 更新</small></span>
                 <ChevronRight :size="17" />
               </button>
               <button
-                v-if="isAdmin && selectedGame.id === 'palworld'"
+                v-if="canManageSettings && selectedGame.id === 'palworld'"
                 @click="navigate('settings', 'palworld')"
               >
                 <Settings2 :size="18" />
@@ -1188,13 +1305,41 @@ function gameAccent(id: string) {
                     placeholder="至少 10 个字符"
                   />
                 </div>
+                <div class="permission-presets" aria-label="权限模板">
+                  <button
+                    v-for="preset in permissionPresets"
+                    :key="preset.id"
+                    type="button"
+                    :class="{ active: presetSelected(newMemberPermissions, preset.permissions) }"
+                    @click="applyPermissionPreset('new', preset.permissions)"
+                  >
+                    {{ preset.label }}
+                  </button>
+                </div>
+                <div class="permission-grid">
+                  <label v-for="permission in permissionDefinitions" :key="permission.id">
+                    <input
+                      type="checkbox"
+                      :checked="newMemberPermissions.includes(permission.id)"
+                      @change="toggleMemberPermission(
+                        'new',
+                        permission.id,
+                        ($event.target as HTMLInputElement).checked
+                      )"
+                    />
+                    <span>
+                      <strong>{{ permission.label }}</strong>
+                      <small>{{ permission.description }}</small>
+                    </span>
+                  </label>
+                </div>
                 <button class="button primary" :disabled="newMemberPassword.length < 10">
                   <UserPlus :size="16" />添加成员
                 </button>
               </form>
               <div class="access-note">
                 <ShieldCheck :size="17" />
-                <span>成员可查看状态并执行启动、停止、重启、更新和备份；不能修改配置或查看管理日志。</span>
+                <span>模板只是快捷选择，最终以后端勾选项为准。任务日志、登录审计和成员管理始终只对管理员开放。</span>
               </div>
             </article>
 
@@ -1202,7 +1347,7 @@ function gameAccent(id: string) {
               <div class="card-heading">
                 <div>
                   <h2>成员凭据</h2>
-                  <p>修改密码会立即使旧密码失效；现有登录会话持续到退出或过期。</p>
+                  <p>修改密码或权限后，该成员现有登录会话会立即退出。</p>
                 </div>
                 <span>最多 20 个</span>
               </div>
@@ -1216,28 +1361,66 @@ function gameAccent(id: string) {
                         创建 {{ formatDateTime(member.createdAt) }} ·
                         最近登录 {{ formatRelative(member.lastUsedAt) }}
                       </small>
+                      <div class="member-permission-chips">
+                        <span v-if="!member.permissions?.length">只读</span>
+                        <span v-for="permission in member.permissions" :key="permission">
+                          {{ permissionLabel(permission) }}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <form
                     v-if="editingMemberId === member.id"
-                    class="member-inline-form"
-                    @submit.prevent="saveMemberPassword(member)"
+                    class="member-inline-form member-permission-editor"
+                    @submit.prevent="saveMember(member)"
                   >
-                    <input
-                      v-model="editingMemberPassword"
-                      type="password"
-                      autocomplete="new-password"
-                      minlength="10"
-                      maxlength="256"
-                      placeholder="输入新的成员密码"
-                      autofocus
-                    />
-                    <button class="button primary small" :disabled="editingMemberPassword.length < 10">
-                      <Save :size="14" />保存
-                    </button>
-                    <button type="button" class="button secondary small" @click="editingMemberId = ''">
-                      取消
-                    </button>
+                    <div class="member-editor-top">
+                      <input
+                        v-model="editingMemberPassword"
+                        type="password"
+                        autocomplete="new-password"
+                        maxlength="256"
+                        placeholder="新密码（留空表示不修改）"
+                        autofocus
+                      />
+                      <button
+                        class="button primary small"
+                        :disabled="editingMemberPassword.length > 0 && editingMemberPassword.length < 10"
+                      >
+                        <Save :size="14" />保存修改
+                      </button>
+                      <button type="button" class="button secondary small" @click="editingMemberId = ''">
+                        取消
+                      </button>
+                    </div>
+                    <div class="permission-presets compact" aria-label="权限模板">
+                      <button
+                        v-for="preset in permissionPresets"
+                        :key="preset.id"
+                        type="button"
+                        :class="{ active: presetSelected(editingMemberPermissions, preset.permissions) }"
+                        @click="applyPermissionPreset('edit', preset.permissions)"
+                      >
+                        {{ preset.label }}
+                      </button>
+                    </div>
+                    <div class="permission-grid compact">
+                      <label v-for="permission in permissionDefinitions" :key="permission.id">
+                        <input
+                          type="checkbox"
+                          :checked="editingMemberPermissions.includes(permission.id)"
+                          @change="toggleMemberPermission(
+                            'edit',
+                            permission.id,
+                            ($event.target as HTMLInputElement).checked
+                          )"
+                        />
+                        <span>
+                          <strong>{{ permission.label }}</strong>
+                          <small>{{ permission.description }}</small>
+                        </span>
+                      </label>
+                    </div>
                   </form>
                   <div v-else-if="deletingMemberId === member.id" class="member-delete-confirm">
                     <span>确认删除？</span>
@@ -1246,7 +1429,7 @@ function gameAccent(id: string) {
                   </div>
                   <div v-else class="member-actions">
                     <button class="button secondary small" @click="beginMemberEdit(member)">
-                      <KeyRound :size="14" />修改密码
+                      <KeyRound :size="14" />编辑密码与权限
                     </button>
                     <button class="icon-button member-delete-button" title="删除成员密码" @click="deletingMemberId = member.id">
                       <Trash2 :size="16" />
