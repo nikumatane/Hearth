@@ -51,14 +51,26 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 	mux.HandleFunc("GET /api/v1/overview", s.auth(s.overview))
 	mux.HandleFunc("GET /api/v1/games/{id}", s.auth(s.game))
 	mux.HandleFunc("POST /api/v1/games/{id}/actions", s.auth(s.gameAction))
-	mux.HandleFunc("GET /api/v1/games/palworld/settings", s.admin(s.palworldSettings))
-	mux.HandleFunc("PATCH /api/v1/games/palworld/settings", s.admin(s.updatePalworldSettings))
-	mux.HandleFunc("GET /api/v1/games/palworld/world-option", s.admin(s.worldOption))
-	mux.HandleFunc("PUT /api/v1/games/palworld/world-option", s.admin(s.updateWorldOption))
+	mux.HandleFunc(
+		"GET /api/v1/games/palworld/settings",
+		s.permitted(permissionPalworldSettings, s.palworldSettings),
+	)
+	mux.HandleFunc(
+		"PATCH /api/v1/games/palworld/settings",
+		s.permitted(permissionPalworldSettings, s.updatePalworldSettings),
+	)
+	mux.HandleFunc(
+		"GET /api/v1/games/palworld/world-option",
+		s.permitted(permissionPalworldSettings, s.worldOption),
+	)
+	mux.HandleFunc(
+		"PUT /api/v1/games/palworld/world-option",
+		s.permitted(permissionPalworldSettings, s.updateWorldOption),
+	)
 	mux.HandleFunc("GET /api/v1/logs", s.admin(s.logs))
 	mux.HandleFunc("GET /api/v1/access/members", s.admin(s.members))
 	mux.HandleFunc("POST /api/v1/access/members", s.admin(s.createMember))
-	mux.HandleFunc("PUT /api/v1/access/members/{id}", s.admin(s.updateMember))
+	mux.HandleFunc("PATCH /api/v1/access/members/{id}", s.admin(s.updateMember))
 	mux.HandleFunc("DELETE /api/v1/access/members/{id}", s.admin(s.deleteMember))
 	mux.HandleFunc("GET /api/v1/access/audit", s.admin(s.loginAudit))
 	mux.Handle("/", spaHandler())
@@ -126,7 +138,8 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true, "name": name, "role": identity.Role,
-		"credentialId": identity.CredentialID, "version": buildinfo.Version,
+		"credentialId": identity.CredentialID, "permissions": identity.Permissions,
+		"version": buildinfo.Version,
 	})
 }
 
@@ -148,7 +161,8 @@ func (s *server) currentSession(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true, "name": name, "role": identity.Role,
-		"credentialId": identity.CredentialID, "version": buildinfo.Version,
+		"credentialId": identity.CredentialID, "permissions": identity.Permissions,
+		"version": buildinfo.Version,
 	})
 }
 
@@ -186,12 +200,35 @@ func (s *server) gameAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "请求格式不正确")
 		return
 	}
+	permission, ok := permissionForAction(request.Action)
+	if !ok {
+		writeServiceError(w, panel.ErrBadAction)
+		return
+	}
+	identity, _ := principalFromContext(r.Context())
+	if !hasPermission(identity, permission) {
+		writeError(w, http.StatusForbidden, "当前成员密码没有执行此操作的权限")
+		return
+	}
 	activity, err := s.service.RunAction(r.PathValue("id"), request.Action)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, activity)
+}
+
+func permissionForAction(action string) (string, bool) {
+	switch action {
+	case "start", "stop", "restart":
+		return permissionGameControl, true
+	case "update":
+		return permissionGameUpdate, true
+	case "backup":
+		return permissionGameBackup, true
+	default:
+		return "", false
+	}
 }
 
 func (s *server) palworldSettings(w http.ResponseWriter, _ *http.Request) {
@@ -325,6 +362,17 @@ func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), principalContextKey{}, identity)))
 	}
+}
+
+func (s *server) permitted(permission string, next http.HandlerFunc) http.HandlerFunc {
+	return s.auth(func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := principalFromContext(r.Context())
+		if !ok || !hasPermission(identity, permission) {
+			writeError(w, http.StatusForbidden, "当前成员密码没有访问此功能的权限")
+			return
+		}
+		next(w, r)
+	})
 }
 
 func (s *server) admin(next http.HandlerFunc) http.HandlerFunc {

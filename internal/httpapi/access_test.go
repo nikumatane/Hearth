@@ -22,7 +22,10 @@ func TestAccessStorePersistsOnlyPasswordDigests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create access store: %v", err)
 	}
-	member, err := store.createMember("friend-secret-123")
+	member, err := store.createMember(
+		"friend-secret-123",
+		[]string{permissionGameControl, permissionPalworldSettings},
+	)
 	if err != nil {
 		t.Fatalf("create member: %v", err)
 	}
@@ -37,7 +40,9 @@ func TestAccessStorePersistsOnlyPasswordDigests(t *testing.T) {
 	}
 
 	identity, ok := store.authenticate("friend-secret-123")
-	if !ok || identity.Role != roleMember || identity.CredentialID != member.ID {
+	if !ok || identity.Role != roleMember || identity.CredentialID != member.ID ||
+		!hasPermission(identity, permissionGameControl) ||
+		!hasPermission(identity, permissionPalworldSettings) {
 		t.Fatalf("member authentication = %#v, %v", identity, ok)
 	}
 
@@ -48,7 +53,9 @@ func TestAccessStorePersistsOnlyPasswordDigests(t *testing.T) {
 	if _, ok := reloaded.authenticate("friend-secret-123"); !ok {
 		t.Fatal("persisted member password did not authenticate")
 	}
-	if _, err := reloaded.updateMember(member.ID, "friend-secret-456"); err != nil {
+	newPassword := "friend-secret-456"
+	newPermissions := []string{permissionGameBackup}
+	if _, err := reloaded.updateMember(member.ID, &newPassword, &newPermissions); err != nil {
 		t.Fatalf("update member: %v", err)
 	}
 	if _, ok := reloaded.authenticate("friend-secret-123"); ok {
@@ -81,7 +88,7 @@ func TestAdminAndMemberPermissionsAndLoginAudit(t *testing.T) {
 
 	create := requestForTest(
 		t, handler, http.MethodPost, "/api/v1/access/members",
-		`{"password":"friend-secret-123"}`, adminCookie,
+		`{"password":"friend-secret-123","permissions":["game.control","palworld.settings"]}`, adminCookie,
 	)
 	if create.Code != http.StatusCreated {
 		t.Fatalf("create member status = %d body = %s", create.Code, create.Body.String())
@@ -113,7 +120,8 @@ func TestAdminAndMemberPermissionsAndLoginAudit(t *testing.T) {
 	}{
 		{path: "/api/v1/overview", want: http.StatusOK},
 		{path: "/api/v1/logs", want: http.StatusForbidden},
-		{path: "/api/v1/games/palworld/world-option", want: http.StatusForbidden},
+		{path: "/api/v1/games/palworld/settings", want: http.StatusOK},
+		{path: "/api/v1/games/palworld/world-option", want: http.StatusNotFound},
 		{path: "/api/v1/access/members", want: http.StatusForbidden},
 		{path: "/api/v1/access/audit", want: http.StatusForbidden},
 	} {
@@ -121,6 +129,21 @@ func TestAdminAndMemberPermissionsAndLoginAudit(t *testing.T) {
 		if response.Code != test.want {
 			t.Errorf("%s status = %d body = %s; want %d", test.path, response.Code, response.Body.String(), test.want)
 		}
+	}
+
+	allowedAction := requestForTest(
+		t, handler, http.MethodPost, "/api/v1/games/palworld/actions",
+		`{"action":"start"}`, memberCookie,
+	)
+	if allowedAction.Code != http.StatusAccepted {
+		t.Fatalf("permitted action status = %d body = %s", allowedAction.Code, allowedAction.Body.String())
+	}
+	deniedAction := requestForTest(
+		t, handler, http.MethodPost, "/api/v1/games/palworld/actions",
+		`{"action":"update"}`, memberCookie,
+	)
+	if deniedAction.Code != http.StatusForbidden {
+		t.Fatalf("unpermitted action status = %d body = %s", deniedAction.Code, deniedAction.Body.String())
 	}
 
 	audit := requestForTest(t, handler, http.MethodGet, "/api/v1/access/audit", "", adminCookie)
@@ -142,6 +165,28 @@ func TestAdminAndMemberPermissionsAndLoginAudit(t *testing.T) {
 		strings.Contains(string(auditData), "friend-secret-123") ||
 		strings.Contains(string(auditData), "definitely-wrong-password") {
 		t.Fatalf("audit file contains a plaintext password: %s", auditData)
+	}
+
+	updated := requestForTest(
+		t, handler, http.MethodPatch, "/api/v1/access/members/"+member.ID,
+		`{"permissions":["game.backup"]}`, adminCookie,
+	)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update permissions status = %d body = %s", updated.Code, updated.Body.String())
+	}
+	revokedAfterPermissionChange := requestForTest(
+		t, handler, http.MethodGet, "/api/v1/overview", "", memberCookie,
+	)
+	if revokedAfterPermissionChange.Code != http.StatusUnauthorized {
+		t.Fatalf("permission change session status = %d; want unauthorized", revokedAfterPermissionChange.Code)
+	}
+
+	memberCookie, _ = loginForTest(t, handler, "friend-secret-123", "198.51.100.22")
+	settingsDenied := requestForTest(
+		t, handler, http.MethodGet, "/api/v1/games/palworld/settings", "", memberCookie,
+	)
+	if settingsDenied.Code != http.StatusForbidden {
+		t.Fatalf("settings after permission change status = %d; want forbidden", settingsDenied.Code)
 	}
 
 	deleted := requestForTest(

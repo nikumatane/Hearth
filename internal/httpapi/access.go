@@ -24,23 +24,35 @@ import (
 )
 
 const (
-	roleAdmin            = "admin"
-	roleMember           = "member"
-	passwordIterations   = 120_000
-	passwordLength       = 32
-	maxMemberCredentials = 20
-	maxAuditEntries      = 500
+	roleAdmin                  = "admin"
+	roleMember                 = "member"
+	permissionGameControl      = "game.control"
+	permissionGameUpdate       = "game.update"
+	permissionGameBackup       = "game.backup"
+	permissionPalworldSettings = "palworld.settings"
+	passwordIterations         = 120_000
+	passwordLength             = 32
+	maxMemberCredentials       = 20
+	maxAuditEntries            = 500
 )
 
 var (
-	errCredentialExists = errors.New("credential password already exists")
-	errMemberNotFound   = errors.New("member credential not found")
-	errMemberLimit      = errors.New("member credential limit reached")
+	errCredentialExists  = errors.New("credential password already exists")
+	errMemberNotFound    = errors.New("member credential not found")
+	errMemberLimit       = errors.New("member credential limit reached")
+	errInvalidPermission = errors.New("invalid member permission")
+	allPermissions       = []string{
+		permissionGameControl,
+		permissionGameUpdate,
+		permissionGameBackup,
+		permissionPalworldSettings,
+	}
 )
 
 type principal struct {
-	Role         string `json:"role"`
-	CredentialID string `json:"credentialId"`
+	Role         string   `json:"role"`
+	CredentialID string   `json:"credentialId"`
+	Permissions  []string `json:"permissions"`
 }
 
 type passwordDigest struct {
@@ -50,18 +62,20 @@ type passwordDigest struct {
 }
 
 type memberCredential struct {
-	ID         string         `json:"id"`
-	Password   passwordDigest `json:"password"`
-	CreatedAt  time.Time      `json:"createdAt"`
-	UpdatedAt  time.Time      `json:"updatedAt"`
-	LastUsedAt *time.Time     `json:"lastUsedAt,omitempty"`
+	ID          string         `json:"id"`
+	Password    passwordDigest `json:"password"`
+	Permissions []string       `json:"permissions"`
+	CreatedAt   time.Time      `json:"createdAt"`
+	UpdatedAt   time.Time      `json:"updatedAt"`
+	LastUsedAt  *time.Time     `json:"lastUsedAt,omitempty"`
 }
 
 type memberView struct {
-	ID         string     `json:"id"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	UpdatedAt  time.Time  `json:"updatedAt"`
-	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	ID          string     `json:"id"`
+	Permissions []string   `json:"permissions"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+	LastUsedAt  *time.Time `json:"lastUsedAt,omitempty"`
 }
 
 type credentialDocument struct {
@@ -110,7 +124,9 @@ func (s *accessStore) authenticate(password string) (principal, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if verifyPassword(password, s.adminPassword) {
-		return principal{Role: roleAdmin, CredentialID: "ADMIN"}, true
+		return principal{
+			Role: roleAdmin, CredentialID: "ADMIN", Permissions: slices.Clone(allPermissions),
+		}, true
 	}
 	for index := range s.members {
 		if !verifyPassword(password, s.members[index].Password) {
@@ -121,7 +137,10 @@ func (s *accessStore) authenticate(password string) (principal, bool) {
 		if err := s.persistMembersLocked(); err != nil {
 			slog.Error("persist member last-used time", "error", err)
 		}
-		return principal{Role: roleMember, CredentialID: s.members[index].ID}, true
+		return principal{
+			Role: roleMember, CredentialID: s.members[index].ID,
+			Permissions: slices.Clone(s.members[index].Permissions),
+		}, true
 	}
 	return principal{}, false
 }
@@ -132,7 +151,8 @@ func (s *accessStore) memberViews() []memberView {
 	views := make([]memberView, 0, len(s.members))
 	for _, member := range s.members {
 		views = append(views, memberView{
-			ID: member.ID, CreatedAt: member.CreatedAt, UpdatedAt: member.UpdatedAt,
+			ID: member.ID, Permissions: slices.Clone(member.Permissions),
+			CreatedAt: member.CreatedAt, UpdatedAt: member.UpdatedAt,
 			LastUsedAt: member.LastUsedAt,
 		})
 	}
@@ -142,8 +162,12 @@ func (s *accessStore) memberViews() []memberView {
 	return views
 }
 
-func (s *accessStore) createMember(password string) (memberView, error) {
+func (s *accessStore) createMember(password string, permissions []string) (memberView, error) {
 	if err := validateMemberPassword(password); err != nil {
+		return memberView{}, err
+	}
+	normalizedPermissions, err := normalizePermissions(permissions)
+	if err != nil {
 		return memberView{}, err
 	}
 	digest, err := newPasswordDigest(password)
@@ -155,7 +179,10 @@ func (s *accessStore) createMember(password string) (memberView, error) {
 		return memberView{}, err
 	}
 	now := time.Now()
-	member := memberCredential{ID: id, Password: digest, CreatedAt: now, UpdatedAt: now}
+	member := memberCredential{
+		ID: id, Password: digest, Permissions: normalizedPermissions,
+		CreatedAt: now, UpdatedAt: now,
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -170,16 +197,38 @@ func (s *accessStore) createMember(password string) (memberView, error) {
 		s.members = s.members[:len(s.members)-1]
 		return memberView{}, err
 	}
-	return memberView{ID: id, CreatedAt: now, UpdatedAt: now}, nil
+	return memberView{
+		ID: id, Permissions: slices.Clone(normalizedPermissions),
+		CreatedAt: now, UpdatedAt: now,
+	}, nil
 }
 
-func (s *accessStore) updateMember(id, password string) (memberView, error) {
-	if err := validateMemberPassword(password); err != nil {
-		return memberView{}, err
+func (s *accessStore) updateMember(
+	id string,
+	password *string,
+	permissions *[]string,
+) (memberView, error) {
+	if password == nil && permissions == nil {
+		return memberView{}, errors.New("至少需要修改密码或权限")
 	}
-	digest, err := newPasswordDigest(password)
-	if err != nil {
-		return memberView{}, err
+	var digest passwordDigest
+	if password != nil {
+		if err := validateMemberPassword(*password); err != nil {
+			return memberView{}, err
+		}
+		var err error
+		digest, err = newPasswordDigest(*password)
+		if err != nil {
+			return memberView{}, err
+		}
+	}
+	var normalizedPermissions []string
+	if permissions != nil {
+		var err error
+		normalizedPermissions, err = normalizePermissions(*permissions)
+		if err != nil {
+			return memberView{}, err
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -187,12 +236,17 @@ func (s *accessStore) updateMember(id, password string) (memberView, error) {
 	if index < 0 {
 		return memberView{}, errMemberNotFound
 	}
-	if s.passwordExistsLocked(password, id) {
+	if password != nil && s.passwordExistsLocked(*password, id) {
 		return memberView{}, errCredentialExists
 	}
 	previous := s.members[index]
 	now := time.Now()
-	s.members[index].Password = digest
+	if password != nil {
+		s.members[index].Password = digest
+	}
+	if permissions != nil {
+		s.members[index].Permissions = normalizedPermissions
+	}
 	s.members[index].UpdatedAt = now
 	if err := s.persistMembersLocked(); err != nil {
 		s.members[index] = previous
@@ -200,7 +254,8 @@ func (s *accessStore) updateMember(id, password string) (memberView, error) {
 	}
 	member := s.members[index]
 	return memberView{
-		ID: member.ID, CreatedAt: member.CreatedAt, UpdatedAt: member.UpdatedAt,
+		ID: member.ID, Permissions: slices.Clone(member.Permissions),
+		CreatedAt: member.CreatedAt, UpdatedAt: member.UpdatedAt,
 		LastUsedAt: member.LastUsedAt,
 	}, nil
 }
@@ -293,6 +348,13 @@ func (s *accessStore) loadMembers() error {
 	}
 	if len(document.Members) > maxMemberCredentials {
 		return fmt.Errorf("member credential count exceeds %d", maxMemberCredentials)
+	}
+	for index := range document.Members {
+		permissions, err := normalizePermissions(document.Members[index].Permissions)
+		if err != nil {
+			return fmt.Errorf("member %s permissions: %w", document.Members[index].ID, err)
+		}
+		document.Members[index].Permissions = permissions
 	}
 	s.members = document.Members
 	return nil
@@ -434,6 +496,31 @@ func validateMemberPassword(password string) error {
 		return errors.New("成员密码不能超过 256 个字符")
 	}
 	return nil
+}
+
+func normalizePermissions(permissions []string) ([]string, error) {
+	requested := make(map[string]bool, len(permissions))
+	for _, permission := range permissions {
+		permission = strings.TrimSpace(permission)
+		if permission == "" {
+			continue
+		}
+		if !slices.Contains(allPermissions, permission) {
+			return nil, fmt.Errorf("%w: %s", errInvalidPermission, permission)
+		}
+		requested[permission] = true
+	}
+	normalized := make([]string, 0, len(requested))
+	for _, permission := range allPermissions {
+		if requested[permission] {
+			normalized = append(normalized, permission)
+		}
+	}
+	return normalized, nil
+}
+
+func hasPermission(identity principal, permission string) bool {
+	return identity.Role == roleAdmin || slices.Contains(identity.Permissions, permission)
 }
 
 func newMemberID() (string, error) {

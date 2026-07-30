@@ -11,13 +11,14 @@ func (s *server) members(w http.ResponseWriter, _ *http.Request) {
 
 func (s *server) createMember(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Password string `json:"password"`
+		Password    string   `json:"password"`
+		Permissions []string `json:"permissions"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "成员密码请求格式不正确")
 		return
 	}
-	member, err := s.access.createMember(request.Password)
+	member, err := s.access.createMember(request.Password, request.Permissions)
 	request.Password = ""
 	if err != nil {
 		writeAccessError(w, err)
@@ -28,14 +29,19 @@ func (s *server) createMember(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) updateMember(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Password string `json:"password"`
+		Password    *string   `json:"password,omitempty"`
+		Permissions *[]string `json:"permissions,omitempty"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "成员密码请求格式不正确")
 		return
 	}
-	member, err := s.access.updateMember(r.PathValue("id"), request.Password)
-	request.Password = ""
+	member, err := s.access.updateMember(
+		r.PathValue("id"), request.Password, request.Permissions,
+	)
+	if request.Password != nil {
+		*request.Password = ""
+	}
 	if err != nil {
 		writeAccessError(w, err)
 		return
@@ -66,6 +72,8 @@ func writeAccessError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "该密码已被管理员或其他成员使用")
 	case errors.Is(err, errMemberLimit):
 		writeError(w, http.StatusConflict, "成员密码数量已达到上限")
+	case errors.Is(err, errInvalidPermission):
+		writeError(w, http.StatusBadRequest, "成员权限不正确")
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
 	}
