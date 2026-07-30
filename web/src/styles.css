@@ -772,6 +772,58 @@ textarea:focus-visible {
   color: #667184;
 }
 
+.settings-source-tabs {
+  margin: 0 0 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-source-tabs button {
+  padding: 14px 16px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--muted);
+  background: var(--panel);
+}
+
+.settings-source-tabs button.active {
+  border-color: rgba(118, 151, 255, .48);
+  color: var(--text);
+  background: rgba(118, 151, 255, .08);
+}
+
+.settings-source-tabs strong { font-size: 13px; }
+.settings-source-tabs span { color: var(--dim); font-size: 12px; }
+
+.source-chip,
+.conflict-chip {
+  width: fit-content;
+  padding: 3px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.source-chip {
+  color: #8dc0fa;
+  background: rgba(118, 151, 255, .08);
+}
+
+.conflict-chip {
+  color: var(--amber);
+  background: rgba(241, 183, 99, .08);
+}
+
+.settings-source-warning.danger {
+  border-color: rgba(241, 119, 124, .3);
+  color: var(--red);
+  background: rgba(241, 119, 124, .07);
+}
+
 .settings-source-warning {
   padding: 15px 17px;
   display: flex;

@@ -25,6 +25,8 @@ export type Game = {
   cpuHistory: MetricPoint[];
   memoryHistory: MetricPoint[];
   tags: string[];
+  restEnabled: boolean;
+  restAvailable: boolean;
 };
 
 export type Activity = {
@@ -68,6 +70,7 @@ export type Setting = {
   sensitive?: boolean;
   risk?: "performance" | "disk" | "security" | "";
   restartRequired: boolean;
+  configured: boolean;
 };
 
 export type SettingGroup = {
@@ -79,9 +82,15 @@ export type SettingGroup = {
 
 export type PalworldSettings = {
   version: string;
+  revision: string;
   groups: SettingGroup[];
   raw: string;
   lastModified: string;
+};
+
+export type PalworldSettingsPatch = {
+  revision: string;
+  changes: Record<string, string | number | boolean>;
 };
 
 export type Session = {
@@ -114,7 +123,6 @@ export type WorldOptionDocument = {
   revision: string;
   lastModified: string;
   data: string;
-  management?: Record<string, string | number | boolean>;
 };
 
 export type LogFile = {
@@ -175,10 +183,10 @@ export const api = {
     }),
   palworldSettings: () =>
     request<PalworldSettings>("/api/v1/games/palworld/settings"),
-  updatePalworldSettings: (settings: PalworldSettings) =>
+  updatePalworldSettings: (patch: PalworldSettingsPatch) =>
     request<PalworldSettings>("/api/v1/games/palworld/settings", {
-      method: "PUT",
-      body: JSON.stringify(settings)
+      method: "PATCH",
+      body: JSON.stringify(patch)
     }),
   worldOption: () =>
     request<WorldOptionDocument>("/api/v1/games/palworld/world-option"),

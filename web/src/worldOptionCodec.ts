@@ -8,12 +8,6 @@ import type { PalworldSettings, Setting, SettingGroup, WorldOptionDocument } fro
 
 const SECRET_MASK = "••••••••";
 const SENSITIVE_KEYS = new Set(["AdminPassword", "ServerPassword"]);
-const MANAGEMENT_KEYS = new Set([
-  "ServerName", "ServerDescription", "ServerPlayerMaxNum", "ServerPassword",
-  "AdminPassword", "PublicIP", "PublicPort", "CrossplayPlatforms", "LogFormatType",
-  "Region", "RESTAPIEnabled", "RESTAPIPort", "RCONEnabled", "RCONPort",
-  "bUseAuth", "BanListURL", "bAllowClientMod"
-]);
 const ENUM_TYPES: Record<string, string> = {
   DeathPenalty: "EPalOptionWorldDeathPenalty",
   Difficulty: "EPalOptionWorldDifficulty",
@@ -30,6 +24,7 @@ export type ParsedWorldOption = {
   magic: number;
   gvas: any;
   originalValues: Record<string, string>;
+  presentKeys: Set<string>;
 };
 
 const entryLabels = (zhCN as any).translation.entry.name as Record<string, string>;
@@ -53,10 +48,12 @@ export function parseWorldOption(document: WorldOptionDocument): ParsedWorldOpti
   const gvas = LosslessJSON.parse(deserialize(decompressed, new Map()));
   const struct = settingsStruct(gvas);
   const originalValues: Record<string, string> = {};
+  const presentKeys = new Set<string>();
   for (const [key, entry] of Object.entries(ENTRIES)) {
+    if (struct[key] !== undefined) presentKeys.add(key);
     originalValues[key] = decodeEntry(struct[key], entry);
   }
-  return { document, magic, gvas, originalValues };
+  return { document, magic, gvas, originalValues, presentKeys };
 }
 
 export function worldOptionSettings(parsed: ParsedWorldOption): PalworldSettings {
@@ -66,7 +63,7 @@ export function worldOptionSettings(parsed: ParsedWorldOption): PalworldSettings
       const entry = ENTRIES[key];
       if (!entry) return [];
       usedKeys.add(key);
-      return [toSetting(entry, parsed.originalValues[key])];
+      return [toSetting(entry, parsed.originalValues[key], parsed.presentKeys.has(key))];
     });
     return { id: category.id, label: category.label, description: category.description, settings };
   }).filter((group) => group.settings.length > 0);
@@ -77,11 +74,14 @@ export function worldOptionSettings(parsed: ParsedWorldOption): PalworldSettings
       id: "version_additions",
       label: "版本新增功能",
       description: "解析器已识别、但尚未归入稳定类别的新版本选项",
-      settings: unclassified.map((key) => toSetting(ENTRIES[key], parsed.originalValues[key]))
+      settings: unclassified.map((key) =>
+        toSetting(ENTRIES[key], parsed.originalValues[key], parsed.presentKeys.has(key))
+      )
     });
   }
   return {
     version: "WorldOption 1.0",
+    revision: parsed.document.revision,
     groups,
     raw: "",
     lastModified: parsed.document.lastModified
@@ -90,33 +90,26 @@ export function worldOptionSettings(parsed: ParsedWorldOption): PalworldSettings
 
 export function encodeWorldOption(
   parsed: ParsedWorldOption,
-  settings: PalworldSettings
-): { data: string; management: Record<string, string | number | boolean> } {
+  settings: PalworldSettings,
+  changedKeys: ReadonlySet<string>
+): { data: string; semantic: string } {
   const gvas = LosslessJSON.parse(LosslessJSON.stringify(parsed.gvas) ?? "{}");
   const struct = settingsStruct(gvas);
-  const management: Record<string, string | number | boolean> = {};
   for (const group of settings.groups) {
     for (const setting of group.settings) {
+      if (!changedKeys.has(setting.key)) continue;
       const entry = ENTRIES[setting.key];
-      if (!entry) continue;
+      if (!entry) throw new Error(`WorldOption.sav 不支持参数 ${setting.key}`);
       const current = canonicalValue(setting.value, entry);
-      const original = parsed.originalValues[setting.key] ?? entry.defaultValue;
-      if (
-        !(SENSITIVE_KEYS.has(setting.key) && current === SECRET_MASK) &&
-        !valuesEqual(current, original, entry)
-      ) {
-        struct[setting.key] = encodeEntry(current, entry);
+      if (SENSITIVE_KEYS.has(setting.key) && current === SECRET_MASK) {
+        throw new Error(`${setting.key} 必须显式输入新值`);
       }
-      const effective = SENSITIVE_KEYS.has(setting.key) && current === SECRET_MASK ? original : current;
-      if (MANAGEMENT_KEYS.has(setting.key)) {
-        const unchangedEmptySecret =
-          SENSITIVE_KEYS.has(setting.key) && effective === "" && valuesEqual(effective, original, entry);
-        if (!unchangedEmptySecret) management[setting.key] = typedValue(effective, entry);
-      }
+      struct[setting.key] = encodeEntry(current, entry);
     }
   }
 
-  let serialized = serialize(LosslessJSON.stringify(gvas) ?? "{}");
+  const semantic = LosslessJSON.stringify(gvas) ?? "{}";
+  let serialized = serialize(semantic);
   const uncompressedLength = serialized.length;
   const compression = (parsed.magic >>> 24) & 0xff;
   if (compression === 0x32) {
@@ -130,7 +123,23 @@ export function encodeWorldOption(
   view.setUint32(4, serialized.length, true);
   view.setUint32(8, parsed.magic, true);
   output.set(serialized, 12);
-  return { data: bytesToBase64(output), management };
+  return { data: bytesToBase64(output), semantic };
+}
+
+export function verifyWorldOptionData(document: WorldOptionDocument, expectedSemantic: string): void {
+  const reparsed = parseWorldOption(document);
+  const actualSemantic = LosslessJSON.stringify(reparsed.gvas) ?? "{}";
+  if (actualSemantic !== expectedSemantic) {
+    throw new Error("WorldOption.sav 往返校验失败，已拒绝保存");
+  }
+}
+
+export function verifyWorldOptionRoundTrip(
+  parsed: ParsedWorldOption,
+  settings: PalworldSettings
+): void {
+  const encoded = encodeWorldOption(parsed, settings, new Set());
+  verifyWorldOptionData({ ...parsed.document, data: encoded.data }, encoded.semantic);
 }
 
 function settingsStruct(gvas: any): Record<string, GvasValue> {
@@ -142,7 +151,7 @@ function settingsStruct(gvas: any): Record<string, GvasValue> {
   return struct;
 }
 
-function toSetting(entry: Entry, value: string): Setting {
+function toSetting(entry: Entry, value: string, configured: boolean): Setting {
   const type = entry.type === "boolean"
     ? "boolean"
     : entry.type === "integer" || entry.type === "float"
@@ -171,7 +180,8 @@ function toSetting(entry: Entry, value: string): Setting {
     options: options?.map((option) => ({ label: option, value: option })),
     sensitive: SENSITIVE_KEYS.has(entry.id),
     risk: riskFor(entry.id),
-    restartRequired: true
+    restartRequired: true,
+    configured
   };
 }
 

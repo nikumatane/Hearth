@@ -54,12 +54,15 @@ import Sparkline from "./components/Sparkline.vue";
 import {
   encodeWorldOption,
   parseWorldOption,
+  verifyWorldOptionData,
+  verifyWorldOptionRoundTrip,
   worldOptionSettings,
   type ParsedWorldOption
 } from "./worldOptionCodec";
 
 type Page = "overview" | "game" | "settings" | "logs" | "access";
 type ActionName = "start" | "stop" | "restart" | "update" | "backup";
+type SettingsSource = "world" | "ini";
 
 const booting = ref(true);
 const loggedIn = ref(false);
@@ -75,13 +78,23 @@ const loadError = ref("");
 const confirmAction = ref<{ game: Game; action: ActionName } | null>(null);
 const actionBusy = ref(false);
 const toast = ref<{ type: "success" | "error"; message: string } | null>(null);
-const settings = ref<PalworldSettings | null>(null);
+const worldSettings = ref<PalworldSettings | null>(null);
+const iniSettings = ref<PalworldSettings | null>(null);
+const settingsSource = ref<SettingsSource>("world");
+const settings = computed(() => settingsSource.value === "world" ? worldSettings.value : iniSettings.value);
+const worldDirtyKeys = ref<Set<string>>(new Set());
+const iniDirtyKeys = ref<Set<string>>(new Set());
+const settingsDirty = computed(() =>
+  (settingsSource.value === "world" ? worldDirtyKeys.value : iniDirtyKeys.value).size > 0
+);
 const settingsLoading = ref(false);
 const settingsSaving = ref(false);
 const settingsSearch = ref("");
-const settingsGroup = ref("server");
-const settingsDirty = ref(false);
+const settingsGroup = ref("server_access");
 const parsedWorldOption = ref<ParsedWorldOption | null>(null);
+const worldRoundTripError = ref("");
+const worldSourceError = ref("");
+const iniSourceError = ref("");
 const logs = ref<Logs | null>(null);
 const logsLoading = ref(false);
 const selectedLogId = ref("");
@@ -113,6 +126,14 @@ const runningCount = computed(
 const palworldGame = computed(() =>
   overview.value?.games.find((game) => game.id === "palworld")
 );
+
+const restAPIEnabled = computed(() => {
+  for (const group of iniSettings.value?.groups ?? []) {
+    const setting = group.settings.find((item) => item.key === "RESTAPIEnabled");
+    if (setting) return setting.value === true || setting.value === "True";
+  }
+  return null;
+});
 
 const playerSummary = computed(() => {
   const games = overview.value?.games ?? [];
@@ -371,13 +392,49 @@ async function removeMember(member: MemberCredential) {
 async function loadSettings() {
   settingsLoading.value = true;
   try {
-    const document = await api.worldOption();
-    parsedWorldOption.value = parseWorldOption(document);
-    settings.value = worldOptionSettings(parsedWorldOption.value);
-    if (!settings.value.groups.some((group) => group.id === settingsGroup.value)) {
-      settingsGroup.value = settings.value.groups[0]?.id ?? "";
+    const [worldResult, iniResult] = await Promise.allSettled([
+      api.worldOption(),
+      api.palworldSettings()
+    ]);
+    worldSettings.value = null;
+    iniSettings.value = null;
+    parsedWorldOption.value = null;
+    worldSourceError.value = "";
+    iniSourceError.value = "";
+    worldRoundTripError.value = "";
+
+    if (worldResult.status === "fulfilled") {
+      try {
+        const parsed = parseWorldOption(worldResult.value);
+        const worldDocument = worldOptionSettings(parsed);
+        parsedWorldOption.value = parsed;
+        worldSettings.value = worldDocument;
+        try {
+          verifyWorldOptionRoundTrip(parsed, worldDocument);
+        } catch (error) {
+          worldRoundTripError.value = error instanceof Error ? error.message : "WorldOption.sav 往返校验失败";
+        }
+      } catch (error) {
+        worldSourceError.value = error instanceof Error ? error.message : "WorldOption.sav 解析失败";
+      }
+    } else {
+      worldSourceError.value = worldResult.reason instanceof Error ? worldResult.reason.message : "WorldOption.sav 读取失败";
     }
-    settingsDirty.value = false;
+
+    if (iniResult.status === "fulfilled") {
+      iniSettings.value = iniResult.value;
+    } else {
+      iniSourceError.value = iniResult.reason instanceof Error ? iniResult.reason.message : "PalWorldSettings.ini 读取失败";
+    }
+
+    if (!worldSettings.value && !iniSettings.value) {
+      throw new Error("两个配置来源都无法读取");
+    }
+    worldDirtyKeys.value = new Set();
+    iniDirtyKeys.value = new Set();
+    if (settingsSource.value === "world" && !worldSettings.value) settingsSource.value = "ini";
+    if (settingsSource.value === "ini" && !iniSettings.value) settingsSource.value = "world";
+    selectSettingsSource(settingsSource.value);
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "配置加载失败");
   } finally {
@@ -385,7 +442,22 @@ async function loadSettings() {
   }
 }
 
+function selectSettingsSource(source: SettingsSource) {
+  settingsSource.value = source;
+  settingsSearch.value = "";
+  settingsGroup.value = settings.value?.groups[0]?.id ?? "";
+}
+
+function canRunSafeAction(game: Game, action: ActionName): boolean {
+  if (action === "start" || game.state !== "running") return true;
+  return game.restAvailable;
+}
+
 function askAction(game: Game, action: ActionName) {
+  if (!canRunSafeAction(game, action)) {
+    showToast("error", "REST API 当前不可用；为保护存档，运行中的停止、重启、更新和备份已锁定");
+    return;
+  }
   confirmAction.value = { game, action };
 }
 
@@ -406,19 +478,38 @@ async function executeAction() {
 }
 
 async function saveSettings() {
-  if (!settings.value || !parsedWorldOption.value) return;
+  if (!settings.value) return;
+  if (settingsSource.value === "world" && !parsedWorldOption.value) return;
   settingsSaving.value = true;
   try {
-    const encoded = encodeWorldOption(parsedWorldOption.value, settings.value);
-    const updatedDocument = await api.updateWorldOption({
-      ...parsedWorldOption.value.document,
-      data: encoded.data,
-      management: encoded.management
-    });
-    parsedWorldOption.value = parseWorldOption(updatedDocument);
-    settings.value = worldOptionSettings(parsedWorldOption.value);
-    settingsDirty.value = false;
-    showToast("success", "WorldOption.sav 已备份并保存；下次启动生效");
+    if (settingsSource.value === "world") {
+      if (worldRoundTripError.value) throw new Error(worldRoundTripError.value);
+      const parsed = parsedWorldOption.value;
+      if (!worldSettings.value || !parsed) return;
+      const encoded = encodeWorldOption(
+        parsed,
+        worldSettings.value,
+        worldDirtyKeys.value
+      );
+      const candidate = { ...parsed.document, data: encoded.data };
+      verifyWorldOptionData(candidate, encoded.semantic);
+      await api.updateWorldOption(candidate);
+      showToast("success", "仅修改的 WorldOption.sav 参数已备份并保存");
+    } else {
+      if (!iniSettings.value) return;
+      const changes: Record<string, string | number | boolean> = {};
+      for (const group of iniSettings.value.groups) {
+        for (const setting of group.settings) {
+          if (iniDirtyKeys.value.has(setting.key)) changes[setting.key] = setting.value;
+        }
+      }
+      await api.updatePalworldSettings({
+        revision: iniSettings.value.revision,
+        changes
+      });
+      showToast("success", "仅修改的 PalWorldSettings.ini 参数已备份并保存");
+    }
+    await loadSettings();
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "配置保存失败");
   } finally {
@@ -428,12 +519,37 @@ async function saveSettings() {
 
 function setSettingValue(setting: Setting, value: string | number | boolean) {
   setting.value = value;
-  settingsDirty.value = true;
+  const current = settingsSource.value === "world" ? worldDirtyKeys.value : iniDirtyKeys.value;
+  const next = new Set(current);
+  next.add(setting.key);
+  if (settingsSource.value === "world") worldDirtyKeys.value = next;
+  else iniDirtyKeys.value = next;
 }
 
 function resetSetting(setting: Setting) {
-  setting.value = setting.default;
-  settingsDirty.value = true;
+  setSettingValue(setting, setting.default);
+}
+
+function findSetting(document: PalworldSettings | null, key: string): Setting | undefined {
+  for (const group of document?.groups ?? []) {
+    const setting = group.settings.find((item) => item.key === key);
+    if (setting) return setting;
+  }
+  return undefined;
+}
+
+function hasSourceConflict(setting: Setting): boolean {
+  const other = findSetting(settingsSource.value === "world" ? iniSettings.value : worldSettings.value, setting.key);
+  if (!other || !setting.configured || !other.configured) return false;
+  const normalize = (item: Setting) => item.sensitive
+    ? (String(item.value) === "" ? "empty" : "set")
+    : JSON.stringify(item.value);
+  return normalize(setting) !== normalize(other);
+}
+
+function settingSourceLabel(setting: Setting): string {
+  const source = settingsSource.value === "world" ? "WorldOption.sav" : "PalWorldSettings.ini";
+  return setting.configured ? source : source + " · 默认值";
 }
 
 function showToast(type: "success" | "error", message: string) {
@@ -793,7 +909,7 @@ function gameAccent(id: string) {
                       <RefreshCw :size="16" />
                       <span><strong>有新版本</strong>{{ game.availableVersion }}</span>
                     </div>
-                    <button @click="askAction(game, 'update')">立即更新</button>
+                    <button :disabled="!canRunSafeAction(game, 'update')" @click="askAction(game, 'update')">立即更新</button>
                   </div>
                   <div v-else class="version-row">
                     <Check :size="15" />
@@ -810,7 +926,8 @@ function gameAccent(id: string) {
                     <button
                       v-else
                       class="button secondary small"
-                      :disabled="game.state !== 'running'"
+                      :disabled="game.state !== 'running' || !game.restAvailable"
+                      :title="!game.restAvailable ? 'REST API 不可用，无法安全重启' : undefined"
                       @click="askAction(game, 'restart')"
                     >
                       <RotateCw :size="15" /> 重启
@@ -901,14 +1018,16 @@ function gameAccent(id: string) {
               <template v-else>
                 <button
                   class="button secondary"
-                  :disabled="selectedGame.state !== 'running'"
+                  :disabled="selectedGame.state !== 'running' || !selectedGame.restAvailable"
+                  :title="!selectedGame.restAvailable ? 'REST API 不可用，无法安全重启' : undefined"
                   @click="askAction(selectedGame, 'restart')"
                 >
                   <RotateCw :size="16" /> 重启
                 </button>
                 <button
                   class="button danger-ghost"
-                  :disabled="selectedGame.state !== 'running'"
+                  :disabled="selectedGame.state !== 'running' || !selectedGame.restAvailable"
+                  :title="!selectedGame.restAvailable ? 'REST API 不可用，无法安全停止' : undefined"
                   @click="askAction(selectedGame, 'stop')"
                 >
                   <Square :size="15" /> 停止
@@ -919,7 +1038,7 @@ function gameAccent(id: string) {
                   <MoreHorizontal :size="19" />
                 </button>
                 <div v-if="gameMenuOpen" class="action-menu game-action-menu">
-                  <button @click="askAction(selectedGame, 'backup'); gameMenuOpen = false">
+                  <button :disabled="!canRunSafeAction(selectedGame, 'backup')" @click="askAction(selectedGame, 'backup'); gameMenuOpen = false">
                     <DatabaseBackup :size="15" />创建备份
                   </button>
                   <button v-if="isAdmin" @click="navigate('settings', 'palworld')">
@@ -939,7 +1058,7 @@ function gameAccent(id: string) {
               <strong>发现新的服务端版本</strong>
               <span>{{ selectedGame.version }} → {{ selectedGame.availableVersion }}</span>
             </div>
-            <button class="button primary small" @click="askAction(selectedGame, 'update')">
+            <button class="button primary small" :disabled="!canRunSafeAction(selectedGame, 'update')" @click="askAction(selectedGame, 'update')">
               安全更新
             </button>
           </section>
@@ -981,6 +1100,7 @@ function gameAccent(id: string) {
                 <div><dt>最近备份</dt><dd>{{ formatRelative(selectedGame.lastBackupAt) }}</dd></div>
                 <div><dt>当前版本</dt><dd>{{ selectedGame.version }}</dd></div>
                 <div><dt>进程状态</dt><dd class="good">{{ stateLabel(selectedGame.state) }}</dd></div>
+                <div><dt>REST 管理</dt><dd :class="selectedGame.restAvailable ? 'good' : ''">{{ selectedGame.restAvailable ? "已连接" : selectedGame.restEnabled ? "已启用但不可用" : "未启用" }}</dd></div>
               </dl>
             </article>
             <article class="panel-card quick-card">
@@ -988,12 +1108,12 @@ function gameAccent(id: string) {
                 <div><h2>快捷操作</h2><p>安全任务会自动排队</p></div>
                 <CloudCog :size="19" />
               </div>
-              <button @click="askAction(selectedGame, 'backup')">
+              <button :disabled="!canRunSafeAction(selectedGame, 'backup')" @click="askAction(selectedGame, 'backup')">
                 <DatabaseBackup :size="18" />
                 <span><strong>创建备份</strong><small>存档与关键配置</small></span>
                 <ChevronRight :size="17" />
               </button>
-              <button @click="askAction(selectedGame, 'update')">
+              <button :disabled="!canRunSafeAction(selectedGame, 'update')" @click="askAction(selectedGame, 'update')">
                 <RefreshCw :size="18" />
                 <span><strong>安全更新服务端</strong><small>保存、停服、备份、SteamCMD 更新</small></span>
                 <ChevronRight :size="17" />
@@ -1250,11 +1370,14 @@ function gameAccent(id: string) {
         <template v-else-if="page === 'settings'">
           <section class="settings-header">
             <div>
-              <span class="eyebrow">PALWORLD · WORLDOPTION.SAV</span>
+              <span class="eyebrow">PALWORLD · {{ settingsSource === "world" ? "WORLDOPTION.SAV" : "PALWORLDSETTINGS.INI" }}</span>
               <h1>帕鲁服务器配置</h1>
-              <p>
+              <p v-if="settingsSource === 'world'">
                 当前存档 {{ parsedWorldOption?.document.worldId || palworldGame?.saveId || "未识别" }}；
-                世界规则按 WorldOption.sav 分类，连接与管理项会同步至 INI。
+                只读取和写入 WorldOption.sav，不会自动同步 INI。
+              </p>
+              <p v-else>
+                Windows 专服配置 PalWorldSettings.ini；只保存明确修改的参数，不会改动当前世界存档。
               </p>
             </div>
             <div class="settings-header-actions">
@@ -1264,7 +1387,7 @@ function gameAccent(id: string) {
               </button>
               <button
                 class="button primary"
-                :disabled="settingsSaving || !settingsDirty || palworldGame?.state !== 'stopped'"
+                :disabled="settingsSaving || !settingsDirty || palworldGame?.state !== 'stopped' || (settingsSource === 'world' && !!worldRoundTripError)"
                 :title="palworldGame?.state !== 'stopped' ? '请先安全停止服务器' : undefined"
                 @click="saveSettings"
               >
@@ -1274,6 +1397,27 @@ function gameAccent(id: string) {
               </button>
             </div>
           </section>
+
+          <div class="settings-source-tabs" role="tablist" aria-label="配置来源">
+            <button
+              :class="{ active: settingsSource === 'world' }"
+              :disabled="!worldSettings"
+              role="tab"
+              @click="selectSettingsSource('world')"
+            >
+              <strong>WorldOption.sav</strong>
+              <span>{{ worldSourceError || "当前世界规则 · 反向解析格式" }}</span>
+            </button>
+            <button
+              :class="{ active: settingsSource === 'ini' }"
+              :disabled="!iniSettings"
+              role="tab"
+              @click="selectSettingsSource('ini')"
+            >
+              <strong>PalWorldSettings.ini</strong>
+              <span>{{ iniSourceError || "Windows 专服配置 · 官方配置入口" }}</span>
+            </button>
+          </div>
 
           <div v-if="settingsLoading && !settings" class="page-loader">
             <LoaderCircle class="spin" :size="22" /> 正在读取配置…
@@ -1305,10 +1449,24 @@ function gameAccent(id: string) {
             </aside>
 
             <div class="settings-main">
+              <article v-if="settingsSource === 'ini' && restAPIEnabled === false" class="settings-source-warning panel-card">
+                <AlertTriangle :size="18" />
+                <div>
+                  <strong>REST API 未启用，但不影响启动 PalServer.exe</strong>
+                  <span>玩家数据以及运行中的安全停止、重启、更新和备份会不可用；需要这些能力时再开启 RESTAPIEnabled。</span>
+                </div>
+              </article>
+              <article v-if="settingsSource === 'world' && worldRoundTripError" class="settings-source-warning panel-card danger">
+                <AlertTriangle :size="18" />
+                <div>
+                  <strong>WorldOption.sav 写入已锁定</strong>
+                  <span>{{ worldRoundTripError }}。当前文件仍可查看，但不会写入。</span>
+                </div>
+              </article>
               <article v-if="palworldGame?.state !== 'stopped'" class="settings-source-warning panel-card">
                 <AlertTriangle :size="18" />
                 <div>
-                  <strong>服务器运行中，暂时不能写入 WorldOption.sav</strong>
+                  <strong>服务器运行中，暂时不能写入{{ settingsSource === "world" ? " WorldOption.sav" : " PalWorldSettings.ini" }}</strong>
                   <span>可以先调整参数；保存前请返回状态页安全停止服务器。</span>
                 </div>
               </article>
@@ -1329,6 +1487,10 @@ function gameAccent(id: string) {
                       <div class="setting-copy">
                         <div>
                           <strong>{{ setting.label }}</strong>
+                          <span class="source-chip">{{ settingSourceLabel(setting) }}</span>
+                          <span v-if="hasSourceConflict(setting)" class="conflict-chip">
+                            两个来源不一致
+                          </span>
                           <span v-if="setting.risk" :class="['risk-chip', setting.risk]">
                             <AlertTriangle :size="12" />
                             {{
