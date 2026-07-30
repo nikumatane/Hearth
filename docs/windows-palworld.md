@@ -102,7 +102,8 @@ member-credentials.json
 login-audit.jsonl
 ```
 
-Palworld 官方 1.0 REST API 是面板保存和优雅停服的安全前提。配置至少需要：
+Palworld 官方 1.0 REST API 不是启动 PalServer.exe 的前提；它用于玩家数据、保存和优雅停服。
+如需运行中的停止、重启、更新和备份，INI 配置至少需要：
 
 ```text
 AdminPassword="使用一个非空管理密码"
@@ -115,14 +116,13 @@ REST API 不应开放到公网。面板固定从 `127.0.0.1` 访问。
 安装完成后：
 
 1. 在 ECS 浏览器打开 `http://127.0.0.1:8080`。
-2. 进入“帕鲁配置”。
-3. 设置非空 `AdminPassword`。
-4. 把 `RESTAPIEnabled` 改为 `True`。
-5. 确认 `RESTAPIPort` 为 `8212`。
-6. 保存配置。
-7. 返回服务器页面，点击“启动服务器”。
+2. 返回服务器页面即可点击“启动服务器”，启动本身不要求 REST API。
+3. 如需完整管理能力，进入“帕鲁配置”，切换到 `PalWorldSettings.ini` 来源。
+4. 设置非空 `AdminPassword`，把 `RESTAPIEnabled` 改为 `True`。
+5. 确认 `RESTAPIPort` 为 `8212`，保存 INI 配置。
 
-配置页直接解析当前世界的 `WorldOption.sav`，并按以下概念分类展示全部已支持参数：
+配置页把 `WorldOption.sav` 与 `PalWorldSettings.ini` 作为两个独立来源读取和保存。
+`WorldOption.sav` 按以下概念分类展示已支持参数：
 
 - 服务器与连接
 - 时间、成长与生成
@@ -133,13 +133,13 @@ REST API 不应开放到公网。面板固定从 `127.0.0.1` 访问。
 - 旅行与世界功能
 - 性能与数量限制
 
-`AdminPassword`、`ServerPassword`、REST API、RCON、服务器名与描述等连接/管理项
-会同步至 `PalWorldSettings.ini`。其他游戏规则保存在 `WorldOption.sav`。写入前面板
-会创建完整 ZIP 备份；为避免与游戏进程同时写存档，服务器运行期间允许查看和编辑，
-但必须安全停止后才能保存。
+重复参数会显示来源冲突，但面板不会自动决定优先级或跨文件同步。两种来源都只提交用户
+明确修改的参数；密码未重新输入时永不写回。`WorldOption.sav` 写入前还会执行完整
+语义往返校验。写入前面板创建完整 ZIP 备份；服务器运行期间允许查看和编辑，但必须
+安全停止后才能保存。
 
-面板会等待游戏进程和 REST API 都恢复；REST API 没有通过健康检查时，启动任务会
-显示错误，但不会强制结束已经启动的游戏。可以在 PowerShell 进一步确认：
+启动任务只等待游戏进程出现，不要求 REST API。需要完整管理能力时，可以在 PowerShell
+进一步确认 REST API：
 
 ```powershell
 Test-NetConnection 127.0.0.1 -Port 8212

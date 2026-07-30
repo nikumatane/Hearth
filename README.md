@@ -33,7 +33,7 @@ Hearth 把前端和 API 合并为一个 Go 二进制，直接管理现有的 Ste
 | 范围 | 当前实现 |
 | --- | --- |
 | 游戏生命周期 | 启动、安全停止、重启、SteamCMD 更新和 ZIP 备份 |
-| 帕鲁配置 | 自动识别当前世界，解析并编辑 `WorldOption.sav`，同步连接管理项至 INI |
+| 帕鲁配置 | 分源读取和增量保存 `WorldOption.sav` / `PalWorldSettings.ini`，显示重复项冲突 |
 | 状态监控 | CPU、内存、磁盘、进程、版本、存档 ID、在线玩家和运行时间 |
 | 访问控制 | 一个管理员密码、最多 20 个无用户名成员密码、角色级 API 校验 |
 | 审计 | 登录 IP、凭据编号、成功状态和时间；不记录密码明文 |
@@ -90,12 +90,12 @@ Hearth 和启动任务，不会停止、启动、更新或修改正在运行的 
 
 1. 在现有方式下正常保存并关闭游戏。
 2. 安装 Hearth，在 ECS 内打开 `http://127.0.0.1:8080`。
-3. 进入“帕鲁配置”，设置非空 `AdminPassword`。
-4. 启用 `RESTAPIEnabled`，确认 `RESTAPIPort=8212`。
-5. 保存配置，并从 Hearth 启动服务器。
+3. 从 Hearth 启动服务器；启动本身不依赖 REST API。
+4. 如果需要玩家数据以及运行中的安全停止、重启、更新和备份，再进入 INI 配置来源，
+   设置非空 `AdminPassword`、启用 `RESTAPIEnabled` 并确认 `RESTAPIPort=8212`。
 
-Hearth 固定从 `127.0.0.1` 访问 Palworld REST API。安全停止、重启和更新的前置条件
-失败时，不会退化为强制结束游戏进程。
+Hearth 固定从 `127.0.0.1` 访问 Palworld REST API。REST 不可用时仍允许启动，
+但依赖保存和优雅停服的操作会被锁定，且不会退化为强制结束游戏进程。
 
 完整流程见 [Windows 帕鲁部署指南](docs/windows-palworld.md)。
 

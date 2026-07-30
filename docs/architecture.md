@@ -48,8 +48,11 @@ Palworld 1.0 配置编辑能力。面板自身保持低资源占用，并把高�
 - 更新前执行保存、优雅停止和关键文件 ZIP 备份。
 - 如果 REST API 不可用，绝不退化为强制结束进程。
 - 如果已有 `steamcmd.exe` 正在运行，拒绝并发更新。
+- `WorldOption.sav` 与 `PalWorldSettings.ini` 分源读取和保存，不自动合并或跨文件同步。
+- 重复参数显示来源冲突；保存请求只包含用户明确修改的字段，并检查源文件版本。
+- `WorldOption.sav` 写入前执行完整语义往返校验。
 - 配置写入使用“临时文件 + 校验 + 原子替换”。
-- 配置响应中的 `AdminPassword` 和 `ServerPassword` 始终脱敏。
+- `PalWorldSettings.ini` 的结构化响应会脱敏密码；`WorldOption.sav` 原始文档仅管理员可读，前端解析后掩码展示。两种来源的密码未显式输入时都不会写回。
 - Palworld REST API 固定使用 `127.0.0.1`，不允许前端控制目标地址。
 
 ## 首版验收标准
