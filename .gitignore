@@ -1,0 +1,19 @@
+.DS_Store
+.idea/
+.vscode/
+
+# Go
+/bin/
+/dist/
+/coverage.out
+
+# Frontend
+/web/node_modules/
+/web/dist/*
+!/web/dist/.placeholder
+/.pnpm-store/
+
+# Local runtime
+/config.json
+/data/
+/.secrets/
