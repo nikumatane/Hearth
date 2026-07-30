@@ -1,14 +1,10 @@
 package palworld
 
 import (
-	"errors"
-	"os"
-	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
 
-	"hearth/internal/config"
 	"hearth/internal/panel"
 )
 
@@ -43,32 +39,25 @@ func TestCalculateCPUResetsWhenProcessChanges(t *testing.T) {
 	}
 }
 
-func TestValidateManagementSettingsBeforeFirstStart(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "PalWorldSettings.ini")
-	service := Service{config: config.GameConfig{
-		SettingsFile: path,
-		RESTURL:      "http://127.0.0.1:8212",
-	}}
-
-	if err := os.WriteFile(path, []byte(`OptionSettings=(AdminPassword="secret",RESTAPIEnabled=False,RESTAPIPort=8212)`), 0o600); err != nil {
-		t.Fatal(err)
+func TestActionRequiresRESTOnlyForRunningSafetyActions(t *testing.T) {
+	tests := []struct {
+		action  string
+		running bool
+		want    bool
+	}{
+		{action: "start", running: false, want: false},
+		{action: "start", running: true, want: false},
+		{action: "stop", running: true, want: true},
+		{action: "restart", running: true, want: true},
+		{action: "update", running: true, want: true},
+		{action: "backup", running: true, want: true},
+		{action: "update", running: false, want: false},
+		{action: "backup", running: false, want: false},
 	}
-	if err := service.validateManagementSettings(); !errors.Is(err, panel.ErrUnsafe) {
-		t.Fatalf("disabled REST validation error = %v", err)
-	}
-
-	if err := os.WriteFile(path, []byte(`OptionSettings=(AdminPassword="secret",RESTAPIEnabled=True,RESTAPIPort=8212)`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.validateManagementSettings(); err != nil {
-		t.Fatalf("valid management settings error = %v", err)
-	}
-
-	if err := os.WriteFile(path, []byte(`OptionSettings=(AdminPassword="secret",RESTAPIEnabled=True,RESTAPIPort=9000)`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.validateManagementSettings(); !errors.Is(err, panel.ErrUnsafe) {
-		t.Fatalf("mismatched REST port validation error = %v", err)
+	for _, test := range tests {
+		if got := actionRequiresREST(test.action, test.running); got != test.want {
+			t.Errorf("actionRequiresREST(%q, %v) = %v, want %v", test.action, test.running, got, test.want)
+		}
 	}
 }
 

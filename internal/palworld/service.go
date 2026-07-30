@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -165,15 +163,13 @@ func (s *Service) RunAction(id, action string) (panel.Activity, error) {
 	if action == "start" && process.Running {
 		return panel.Activity{}, fmt.Errorf("%w: 帕鲁服务器已经在运行", panel.ErrUnsafe)
 	}
-	if action == "start" {
-		if err := s.validateManagementSettings(); err != nil {
-			return panel.Activity{}, err
-		}
-	}
 	if action == "stop" && !process.Running {
 		return panel.Activity{}, fmt.Errorf("%w: 帕鲁服务器当前未运行", panel.ErrUnsafe)
 	}
-	if process.Running && action != "start" {
+	if action == "restart" && !process.Running {
+		return panel.Activity{}, fmt.Errorf("%w: 帕鲁服务器当前未运行，请使用启动", panel.ErrUnsafe)
+	}
+	if actionRequiresREST(action, process.Running) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_, preflightErr := s.rest.info(ctx)
 		cancel()
@@ -214,11 +210,15 @@ func (s *Service) RunAction(id, action string) (panel.Activity, error) {
 	return activity, nil
 }
 
+func actionRequiresREST(action string, running bool) bool {
+	return running && action != "start"
+}
+
 func (s *Service) PalworldSettings() (panel.PalworldSettings, error) {
 	return readPalworldSettings(s.config.SettingsFile, s.config.DefaultSettingsFile)
 }
 
-func (s *Service) UpdatePalworldSettings(settings panel.PalworldSettings) (panel.PalworldSettings, error) {
+func (s *Service) UpdatePalworldSettings(patch panel.PalworldSettingsPatch) (panel.PalworldSettings, error) {
 	s.mu.Lock()
 	if s.busy {
 		s.mu.Unlock()
@@ -238,11 +238,16 @@ func (s *Service) UpdatePalworldSettings(settings panel.PalworldSettings) (panel
 	if err != nil {
 		return panel.PalworldSettings{}, err
 	}
-	updated, err := writePalworldSettings(s.config.SettingsFile, s.config.DefaultSettingsFile, settings, process.Running)
+	if process.Running {
+		return panel.PalworldSettings{}, fmt.Errorf(
+			"%w: 修改 PalWorldSettings.ini 前必须先安全停止帕鲁服务器", panel.ErrUnsafe,
+		)
+	}
+	updated, err := patchPalworldSettings(s.config.SettingsFile, s.config.DefaultSettingsFile, patch)
 	if err != nil {
 		return panel.PalworldSettings{}, err
 	}
-	s.addCompletedActivity("配置已保存", "已备份原文件；修改将在下次重启时生效")
+	s.addCompletedActivity("INI 配置已保存", "仅写入明确修改的参数；原文件已备份")
 	return updated, nil
 }
 
@@ -299,21 +304,15 @@ func (s *Service) UpdateWorldOption(document panel.WorldOptionDocument) (panel.W
 	if err := validateWorldOptionContainer(document.Data); err != nil {
 		return panel.WorldOptionDocument{}, err
 	}
-	renderedINI, err := renderManagementSettings(s.config.SettingsFile, document.Management)
-	if err != nil {
-		return panel.WorldOptionDocument{}, err
-	}
 	if _, err := s.createBackup(); err != nil {
 		return panel.WorldOptionDocument{}, fmt.Errorf("backup before WorldOption update: %w", err)
 	}
-	if err := replaceWorldAndManagement(
-		world.OptionPath, document.Data, s.config.SettingsFile, renderedINI,
-	); err != nil {
-		return panel.WorldOptionDocument{}, err
+	if err := atomicWriteFile(world.OptionPath, document.Data); err != nil {
+		return panel.WorldOptionDocument{}, fmt.Errorf("write WorldOption.sav: %w", err)
 	}
 	s.addCompletedActivity(
 		"世界配置已保存",
-		fmt.Sprintf("WorldOption.sav 与管理配置已同步；当前存档 %s", world.ID),
+		fmt.Sprintf("仅更新 WorldOption.sav；当前存档 %s", world.ID),
 	)
 	slog.Info("palworld world settings saved", "world_id", world.ID)
 	return readWorldOption(world)
@@ -328,6 +327,9 @@ func (s *Service) snapshot() (panel.Game, panel.ResourceUsage) {
 		PlayersMax:       readNumericOption(s.config.SettingsFile, "ServerPlayerMaxNum"),
 		PlayersAvailable: true, PlayersSource: "进程已停止",
 		CPUHistory: []panel.MetricPoint{}, MemoryHistory: []panel.MetricPoint{},
+	}
+	if management, managementErr := readManagementSettings(s.config.SettingsFile); managementErr == nil {
+		game.RESTEnabled = management.RESTEnabled
 	}
 	if world, worldErr := detectActiveWorld(s.config.InstallDir); worldErr == nil {
 		game.SaveID = world.ID
@@ -398,6 +400,7 @@ func (s *Service) snapshot() (panel.Game, panel.ResourceUsage) {
 }
 
 func applyAPIStatus(game *panel.Game, status apiStatus) {
+	game.RESTAvailable = status.InfoOK
 	if status.InfoOK {
 		game.Version = status.Info.Version
 	}
@@ -486,9 +489,7 @@ func (s *Service) performAction(action string, wasRunning bool, activityID strin
 	var err error
 	switch action {
 	case "start":
-		if err = s.start(); err == nil {
-			err = s.waitForREST()
-		}
+		err = s.start()
 	case "stop":
 		err = s.gracefulStop()
 	case "restart":
@@ -503,34 +504,6 @@ func (s *Service) performAction(action string, wasRunning bool, activityID strin
 		err = s.backup(wasRunning)
 	}
 	s.finishActivity(activityID, err)
-}
-
-func (s *Service) validateManagementSettings() error {
-	settings, err := readManagementSettings(s.config.SettingsFile)
-	if err != nil {
-		return fmt.Errorf("%w: 无法读取帕鲁管理配置：%v", panel.ErrUnsafe, err)
-	}
-	if settings.AdminPassword == "" {
-		return fmt.Errorf("%w: 启动前请先设置非空 AdminPassword", panel.ErrUnsafe)
-	}
-	if !settings.RESTEnabled {
-		return fmt.Errorf("%w: 启动前请先启用 RESTAPIEnabled", panel.ErrUnsafe)
-	}
-	endpoint, err := url.Parse(s.config.RESTURL)
-	if err != nil {
-		return fmt.Errorf("%w: REST API 地址无效", panel.ErrInvalid)
-	}
-	expectedPort, err := strconv.Atoi(endpoint.Port())
-	if err != nil || expectedPort <= 0 {
-		return fmt.Errorf("%w: REST API 地址必须包含端口", panel.ErrInvalid)
-	}
-	if settings.RESTPort != expectedPort {
-		return fmt.Errorf(
-			"%w: PalWorldSettings.ini 的 RESTAPIPort 为 %d，但面板配置使用 %d",
-			panel.ErrUnsafe, settings.RESTPort, expectedPort,
-		)
-	}
-	return nil
 }
 
 func (s *Service) gracefulStop() error {

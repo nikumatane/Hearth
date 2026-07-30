@@ -51,21 +51,32 @@ func TestReadSettingsRedactsSecretsAndIncludesUnknownOptions(t *testing.T) {
 	}
 }
 
-func TestWriteSettingsPreservesSecretsAndUnknownOptions(t *testing.T) {
+func TestReadSettingsDoesNotMaskEmptyPasswords(t *testing.T) {
+	path := writeTestSettings(t, `OptionSettings=(AdminPassword="",ServerPassword="")`)
+	settings, err := readPalworldSettings(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"AdminPassword", "ServerPassword"} {
+		setting := settingByKey(settings, key)
+		if setting == nil || setting.Value != "" {
+			t.Fatalf("%s = %#v", key, setting)
+		}
+	}
+}
+
+func TestPatchSettingsPreservesSecretsAndUnknownOptions(t *testing.T) {
 	path := writeTestSettings(t, testSettings)
 	settings, err := readPalworldSettings(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	expRate := settingByKey(settings, "ExpRate")
-	if expRate == nil {
-		t.Fatal("ExpRate is missing")
-	}
-	expRate.Value = 2.5
-
-	updated, err := writePalworldSettings(path, "", settings, true)
+	updated, err := patchPalworldSettings(path, "", panel.PalworldSettingsPatch{
+		Revision: settings.Revision,
+		Changes:  map[string]any{"ExpRate": 2.5},
+	})
 	if err != nil {
-		t.Fatalf("writePalworldSettings() error = %v", err)
+		t.Fatalf("patchPalworldSettings() error = %v", err)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -86,38 +97,45 @@ func TestWriteSettingsPreservesSecretsAndUnknownOptions(t *testing.T) {
 	if strings.Contains(updated.Raw, "very-secret") {
 		t.Fatal("updated response exposed AdminPassword")
 	}
+	if updated.Revision == settings.Revision {
+		t.Fatal("settings revision did not change")
+	}
 	backups, err := filepath.Glob(path + ".panel-backup-*")
 	if err != nil || len(backups) != 1 {
 		t.Fatalf("backup files = %v, error = %v", backups, err)
 	}
 }
 
-func TestWriteSettingsRejectsPasswordChangeWhileRunning(t *testing.T) {
+func TestPatchSettingsRejectsStaleRevisionAndMaskedPassword(t *testing.T) {
 	path := writeTestSettings(t, testSettings)
 	settings, err := readPalworldSettings(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	adminPassword := settingByKey(settings, "AdminPassword")
-	if adminPassword == nil {
-		t.Fatal("AdminPassword is missing")
-	}
-	adminPassword.Value = "replacement"
-
-	_, err = writePalworldSettings(path, "", settings, true)
+	_, err = patchPalworldSettings(path, "", panel.PalworldSettingsPatch{
+		Revision: "stale",
+		Changes:  map[string]any{"ExpRate": 2},
+	})
 	if !errors.Is(err, panel.ErrUnsafe) {
-		t.Fatalf("writePalworldSettings() error = %v", err)
+		t.Fatalf("stale revision error = %v", err)
+	}
+	_, err = patchPalworldSettings(path, "", panel.PalworldSettingsPatch{
+		Revision: settings.Revision,
+		Changes:  map[string]any{"AdminPassword": secretMask},
+	})
+	if !errors.Is(err, panel.ErrInvalid) {
+		t.Fatalf("masked password error = %v", err)
 	}
 	raw, readErr := os.ReadFile(path)
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
 	if string(raw) != testSettings {
-		t.Fatal("settings changed after rejected password update")
+		t.Fatal("settings changed after rejected patches")
 	}
 }
 
-func TestDefaultFileAddsNewVersionOptionsWithoutLosingCurrentValues(t *testing.T) {
+func TestPatchSettingsCanAddKnownDefaultWithoutLosingCurrentValues(t *testing.T) {
 	directory := t.TempDir()
 	currentPath := filepath.Join(directory, "PalWorldSettings.ini")
 	defaultPath := filepath.Join(directory, "DefaultPalWorldSettings.ini")
@@ -129,16 +147,20 @@ func TestDefaultFileAddsNewVersionOptionsWithoutLosingCurrentValues(t *testing.T
 	if err := os.WriteFile(defaultPath, []byte(defaults), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
 	settings, err := readPalworldSettings(currentPath, defaultPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	newSetting := settingByKey(settings, "NewInOnePointZero")
-	if newSetting == nil || newSetting.Value != true {
-		t.Fatalf("new default setting = %#v", newSetting)
+	if currentSetting := settingByKey(settings, "ServerName"); currentSetting == nil || !currentSetting.Configured {
+		t.Fatalf("current setting source state = %#v", currentSetting)
 	}
-	if _, err := writePalworldSettings(currentPath, defaultPath, settings, false); err != nil {
+	if defaultSetting := settingByKey(settings, "NewInOnePointZero"); defaultSetting == nil || defaultSetting.Configured {
+		t.Fatalf("default-only setting source state = %#v", defaultSetting)
+	}
+	if _, err := patchPalworldSettings(currentPath, defaultPath, panel.PalworldSettingsPatch{
+		Revision: settings.Revision,
+		Changes:  map[string]any{"NewInOnePointZero": true},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(currentPath)
@@ -150,7 +172,7 @@ func TestDefaultFileAddsNewVersionOptionsWithoutLosingCurrentValues(t *testing.T
 		t.Fatalf("new option was not added: %s", text)
 	}
 	if !strings.Contains(text, `ServerName="Existing"`) {
-		t.Fatalf("current option was overwritten by default: %s", text)
+		t.Fatalf("current option was overwritten: %s", text)
 	}
 }
 
@@ -182,31 +204,40 @@ func settingByKey(settings panel.PalworldSettings, key string) *panel.Setting {
 	return nil
 }
 
-func TestRenderManagementSettingsOnlySynchronizesAllowedKeys(t *testing.T) {
+func TestPatchSettingsOnlyChangesRequestedKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "PalWorldSettings.ini")
 	raw := `[/Script/Pal.PalGameWorldSettings]
-OptionSettings=(AdminPassword="old",RESTAPIEnabled=False,RESTAPIPort=8212,ExpRate=1.000000)`
+OptionSettings=(AdminPassword="old",ServerPassword="keep-me",RESTAPIEnabled=False,RESTAPIPort=8212,ExpRate=1.000000)`
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-
-	rendered, err := renderManagementSettings(path, map[string]any{
-		"AdminPassword":  "new-secret",
-		"RESTAPIEnabled": true,
-		"ExpRate":        20,
+	settings, err := readPalworldSettings(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = patchPalworldSettings(path, "", panel.PalworldSettingsPatch{
+		Revision: settings.Revision,
+		Changes: map[string]any{
+			"AdminPassword": "new-secret",
+			"RCONEnabled":   true,
+		},
 	})
 	if err != nil {
-		t.Fatalf("renderManagementSettings() error = %v", err)
+		t.Fatalf("patchPalworldSettings() error = %v", err)
 	}
-	document, err := parseINI(string(rendered))
+	updatedRaw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := parseINI(string(updatedRaw))
 	if err != nil {
 		t.Fatal(err)
 	}
 	values := document.values()
-	if values["AdminPassword"] != `"new-secret"` || values["RESTAPIEnabled"] != "True" {
-		t.Fatalf("management values = %#v", values)
+	if values["AdminPassword"] != `"new-secret"` || values["RCONEnabled"] != "True" {
+		t.Fatalf("patched values = %#v", values)
 	}
-	if values["ExpRate"] != "1.000000" {
-		t.Fatalf("ExpRate was unexpectedly synchronized: %q", values["ExpRate"])
+	if values["ServerPassword"] != `"keep-me"` || values["RESTAPIEnabled"] != "False" || values["ExpRate"] != "1.000000" {
+		t.Fatalf("untouched values changed: %#v", values)
 	}
 }

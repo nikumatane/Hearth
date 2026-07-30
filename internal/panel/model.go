@@ -42,6 +42,8 @@ type Game struct {
 	CPUHistory       []MetricPoint `json:"cpuHistory"`
 	MemoryHistory    []MetricPoint `json:"memoryHistory"`
 	Tags             []string      `json:"tags"`
+	RESTEnabled      bool          `json:"restEnabled"`
+	RESTAvailable    bool          `json:"restAvailable"`
 }
 
 type Activity struct {
@@ -83,6 +85,7 @@ type Setting struct {
 	Sensitive       bool            `json:"sensitive,omitempty"`
 	Risk            string          `json:"risk,omitempty"`
 	RestartRequired bool            `json:"restartRequired"`
+	Configured      bool            `json:"configured"`
 }
 
 type SettingGroup struct {
@@ -94,17 +97,22 @@ type SettingGroup struct {
 
 type PalworldSettings struct {
 	Version      string         `json:"version"`
+	Revision     string         `json:"revision"`
 	Groups       []SettingGroup `json:"groups"`
 	Raw          string         `json:"raw"`
 	LastModified time.Time      `json:"lastModified"`
 }
 
+type PalworldSettingsPatch struct {
+	Revision string         `json:"revision"`
+	Changes  map[string]any `json:"changes"`
+}
+
 type WorldOptionDocument struct {
-	WorldID      string         `json:"worldId"`
-	Revision     string         `json:"revision"`
-	LastModified time.Time      `json:"lastModified"`
-	Data         []byte         `json:"data"`
-	Management   map[string]any `json:"management,omitempty"`
+	WorldID      string    `json:"worldId"`
+	Revision     string    `json:"revision"`
+	LastModified time.Time `json:"lastModified"`
+	Data         []byte    `json:"data"`
 }
 
 type LogFile struct {

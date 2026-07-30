@@ -52,7 +52,7 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 	mux.HandleFunc("GET /api/v1/games/{id}", s.auth(s.game))
 	mux.HandleFunc("POST /api/v1/games/{id}/actions", s.auth(s.gameAction))
 	mux.HandleFunc("GET /api/v1/games/palworld/settings", s.admin(s.palworldSettings))
-	mux.HandleFunc("PUT /api/v1/games/palworld/settings", s.admin(s.updatePalworldSettings))
+	mux.HandleFunc("PATCH /api/v1/games/palworld/settings", s.admin(s.updatePalworldSettings))
 	mux.HandleFunc("GET /api/v1/games/palworld/world-option", s.admin(s.worldOption))
 	mux.HandleFunc("PUT /api/v1/games/palworld/world-option", s.admin(s.updateWorldOption))
 	mux.HandleFunc("GET /api/v1/logs", s.admin(s.logs))
@@ -204,12 +204,12 @@ func (s *server) palworldSettings(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *server) updatePalworldSettings(w http.ResponseWriter, r *http.Request) {
-	var settings panel.PalworldSettings
-	if err := decodeJSON(r, &settings); err != nil {
-		writeError(w, http.StatusBadRequest, "配置格式不正确")
+	var patch panel.PalworldSettingsPatch
+	if err := decodeJSON(r, &patch); err != nil {
+		writeError(w, http.StatusBadRequest, "配置增量格式不正确")
 		return
 	}
-	updated, err := s.service.UpdatePalworldSettings(settings)
+	updated, err := s.service.UpdatePalworldSettings(patch)
 	if err != nil {
 		writeServiceError(w, err)
 		return

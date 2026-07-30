@@ -21,7 +21,7 @@ type Service interface {
 	Game(id string) (Game, error)
 	RunAction(id, action string) (Activity, error)
 	PalworldSettings() (PalworldSettings, error)
-	UpdatePalworldSettings(settings PalworldSettings) (PalworldSettings, error)
+	UpdatePalworldSettings(patch PalworldSettingsPatch) (PalworldSettings, error)
 	WorldOption() (WorldOptionDocument, error)
 	UpdateWorldOption(document WorldOptionDocument) (WorldOptionDocument, error)
 }
@@ -50,6 +50,7 @@ func NewDemoService() *DemoService {
 				UptimeSeconds: 5*3600 + 42*60, CPUPercent: 36.8, MemoryGB: 5.72,
 				Port: 8211, SaveID: "E67C6D5A4D25543748EBC2BAB926DC80",
 				SaveDetection: "GameUserSettings.ini", LastBackupAt: &backup, Tags: []string{"Steam", "REST API"},
+				RESTEnabled: true, RESTAvailable: true,
 			},
 			"dont-starve-together": {
 				ID: "dont-starve-together", Name: "饥荒联机版", ShortName: "DST",
@@ -143,15 +144,23 @@ func (s *DemoService) PalworldSettings() (PalworldSettings, error) {
 	return cloneSettings(s.settings), nil
 }
 
-func (s *DemoService) UpdatePalworldSettings(settings PalworldSettings) (PalworldSettings, error) {
+func (s *DemoService) UpdatePalworldSettings(patch PalworldSettingsPatch) (PalworldSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	settings.Version = "1.0"
-	settings.LastModified = time.Now()
-	s.settings = cloneSettings(settings)
+	for groupIndex := range s.settings.Groups {
+		for settingIndex := range s.settings.Groups[groupIndex].Settings {
+			setting := &s.settings.Groups[groupIndex].Settings[settingIndex]
+			if value, ok := patch.Changes[setting.Key]; ok {
+				setting.Value = value
+			}
+		}
+	}
+	s.settings.Version = "1.0"
+	s.settings.Revision = fmt.Sprintf("demo-%d", time.Now().UnixNano())
+	s.settings.LastModified = time.Now()
 	s.activities = append([]Activity{{
 		ID: fmt.Sprintf("a-%d", time.Now().UnixNano()), GameID: "palworld",
-		Title: "配置已保存", Detail: "演示模式未写入服务器文件",
+		Title: "INI 配置已保存", Detail: "演示模式未写入服务器文件",
 		Status: "success", CreatedAt: time.Now(),
 	}}, s.activities...)
 	return cloneSettings(s.settings), nil

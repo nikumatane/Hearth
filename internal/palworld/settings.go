@@ -1,6 +1,7 @@
 package palworld
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -147,14 +148,6 @@ var groupMetadata = map[string]struct {
 	"access":      {"连接与管理 API", "跨平台、REST API 和 RCON"},
 	"world":       {"世界规则", "难度、死亡规则与 1.0 世界功能"},
 	"advanced":    {"其他 1.0 参数", "从当前配置自动识别并保留的参数"},
-}
-
-var worldOptionManagementKeys = map[string]bool{
-	"ServerName": true, "ServerDescription": true, "ServerPlayerMaxNum": true,
-	"ServerPassword": true, "AdminPassword": true, "PublicIP": true, "PublicPort": true,
-	"CrossplayPlatforms": true, "LogFormatType": true, "Region": true,
-	"RESTAPIEnabled": true, "RESTAPIPort": true, "RCONEnabled": true, "RCONPort": true,
-	"bUseAuth": true, "BanListURL": true, "bAllowClientMod": true,
 }
 
 func parseINI(raw string) (iniDocument, error) {
@@ -328,8 +321,13 @@ func readPalworldSettings(path, defaultPath string) (panel.PalworldSettings, err
 		}
 	}
 	return panel.PalworldSettings{
-		Version: settingsVersion, Groups: groups, Raw: redacted.render(), LastModified: info.ModTime(),
+		Version: settingsVersion, Revision: settingsRevision(raw),
+		Groups: groups, Raw: redacted.render(), LastModified: info.ModTime(),
 	}, nil
+}
+
+func settingsRevision(raw string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))
 }
 
 func readSettingsFile(path string) (string, os.FileInfo, error) {
@@ -379,17 +377,20 @@ func buildSettingGroups(document iniDocument, defaults map[string]string) []pane
 			defaultValue = decodeOptionValue(rawDefault, definition)
 		}
 		if definition.Sensitive {
-			value = secretMask
-			if hasDefault {
+			if fmt.Sprint(value) != "" {
+				value = secretMask
+			}
+			if hasDefault && fmt.Sprint(defaultValue) != "" {
 				defaultValue = secretMask
 			}
 		}
+		_, configured := seen[option.Key]
 		groupSettings[definition.Group] = append(groupSettings[definition.Group], panel.Setting{
 			Key: option.Key, Label: definition.Label, Description: definition.Description,
 			Type: definition.Type, Value: value, Default: defaultValue,
 			Min: definition.Min, Max: definition.Max, Step: definition.Step,
 			Options: definition.Options, Sensitive: definition.Sensitive,
-			Risk: definition.Risk, RestartRequired: true,
+			Risk: definition.Risk, RestartRequired: true, Configured: configured,
 		})
 	}
 
@@ -496,35 +497,25 @@ func readNumericOption(path, key string) int {
 	return int(numberValue)
 }
 
-func writePalworldSettings(path, defaultPath string, input panel.PalworldSettings, running bool) (panel.PalworldSettings, error) {
+func patchPalworldSettings(path, defaultPath string, patch panel.PalworldSettingsPatch) (panel.PalworldSettings, error) {
 	currentRaw, _, err := readSettingsFile(path)
 	if err != nil {
 		return panel.PalworldSettings{}, err
 	}
-	current, err := parseINI(currentRaw)
+	if patch.Revision == "" || patch.Revision != settingsRevision(currentRaw) {
+		return panel.PalworldSettings{}, fmt.Errorf(
+			"%w: PalWorldSettings.ini 已被其他程序修改，请重新载入后再保存", panel.ErrUnsafe,
+		)
+	}
+	if len(patch.Changes) == 0 {
+		return panel.PalworldSettings{}, fmt.Errorf("%w: 没有需要保存的 INI 参数", panel.ErrInvalid)
+	}
+	document, err := parseINI(currentRaw)
 	if err != nil {
 		return panel.PalworldSettings{}, fmt.Errorf("%w: current settings are invalid: %v", panel.ErrInvalid, err)
 	}
-
-	base := current
-	if strings.TrimSpace(input.Raw) != "" {
-		base, err = parseINI(input.Raw)
-		if err != nil {
-			return panel.PalworldSettings{}, fmt.Errorf("%w: raw settings are invalid: %v", panel.ErrInvalid, err)
-		}
-	}
-	currentValues := current.values()
-	for index := range base.Options {
-		definition := settingDefinitions[base.Options[index].Key]
-		if definition.Sensitive && decodeOptionValue(base.Options[index].Value, definition) == secretMask {
-			if existing, ok := currentValues[base.Options[index].Key]; ok {
-				base.Options[index].Value = existing
-			}
-		}
-	}
-
-	positions := make(map[string]int, len(base.Options))
-	for index, option := range base.Options {
+	positions := make(map[string]int, len(document.Options))
+	for index, option := range document.Options {
 		positions[option.Key] = index
 	}
 	defaultValues := map[string]string{}
@@ -535,40 +526,41 @@ func writePalworldSettings(path, defaultPath string, input panel.PalworldSetting
 			}
 		}
 	}
-	for _, group := range input.Groups {
-		for _, setting := range group.Settings {
-			position, ok := positions[setting.Key]
-			if !ok {
-				defaultValue, existsInDefault := defaultValues[setting.Key]
-				if !existsInDefault {
-					continue
-				}
-				base.Options = append(base.Options, iniOption{Key: setting.Key, Value: defaultValue})
-				position = len(base.Options) - 1
-				positions[setting.Key] = position
-			}
-			definition, curated := settingDefinitions[setting.Key]
-			if !curated {
-				definition = inferDefinition(base.Options[position])
-			}
-			if definition.Sensitive && fmt.Sprint(setting.Value) == secretMask {
-				continue
-			}
-			encoded, encodeErr := encodeSettingValue(setting.Value, definition)
-			if encodeErr != nil {
-				return panel.PalworldSettings{}, fmt.Errorf("%w: %s: %v", panel.ErrInvalid, setting.Key, encodeErr)
-			}
-			base.Options[position].Value = encoded
+	keys := make([]string, 0, len(patch.Changes))
+	for key := range patch.Changes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		position, exists := positions[key]
+		option := iniOption{Key: key}
+		if exists {
+			option = document.Options[position]
+		} else if rawDefault, ok := defaultValues[key]; ok {
+			option.Value = rawDefault
+		} else if _, curated := settingDefinitions[key]; !curated {
+			return panel.PalworldSettings{}, fmt.Errorf("%w: INI 中不存在参数 %s", panel.ErrInvalid, key)
 		}
+		definition, curated := settingDefinitions[key]
+		if !curated {
+			definition = inferDefinition(option)
+		}
+		value := patch.Changes[key]
+		if definition.Sensitive && fmt.Sprint(value) == secretMask {
+			return panel.PalworldSettings{}, fmt.Errorf("%w: %s 必须显式输入新值", panel.ErrInvalid, key)
+		}
+		encoded, encodeErr := encodeSettingValue(value, definition)
+		if encodeErr != nil {
+			return panel.PalworldSettings{}, fmt.Errorf("%w: %s: %v", panel.ErrInvalid, key, encodeErr)
+		}
+		if exists {
+			document.Options[position].Value = encoded
+			continue
+		}
+		document.Options = append(document.Options, iniOption{Key: key, Value: encoded})
+		positions[key] = len(document.Options) - 1
 	}
-
-	beforePassword := decodeOptionValue(currentValues["AdminPassword"], settingDefinitions["AdminPassword"])
-	afterPassword := decodeOptionValue(base.values()["AdminPassword"], settingDefinitions["AdminPassword"])
-	if running && beforePassword != afterPassword {
-		return panel.PalworldSettings{}, fmt.Errorf("%w: 服务器运行时不能修改管理员密码，请先安全停服", panel.ErrUnsafe)
-	}
-
-	rendered := base.render()
+	rendered := document.render()
 	if _, parseErr := parseINI(rendered); parseErr != nil {
 		return panel.PalworldSettings{}, fmt.Errorf("%w: rendered settings failed validation: %v", panel.ErrInvalid, parseErr)
 	}
@@ -576,41 +568,6 @@ func writePalworldSettings(path, defaultPath string, input panel.PalworldSetting
 		return panel.PalworldSettings{}, err
 	}
 	return readPalworldSettings(path, defaultPath)
-}
-
-func renderManagementSettings(path string, updates map[string]any) ([]byte, error) {
-	raw, _, err := readSettingsFile(path)
-	if err != nil {
-		return nil, err
-	}
-	document, err := parseINI(raw)
-	if err != nil {
-		return nil, fmt.Errorf("%w: current settings are invalid: %v", panel.ErrInvalid, err)
-	}
-	for index := range document.Options {
-		option := &document.Options[index]
-		if !worldOptionManagementKeys[option.Key] {
-			continue
-		}
-		value, ok := updates[option.Key]
-		if !ok {
-			continue
-		}
-		definition, curated := settingDefinitions[option.Key]
-		if !curated {
-			definition = inferDefinition(*option)
-		}
-		encoded, encodeErr := encodeSettingValue(value, definition)
-		if encodeErr != nil {
-			return nil, fmt.Errorf("%w: %s: %v", panel.ErrInvalid, option.Key, encodeErr)
-		}
-		option.Value = encoded
-	}
-	rendered := []byte(document.render())
-	if _, parseErr := parseINI(string(rendered)); parseErr != nil {
-		return nil, fmt.Errorf("%w: synchronized management settings are invalid: %v", panel.ErrInvalid, parseErr)
-	}
-	return rendered, nil
 }
 
 func encodeSettingValue(value any, definition settingDefinition) (string, error) {
@@ -712,35 +669,6 @@ func atomicWriteFile(path string, data []byte) error {
 
 	if err := replaceFile(tempPath, path); err != nil {
 		return fmt.Errorf("replace settings file: %w", err)
-	}
-	return nil
-}
-
-func replaceWorldAndManagement(worldPath string, worldData []byte, settingsPath string, settingsData []byte) error {
-	stamp := time.Now().Format("20060102-150405.000000000")
-	worldBackup := worldPath + ".panel-backup-" + stamp
-	settingsBackup := settingsPath + ".panel-backup-" + stamp
-	if err := copyFile(worldPath, worldBackup); err != nil {
-		return fmt.Errorf("backup WorldOption.sav: %w", err)
-	}
-	if err := copyFile(settingsPath, settingsBackup); err != nil {
-		return fmt.Errorf("backup PalWorldSettings.ini: %w", err)
-	}
-	if err := atomicWriteFile(settingsPath, settingsData); err != nil {
-		return fmt.Errorf("write synchronized PalWorldSettings.ini: %w", err)
-	}
-	if err := atomicWriteFile(worldPath, worldData); err != nil {
-		rollbackData, rollbackReadErr := os.ReadFile(settingsBackup)
-		if rollbackReadErr == nil {
-			rollbackReadErr = atomicWriteFile(settingsPath, rollbackData)
-		}
-		if rollbackReadErr != nil {
-			return fmt.Errorf(
-				"write WorldOption.sav: %v; PalWorldSettings.ini rollback also failed: %w",
-				err, rollbackReadErr,
-			)
-		}
-		return fmt.Errorf("write WorldOption.sav: %w; PalWorldSettings.ini was rolled back", err)
 	}
 	return nil
 }
