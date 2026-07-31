@@ -1,9 +1,9 @@
 <p align="center">
-  <strong>简体中文</strong>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="README.en.md">English</a>
+  <img src="docs/assets/hearth-banner.svg" width="100%" alt="Hearth — A quiet home for your game servers." />
 </p>
 
 <p align="center">
-  <img src="docs/assets/hearth-banner.svg" width="100%" alt="Hearth — A quiet home for your game servers." />
+  <strong>简体中文</strong>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="README.en.md">English</a>
 </p>
 
 <p align="center">
