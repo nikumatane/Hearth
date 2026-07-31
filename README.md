@@ -69,7 +69,7 @@ Hearth 把前端和 API 合并为一个 Go 二进制，直接管理现有的 Ste
 make windows-package
 ```
 
-解压 `hearth-windows-amd64-v0.7.0.zip`，确保这些文件位于同一目录：
+解压 `hearth-windows-amd64-v0.8.0.zip`，确保这些文件位于同一目录：
 
 ```text
 hearth.exe
