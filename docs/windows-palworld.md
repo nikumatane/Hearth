@@ -1,3 +1,7 @@
+<p align="center">
+  <strong>简体中文</strong>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="windows-palworld.en.md">English</a>
+</p>
+
 # Hearth：Windows 帕鲁部署与安全接管
 
 ## 初始发现基线
@@ -56,7 +60,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 1. 验证 SteamCMD、PalServer、当前配置和默认配置文件。
 2. 把面板复制到 `C:\ProgramData\Hearth`。
 3. 创建独立的面板管理员密码文件并收紧 ACL。
-4. 配置成员密码摘要、登录审计和参数审计文件；升级时保留已有内容。
+4. 配置成员密码摘要、登录/参数审计、IP 规则和设备签名密钥；升级时保留已有内容。
 5. 注册开机启动的 `Hearth` 计划任务。
 6. 仅监听 `127.0.0.1:8080`。
 7. 验证面板健康接口。

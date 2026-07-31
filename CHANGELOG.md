@@ -1,3 +1,7 @@
+<p align="center">
+  <strong>简体中文</strong>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="CHANGELOG.en.md">English</a>
+</p>
+
 # Hearth 版本变更
 
 本文件从 `0.8.0` 开始记录面向使用者的变化。开发分支中尚未发布的内容放在

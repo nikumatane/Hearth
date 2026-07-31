@@ -1,3 +1,7 @@
+<p align="center">
+  <a href="THIRD_PARTY_NOTICES.zh-CN.md">简体中文</a>&nbsp;&nbsp;|&nbsp;&nbsp;<strong>English</strong>
+</p>
+
 # Third-party notices
 
 ## Bluefissure/pal-conf

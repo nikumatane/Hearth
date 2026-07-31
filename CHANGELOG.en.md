@@ -1,0 +1,57 @@
+<p align="center">
+  <a href="CHANGELOG.md">简体中文</a>&nbsp;&nbsp;|&nbsp;&nbsp;<strong>English</strong>
+</p>
+
+# Hearth changelog
+
+This file records user-facing changes beginning with `0.8.0`. Work not yet released stays under
+Unreleased and moves to a version section when a formal package is built.
+
+## Unreleased
+
+None.
+
+## 1.0.0 - 2026-07-31
+
+- Added an on-demand check beside Current version on the Palworld detail page. SteamCMD compares the
+  local Build ID with the public branch and reports stage progress in the existing task area.
+- Changed the overview greeting from fixed copy to the visitor browser's local time, refreshing the
+  date and time-of-day label every minute.
+- Documented the safe boundary for stop/restart when REST is unavailable.
+- Narrowed member configuration permission to routine allowlisted `PalWorldSettings.ini` gameplay
+  settings. System, security, performance, and complete `WorldOption.sav` access remain
+  administrator-only, and legacy permission is safely narrowed during upgrade.
+- Added administrator parameter audit with actor, source IP, configuration revision, and actual
+  structured differences after a successful save. Sensitive values are not persisted, and JSONL
+  rotates at 5 MiB.
+- Tightened compound INI validation to prevent hidden extra parameters, made login throttling
+  source-specific, bounded the session table, and added 5 MiB one-generation rotation to login audit.
+- Added age and total-capacity retention to Palworld ZIP backups, defaulting to 30 days / 20 GiB.
+  The newly created backup is always retained and unknown files are never cleaned.
+- Changed real SteamCMD update timeout to 30 minutes without log progress. SteamCMD self-update output
+  refreshes the timer; when self-update exits before confirming Palworld completion, Hearth retries
+  once and terminates a stuck task as a Windows process tree.
+- Upgraded login protection to per-source exponential backoff and bounded PBKDF2 concurrency. Known
+  devices use a signed cookie and reserved verification lane but still require the correct password
+  and cannot create a passwordless session.
+- Added suspected automation/brute-force severity, consecutive-failure counts, and IP-rule changes to
+  login audit. The row menu can deny an exact IP for 24 hours or allow it for seven days.
+- Added an administrator IP rules page. Deny rules reject before password computation, while allow
+  rules change throttling only and never bypass the password. Rules support expiry, permanent mode,
+  notes, and runtime hit counts.
+- Forwarded headers are now trusted only from direct peers in `trustedProxyCidrs` and proxy chains are
+  parsed from right to left, preventing clients from forging source IP or HTTPS cookie markers.
+  Windows defaults to loopback proxies only.
+- Raised the installer administrator-password minimum and new/changed member-password minimum to 14
+  characters. Existing member digests remain valid.
+
+## 0.8.0
+
+- When REST is unavailable, stop and restart can fall back to terminating the captured Palworld
+  process after the user explicitly accepts save risk. A changed PID or process start time is never
+  killed.
+- Added stage, detail, and percentage progress to start, stop, restart, update, and backup tasks.
+- Members can see progress for tasks they are allowed to perform on overview and detail pages, while
+  task logs and login audit remain administrator-only.
+- Improved mobile navigation, confirmation dialogs, task state, and action layout.
+- Unified the Windows package, health endpoint, and UI version indicator on `0.8.0`.

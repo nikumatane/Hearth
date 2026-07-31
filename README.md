@@ -1,4 +1,8 @@
 <p align="center">
+  <strong>简体中文</strong>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="README.en.md">English</a>
+</p>
+
+<p align="center">
   <img src="docs/assets/hearth-banner.svg" width="100%" alt="Hearth — A quiet home for your game servers." />
 </p>
 
@@ -110,6 +114,7 @@ install-windows.ps1
 uninstall-windows.ps1
 VERSION
 THIRD_PARTY_NOTICES.md
+THIRD_PARTY_NOTICES.zh-CN.md
 ```
 
 在管理员 PowerShell 中运行：
@@ -195,7 +200,7 @@ HEARTH_DEMO=true HEARTH_ADMIN_PASSWORD='replace-me' ./bin/hearth
 - [Windows 帕鲁部署与升级](docs/windows-palworld.md)
 - [架构与安全边界](docs/architecture.md)
 - [版本变更记录](CHANGELOG.md)
-- [第三方组件声明](THIRD_PARTY_NOTICES.md)
+- [第三方组件声明](THIRD_PARTY_NOTICES.zh-CN.md)
 
 公网入口属于部署层能力，不由 Hearth 配置或维护。如需让朋友访问，推荐在面板外使用
 Tailscale Funnel 等 HTTPS 入口；不要直接向公网开放 Hearth 的 8080 或 Palworld REST

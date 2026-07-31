@@ -18,8 +18,8 @@ windows-package:
 	pnpm --dir web build
 	mkdir -p dist/windows-amd64
 	GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w $(LDFLAGS)" -o dist/windows-amd64/hearth.exe ./cmd/hearth
-	cp scripts/install-windows.ps1 scripts/uninstall-windows.ps1 THIRD_PARTY_NOTICES.md VERSION dist/windows-amd64/
-	cd dist/windows-amd64 && zip -FS -j -q ../hearth-windows-amd64-v$(VERSION).zip hearth.exe install-windows.ps1 uninstall-windows.ps1 THIRD_PARTY_NOTICES.md VERSION
+	cp scripts/install-windows.ps1 scripts/uninstall-windows.ps1 THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.zh-CN.md VERSION dist/windows-amd64/
+	cd dist/windows-amd64 && zip -FS -j -q ../hearth-windows-amd64-v$(VERSION).zip hearth.exe install-windows.ps1 uninstall-windows.ps1 THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.zh-CN.md VERSION
 	cp $(WINDOWS_ZIP) dist/hearth-windows-amd64.zip
 
 test:

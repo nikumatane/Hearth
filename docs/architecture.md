@@ -1,3 +1,7 @@
+<p align="center">
+  <strong>简体中文</strong>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="architecture.en.md">English</a>
+</p>
+
 # Hearth 架构决策
 
 ## 目标
