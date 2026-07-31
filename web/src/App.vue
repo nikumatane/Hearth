@@ -67,6 +67,11 @@ import {
 type Page = "overview" | "game" | "settings" | "logs" | "access";
 type ActionName = "start" | "stop" | "restart" | "update" | "backup";
 type SettingsSource = "world" | "ini";
+const minimumPasswordLength = 10;
+
+function passwordCharacterCount(password: string) {
+  return Array.from(password).length;
+}
 
 const permissionDefinitions: Array<{
   id: Permission;
@@ -440,8 +445,8 @@ async function loadAccess() {
 }
 
 async function addMember() {
-  if (newMemberPassword.value.length < 14) {
-    showToast("error", "成员密码至少需要 14 个字符");
+  if (passwordCharacterCount(newMemberPassword.value) < minimumPasswordLength) {
+    showToast("error", `成员密码至少需要 ${minimumPasswordLength} 个字符`);
     return;
   }
   try {
@@ -466,8 +471,11 @@ function beginMemberEdit(member: MemberCredential) {
 }
 
 async function saveMember(member: MemberCredential) {
-  if (editingMemberPassword.value.length > 0 && editingMemberPassword.value.length < 14) {
-    showToast("error", "新密码留空表示不修改；填写时至少需要 14 个字符");
+  if (
+    editingMemberPassword.value.length > 0 &&
+    passwordCharacterCount(editingMemberPassword.value) < minimumPasswordLength
+  ) {
+    showToast("error", `新密码留空表示不修改；填写时至少需要 ${minimumPasswordLength} 个字符`);
     return;
   }
   try {
@@ -1599,9 +1607,9 @@ function gameAccent(id: string) {
                     v-model="newMemberPassword"
                     type="password"
                     autocomplete="new-password"
-                    minlength="14"
+                    :minlength="minimumPasswordLength"
                     maxlength="256"
-                    placeholder="至少 14 个字符"
+                    :placeholder="`至少 ${minimumPasswordLength} 个字符`"
                   />
                 </div>
                 <div class="permission-presets" aria-label="权限模板">
@@ -1632,7 +1640,10 @@ function gameAccent(id: string) {
                     </span>
                   </label>
                 </div>
-                <button class="button primary" :disabled="newMemberPassword.length < 14">
+                <button
+                  class="button primary"
+                  :disabled="passwordCharacterCount(newMemberPassword) < minimumPasswordLength"
+                >
                   <UserPlus :size="16" />添加成员
                 </button>
               </form>
@@ -1684,7 +1695,10 @@ function gameAccent(id: string) {
                       />
                       <button
                         class="button primary small"
-                        :disabled="editingMemberPassword.length > 0 && editingMemberPassword.length < 14"
+                        :disabled="
+                          editingMemberPassword.length > 0 &&
+                          passwordCharacterCount(editingMemberPassword) < minimumPasswordLength
+                        "
                       >
                         <Save :size="14" />保存修改
                       </button>

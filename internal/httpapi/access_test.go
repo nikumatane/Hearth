@@ -92,6 +92,18 @@ func TestAccessStorePersistsOnlyPasswordDigests(t *testing.T) {
 	}
 }
 
+func TestValidateMemberPasswordUsesTenCharacterMinimum(t *testing.T) {
+	if err := validateMemberPassword("1234567890"); err != nil {
+		t.Fatalf("10-character password was rejected: %v", err)
+	}
+	if err := validateMemberPassword("123456789"); err == nil {
+		t.Fatal("9-character password was accepted")
+	}
+	if err := validateMemberPassword("中文密码十位字符测试"); err != nil {
+		t.Fatalf("10-character Unicode password was rejected: %v", err)
+	}
+}
+
 func TestLoginAuditRotatesAndReloads(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "login-audit.jsonl")
 	filler := bytes.Repeat([]byte("{}\n"), maxLoginAuditSize/3+1)

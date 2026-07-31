@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -31,6 +32,8 @@ const (
 	legacyPermissionPalworldSettings = "palworld.settings"
 	passwordIterations               = 120_000
 	passwordLength                   = 32
+	minimumMemberPasswordLength      = 10
+	maximumMemberPasswordLength      = 256
 	maxMemberCredentials             = 20
 	maxAuditEntries                  = 500
 	maxLoginAuditSize                = 5 << 20
@@ -544,11 +547,12 @@ func pbkdf2SHA256(password, salt []byte, iterations, keyLength int) []byte {
 }
 
 func validateMemberPassword(password string) error {
-	if len(password) < 14 {
-		return errors.New("成员密码至少需要 14 个字符")
+	length := utf8.RuneCountInString(password)
+	if length < minimumMemberPasswordLength {
+		return fmt.Errorf("成员密码至少需要 %d 个字符", minimumMemberPasswordLength)
 	}
-	if len(password) > 256 {
-		return errors.New("成员密码不能超过 256 个字符")
+	if length > maximumMemberPasswordLength {
+		return fmt.Errorf("成员密码不能超过 %d 个字符", maximumMemberPasswordLength)
 	}
 	return nil
 }

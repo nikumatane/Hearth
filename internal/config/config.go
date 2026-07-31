@@ -7,7 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 )
+
+const minimumAdminPasswordLength = 10
 
 type GameConfig struct {
 	Enabled                   bool     `json:"enabled"`
@@ -92,6 +95,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.AdminPassword == "" {
 		return Config{}, errors.New("Hearth admin password is required through HEARTH_ADMIN_PASSWORD or adminPasswordFile")
+	}
+	if !cfg.Demo && utf8.RuneCountInString(cfg.AdminPassword) < minimumAdminPasswordLength {
+		return Config{}, fmt.Errorf("Hearth admin password must contain at least %d characters", minimumAdminPasswordLength)
 	}
 	if cfg.ConfigAuditFile == "" && cfg.AuditFile != "" {
 		cfg.ConfigAuditFile = filepath.Join(filepath.Dir(cfg.AuditFile), "config-audit.jsonl")

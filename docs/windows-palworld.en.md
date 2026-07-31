@@ -108,6 +108,9 @@ The `Panel administrator password` requested by the installer belongs to Hearth;
 Palworld's `AdminPassword`. After signing in, an administrator can add member passwords under Access
 control:
 
+The panel administrator password and new/changed member passwords require at least 10 characters.
+A unique password or passphrase of 14 characters or more is recommended in practice.
+
 - There is no username. Each password receives an automatic `M-...` ID.
 - New members can only view status. Administrators can use Read-only, Daily management, or Server
   owner presets.

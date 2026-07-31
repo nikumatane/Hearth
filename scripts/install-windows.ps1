@@ -26,6 +26,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $taskName = 'Hearth'
+$minimumPanelPasswordLength = 10
 $installRoot = Join-Path $env:ProgramData $taskName
 $sourceExecutable = Join-Path $SourceDirectory 'hearth.exe'
 $versionFile = Join-Path $SourceDirectory 'VERSION'
@@ -65,8 +66,8 @@ $securePassword = Read-Host -AsSecureString 'Panel administrator password'
 $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
 try {
     $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
-    if ([string]::IsNullOrWhiteSpace($plainPassword) -or $plainPassword.Length -lt 14) {
-        throw 'Panel administrator password must contain at least 14 characters.'
+    if ([string]::IsNullOrWhiteSpace($plainPassword) -or $plainPassword.Length -lt $minimumPanelPasswordLength) {
+        throw "Panel administrator password must contain at least $minimumPanelPasswordLength characters."
     }
 
     New-Item -ItemType Directory -Path $installRoot -Force | Out-Null

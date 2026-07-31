@@ -34,7 +34,7 @@ func TestLoadRequiresPasswordOutsideDemo(t *testing.T) {
 
 func TestLoadFileAndEnvironmentOverride(t *testing.T) {
 	t.Setenv("HEARTH_DEMO", "false")
-	t.Setenv("HEARTH_ADMIN_PASSWORD", "secret")
+	t.Setenv("HEARTH_ADMIN_PASSWORD", "secret1234")
 	t.Setenv("HEARTH_LISTEN", "127.0.0.1:9090")
 
 	directory := t.TempDir()
@@ -71,6 +71,15 @@ func TestLoadFileAndEnvironmentOverride(t *testing.T) {
 		cfg.TrustedProxyCIDRs[0] != "127.0.0.0/8" ||
 		cfg.TrustedProxyCIDRs[1] != "::1/128" {
 		t.Fatalf("TrustedProxyCIDRs = %#v", cfg.TrustedProxyCIDRs)
+	}
+}
+
+func TestLoadRejectsShortProductionAdminPassword(t *testing.T) {
+	t.Setenv("HEARTH_DEMO", "false")
+	t.Setenv("HEARTH_ADMIN_PASSWORD", "short")
+
+	if _, err := Load(""); err == nil {
+		t.Fatal("Load() accepted a production administrator password shorter than 10 characters")
 	}
 }
 

@@ -51,6 +51,9 @@ current small-server use case.
 - The panel password is stored in a file readable only by `SYSTEM` and Administrators.
 - The installer password is the sole administrator credential. Member passwords use individual
   random salts and PBKDF2-SHA256 digests in the same protected directory; plaintext is not stored.
+- Production administrator passwords and new/changed member passwords require at least 10
+  characters. This is a compatibility minimum; the documentation still recommends a unique password
+  or passphrase of 14 characters or more.
 - The password itself identifies the login; there is no username. Members are distinguished by an
   automatically generated credential ID.
 - New members are read-only. Administrators can grant lifecycle control, server update, save backup,

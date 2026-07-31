@@ -61,6 +61,9 @@ management, or Server owner preset and then adjust individual permissions. Membe
 are stored as salted PBKDF2-SHA256 digests. The frontend hides or disables unavailable actions,
 while the backend independently checks every request. Deleting a member or changing its password
 or permissions immediately revokes that member's active sessions.
+Administrator and new/changed member passwords require at least 10 characters. This is a minimum
+compatibility threshold; a unique password or passphrase of 14 characters or more is still
+recommended.
 
 The gameplay-settings permission uses a conservative backend allowlist. It covers the server
 name, description, player limit, time and experience multipliers, capture and gathering rates,

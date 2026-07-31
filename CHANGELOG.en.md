@@ -42,8 +42,8 @@ None.
 - Forwarded headers are now trusted only from direct peers in `trustedProxyCidrs` and proxy chains are
   parsed from right to left, preventing clients from forging source IP or HTTPS cookie markers.
   Windows defaults to loopback proxies only.
-- Raised the installer administrator-password minimum and new/changed member-password minimum to 14
-  characters. Existing member digests remain valid.
+- Standardized installer administrator passwords and new/changed member passwords on a 10-character
+  minimum. Existing member digests remain valid, and longer unique passwords remain recommended.
 
 ## 0.8.0
 
