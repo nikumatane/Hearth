@@ -49,10 +49,14 @@ type Game struct {
 type Activity struct {
 	ID        string    `json:"id"`
 	GameID    string    `json:"gameId,omitempty"`
+	Action    string    `json:"action,omitempty"`
 	Title     string    `json:"title"`
 	Detail    string    `json:"detail"`
 	Status    string    `json:"status"`
+	Stage     string    `json:"stage,omitempty"`
+	Progress  int       `json:"progress"`
 	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type Overview struct {
@@ -63,7 +67,8 @@ type Overview struct {
 }
 
 type ActionRequest struct {
-	Action string `json:"action"`
+	Action      string `json:"action"`
+	AllowUnsafe bool   `json:"allowUnsafe,omitempty"`
 }
 
 type SettingOption struct {

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"hearth/internal/config"
+	"hearth/internal/panel"
 )
 
 func TestAccessStorePersistsOnlyPasswordDigests(t *testing.T) {
@@ -138,6 +139,16 @@ func TestAdminAndMemberPermissionsAndLoginAudit(t *testing.T) {
 	if allowedAction.Code != http.StatusAccepted {
 		t.Fatalf("permitted action status = %d body = %s", allowedAction.Code, allowedAction.Body.String())
 	}
+	memberOverviewResponse := requestForTest(
+		t, handler, http.MethodGet, "/api/v1/overview", "", memberCookie,
+	)
+	var memberOverview panel.Overview
+	if err := json.Unmarshal(memberOverviewResponse.Body.Bytes(), &memberOverview); err != nil {
+		t.Fatalf("decode member overview: %v", err)
+	}
+	if len(memberOverview.Activities) != 1 || memberOverview.Activities[0].Action != "start" {
+		t.Fatalf("member activities = %#v; want only permitted control activity", memberOverview.Activities)
+	}
 	deniedAction := requestForTest(
 		t, handler, http.MethodPost, "/api/v1/games/palworld/actions",
 		`{"action":"update"}`, memberCookie,
@@ -182,6 +193,16 @@ func TestAdminAndMemberPermissionsAndLoginAudit(t *testing.T) {
 	}
 
 	memberCookie, _ = loginForTest(t, handler, "friend-secret-123", "198.51.100.22")
+	backupMemberOverview := requestForTest(
+		t, handler, http.MethodGet, "/api/v1/overview", "", memberCookie,
+	)
+	var filteredOverview panel.Overview
+	if err := json.Unmarshal(backupMemberOverview.Body.Bytes(), &filteredOverview); err != nil {
+		t.Fatalf("decode filtered member overview: %v", err)
+	}
+	if len(filteredOverview.Activities) != 0 {
+		t.Fatalf("backup-only member activities = %#v; control activity must be filtered", filteredOverview.Activities)
+	}
 	settingsDenied := requestForTest(
 		t, handler, http.MethodGet, "/api/v1/games/palworld/settings", "", memberCookie,
 	)

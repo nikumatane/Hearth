@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,9 +43,11 @@ type Service struct {
 	hostCPUHistory []panel.MetricPoint
 	hostMemHistory []panel.MetricPoint
 
-	apiMu     sync.Mutex
-	apiAt     time.Time
-	apiStatus apiStatus
+	apiMu         sync.Mutex
+	apiAt         time.Time
+	apiStatus     apiStatus
+	apiRefreshing bool
+	apiGeneration uint64
 }
 
 type apiStatus struct {
@@ -71,6 +75,8 @@ func NewService(gameConfig config.GameConfig) (*Service, error) {
 		return nil, err
 	}
 	service.rest = client
+	service.apiRefreshing = true
+	go service.refreshAPIStatus(service.apiGeneration)
 	return service, nil
 }
 
@@ -148,12 +154,16 @@ func (s *Service) Game(id string) (panel.Game, error) {
 	return game, nil
 }
 
-func (s *Service) RunAction(id, action string) (panel.Activity, error) {
+func (s *Service) RunAction(id string, request panel.ActionRequest) (panel.Activity, error) {
 	if id != palworldID {
 		return panel.Activity{}, panel.ErrNotFound
 	}
+	action := request.Action
 	if action != "start" && action != "stop" && action != "restart" && action != "update" && action != "backup" {
 		return panel.Activity{}, panel.ErrBadAction
+	}
+	if request.AllowUnsafe && !actionAllowsUnsafeFallback(action) {
+		return panel.Activity{}, fmt.Errorf("%w: 强制回退确认仅适用于停止和重启", panel.ErrInvalid)
 	}
 
 	process, _, err := s.platform.sample(s.config.ProcessName, s.config.InstallDir)
@@ -168,14 +178,6 @@ func (s *Service) RunAction(id, action string) (panel.Activity, error) {
 	}
 	if action == "restart" && !process.Running {
 		return panel.Activity{}, fmt.Errorf("%w: 帕鲁服务器当前未运行，请使用启动", panel.ErrUnsafe)
-	}
-	if actionRequiresREST(action, process.Running) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, preflightErr := s.rest.info(ctx)
-		cancel()
-		if preflightErr != nil {
-			return panel.Activity{}, fmt.Errorf("%w: 无法验证帕鲁本机 REST API，已拒绝可能损坏存档的操作：%v", panel.ErrUnsafe, preflightErr)
-		}
 	}
 	if action == "start" || action == "restart" || action == "update" {
 		steamProcess, _, sampleErr := s.platform.sample("steamcmd.exe", s.config.InstallDir)
@@ -194,10 +196,15 @@ func (s *Service) RunAction(id, action string) (panel.Activity, error) {
 	}
 	s.busy = true
 	s.currentAction = action
+	now := time.Now()
+	detail := "任务已进入执行队列"
+	if request.AllowUnsafe {
+		detail = "已确认：REST 安全关闭失败时允许强制终止原进程"
+	}
 	activity := panel.Activity{
 		ID: fmt.Sprintf("pal-%d", time.Now().UnixNano()), GameID: palworldID,
-		Title: productionActionTitle(action), Detail: "任务已进入安全执行队列",
-		Status: "running", CreatedAt: time.Now(),
+		Action: action, Title: productionActionTitle(action), Detail: detail,
+		Status: "running", Stage: "排队", Progress: 5, CreatedAt: now, UpdatedAt: now,
 	}
 	s.activities = append([]panel.Activity{activity}, s.activities...)
 	if len(s.activities) > 20 {
@@ -206,12 +213,12 @@ func (s *Service) RunAction(id, action string) (panel.Activity, error) {
 	s.mu.Unlock()
 
 	slog.Info("palworld task queued", "action", action, "activity", activity.ID)
-	go s.performAction(action, process.Running, activity.ID)
+	go s.performAction(action, process, request.AllowUnsafe, activity.ID)
 	return activity, nil
 }
 
-func actionRequiresREST(action string, running bool) bool {
-	return running && action != "start"
+func actionAllowsUnsafeFallback(action string) bool {
+	return action == "stop" || action == "restart"
 }
 
 func (s *Service) PalworldSettings() (panel.PalworldSettings, error) {
@@ -429,10 +436,17 @@ func applyAPIStatus(game *panel.Game, status apiStatus) {
 
 func (s *Service) cachedAPIStatus() apiStatus {
 	s.apiMu.Lock()
-	defer s.apiMu.Unlock()
-	if time.Since(s.apiAt) < 5*time.Second {
-		return s.apiStatus
+	status := s.apiStatus
+	if time.Since(s.apiAt) >= 5*time.Second && !s.apiRefreshing {
+		s.apiRefreshing = true
+		generation := s.apiGeneration
+		go s.refreshAPIStatus(generation)
 	}
+	s.apiMu.Unlock()
+	return status
+}
+
+func (s *Service) refreshAPIStatus(generation uint64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
 	defer cancel()
 	status := apiStatus{}
@@ -464,9 +478,25 @@ func (s *Service) cachedAPIStatus() apiStatus {
 		}
 	}()
 	wait.Wait()
+
+	s.apiMu.Lock()
+	if generation != s.apiGeneration {
+		s.apiRefreshing = false
+		s.apiMu.Unlock()
+		return
+	}
 	s.apiAt = time.Now()
 	s.apiStatus = status
-	return status
+	s.apiRefreshing = false
+	s.apiMu.Unlock()
+}
+
+func (s *Service) invalidateAPIStatus() {
+	s.apiMu.Lock()
+	s.apiAt = time.Time{}
+	s.apiStatus = apiStatus{}
+	s.apiGeneration++
+	s.apiMu.Unlock()
 }
 
 func (s *Service) installedBuildID() string {
@@ -485,28 +515,89 @@ func (s *Service) installedBuildID() string {
 	return "未知"
 }
 
-func (s *Service) performAction(action string, wasRunning bool, activityID string) {
-	var err error
+type taskReporter func(stage string, progress int, detail string)
+
+var steamProgressPattern = regexp.MustCompile(`(?i)progress:\s*([0-9]+(?:\.[0-9]+)?)`)
+
+func (s *Service) performAction(
+	action string,
+	process processSample,
+	allowUnsafe bool,
+	activityID string,
+) {
+	report := func(stage string, progress int, detail string) {
+		s.updateActivity(activityID, stage, progress, detail)
+	}
+	var (
+		err    error
+		forced bool
+	)
 	switch action {
 	case "start":
-		err = s.start()
+		err = s.start(scaleReporter(report, 5, 95))
 	case "stop":
-		err = s.gracefulStop()
+		forced, err = s.stop(process, allowUnsafe, scaleReporter(report, 5, 95))
 	case "restart":
-		if err = s.gracefulStop(); err == nil {
-			if err = s.start(); err == nil {
-				err = s.waitForREST()
+		forced, err = s.stop(process, allowUnsafe, scaleReporter(report, 5, 50))
+		if err == nil {
+			err = s.start(scaleReporter(report, 50, 85))
+		}
+		if err == nil {
+			if forced {
+				report("检查进程", 95, "游戏进程已恢复；REST 不可用，按进程状态完成检查")
+			} else {
+				err = s.waitForREST(scaleReporter(report, 85, 98))
 			}
 		}
 	case "update":
-		err = s.update(wasRunning)
+		err = s.update(process.Running, report)
 	case "backup":
-		err = s.backup(wasRunning)
+		err = s.backup(process.Running, report)
 	}
-	s.finishActivity(activityID, err)
+	s.finishActivity(activityID, action, forced, err)
 }
 
-func (s *Service) gracefulStop() error {
+func scaleReporter(report taskReporter, start, end int) taskReporter {
+	return func(stage string, progress int, detail string) {
+		progress = max(0, min(progress, 100))
+		report(stage, start+(end-start)*progress/100, detail)
+	}
+}
+
+func (s *Service) stop(
+	expectedProcess processSample,
+	allowUnsafe bool,
+	report taskReporter,
+) (bool, error) {
+	report("安全关闭", 2, "正在通过 REST API 保存世界并请求安全关闭")
+	safeErr := s.gracefulStop(scaleReporter(report, 0, 60))
+	if safeErr == nil {
+		report("安全关闭", 100, "世界已保存，Palworld 进程已安全退出")
+		return false, nil
+	}
+	if !allowUnsafe {
+		return false, safeErr
+	}
+
+	slog.Warn(
+		"palworld graceful stop failed; using confirmed force stop",
+		"pid", expectedProcess.PID,
+		"error", safeErr,
+	)
+	report("强制停止", 62, "REST 安全关闭不可用；正在终止任务创建时识别到的 Palworld 进程")
+	if forceErr := s.forceStop(expectedProcess, scaleReporter(report, 60, 100)); forceErr != nil {
+		return true, fmt.Errorf(
+			"safe shutdown failed: %v; confirmed force stop also failed: %w",
+			safeErr,
+			forceErr,
+		)
+	}
+	report("强制停止", 100, "Palworld 原进程已强制终止；最近未自动保存的进度可能丢失")
+	return true, nil
+}
+
+func (s *Service) gracefulStop(report taskReporter) error {
+	report("保存世界", 5, "正在通过 REST API 保存当前世界")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := s.rest.save(ctx); err != nil {
 		cancel()
@@ -514,70 +605,166 @@ func (s *Service) gracefulStop() error {
 	}
 	cancel()
 
+	report("请求安全关闭", 30, "世界已保存，正在通知玩家并请求 Palworld 自行退出")
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	err := s.rest.shutdown(ctx, s.config.ShutdownWaitSeconds, "服务器维护中，请稍后重新连接。")
 	cancel()
 	if err != nil {
 		return fmt.Errorf("request graceful shutdown: %w", err)
 	}
-	deadline := time.Now().Add(time.Duration(s.config.ShutdownWaitSeconds+45) * time.Second)
+
+	waitStarted := time.Now()
+	waitDuration := time.Duration(s.config.ShutdownWaitSeconds+45) * time.Second
+	deadline := waitStarted.Add(waitDuration)
 	for time.Now().Before(deadline) {
 		process, _, sampleErr := s.platform.sample(s.config.ProcessName, s.config.InstallDir)
 		if sampleErr != nil {
 			return sampleErr
 		}
 		if !process.Running {
+			report("等待进程退出", 100, "Palworld 进程已安全退出")
 			return nil
 		}
+		waitProgress := int(time.Since(waitStarted) * 45 / waitDuration)
+		report("等待进程退出", min(95, 50+waitProgress), "安全关闭请求已发送，正在等待游戏进程退出")
 		time.Sleep(time.Second)
 	}
 	return errors.New("Palworld did not exit after the graceful shutdown deadline; process was left untouched")
 }
 
-func (s *Service) start() error {
+func (s *Service) forceStop(expected processSample, report taskReporter) error {
+	process, _, err := s.platform.sample(s.config.ProcessName, s.config.InstallDir)
+	if err != nil {
+		return err
+	}
+	if !process.Running {
+		report("确认进程状态", 100, "Palworld 进程已经退出")
+		return nil
+	}
+	if expected.PID == 0 || expected.StartedAt.IsZero() {
+		return errors.New("captured Palworld process identity is incomplete; the running process was left untouched")
+	}
+	if process.PID != expected.PID || process.StartedAt.IsZero() || !process.StartedAt.Equal(expected.StartedAt) {
+		return fmt.Errorf(
+			"Palworld process identity changed from PID %d started %s to PID %d started %s; the current process was left untouched",
+			expected.PID,
+			expected.StartedAt.Format(time.RFC3339Nano),
+			process.PID,
+			process.StartedAt.Format(time.RFC3339Nano),
+		)
+	}
+
+	report("终止原进程", 40, fmt.Sprintf("正在强制终止 Palworld PID %d", expected.PID))
+	if err := s.platform.terminate(expected.PID, expected.StartedAt); err != nil {
+		return fmt.Errorf("terminate Palworld PID %d: %w", expected.PID, err)
+	}
+
+	waitStarted := time.Now()
+	deadline := waitStarted.Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		current, _, sampleErr := s.platform.sample(s.config.ProcessName, s.config.InstallDir)
+		if sampleErr != nil {
+			return sampleErr
+		}
+		if !current.Running {
+			report("确认进程状态", 100, "已确认原 Palworld 进程退出")
+			return nil
+		}
+		if current.PID != expected.PID ||
+			current.StartedAt.IsZero() ||
+			!current.StartedAt.Equal(expected.StartedAt) {
+			return fmt.Errorf(
+				"Palworld PID %d exited but a different process appeared as PID %d; the new process was left untouched",
+				expected.PID,
+				current.PID,
+			)
+		}
+		waitProgress := int(time.Since(waitStarted) * 50 / (15 * time.Second))
+		report("确认进程状态", min(95, 45+waitProgress), "终止信号已发送，正在确认进程退出")
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("Palworld PID %d did not exit after force termination", expected.PID)
+}
+
+func (s *Service) start(report taskReporter) error {
+	report("准备启动", 5, "正在准备 Palworld 启动日志")
 	logDirectory := filepath.Join(s.config.InstallDir, "panel-logs")
 	if err := os.MkdirAll(logDirectory, 0o700); err != nil {
 		return err
 	}
 	logPath := filepath.Join(logDirectory, "palworld-"+time.Now().Format("20060102")+".log")
+	report("启动进程", 25, "正在启动 PalServer.exe")
 	if err := s.platform.startDetached(s.config.Executable, s.config.InstallDir, s.config.StartArgs, logPath); err != nil {
 		return fmt.Errorf("start Palworld: %w", err)
 	}
-	deadline := time.Now().Add(90 * time.Second)
+
+	waitStarted := time.Now()
+	deadline := waitStarted.Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		process, _, err := s.platform.sample(s.config.ProcessName, s.config.InstallDir)
 		if err != nil {
 			return err
 		}
 		if process.Running {
-			s.apiMu.Lock()
-			s.apiAt = time.Time{}
-			s.apiMu.Unlock()
+			s.invalidateAPIStatus()
+			report("确认进程状态", 100, fmt.Sprintf("已检测到 Palworld 进程 PID %d", process.PID))
 			return nil
 		}
+		waitProgress := int(time.Since(waitStarted) * 40 / (90 * time.Second))
+		report("等待进程出现", min(95, 55+waitProgress), "PalServer.exe 已启动，正在等待游戏进程出现")
 		time.Sleep(time.Second)
 	}
 	return errors.New("Palworld process did not appear within 90 seconds")
 }
 
-func (s *Service) update(wasRunning bool) error {
+func (s *Service) update(wasRunning bool, report taskReporter) error {
 	if wasRunning {
-		if err := s.gracefulStop(); err != nil {
+		if err := s.gracefulStop(scaleReporter(report, 0, 25)); err != nil {
 			return err
 		}
+	} else {
+		report("确认停服状态", 25, "Palworld 当前未运行，可以直接备份并更新")
 	}
+
+	report("更新前备份", 30, "正在创建更新前的完整 ZIP 备份")
 	if _, err := s.createBackup(); err != nil {
 		if wasRunning {
-			_ = s.start()
+			_ = s.start(scaleReporter(report, 75, 90))
 		}
 		return fmt.Errorf("backup before update: %w", err)
 	}
+	report("更新前备份", 40, "更新前备份已完成")
 
 	logDirectory := filepath.Join(s.config.InstallDir, "panel-logs")
 	if err := os.MkdirAll(logDirectory, 0o700); err != nil {
 		return err
 	}
 	logPath := filepath.Join(logDirectory, "steamcmd-"+time.Now().Format("20060102-150405")+".log")
+	updateErr := s.runSteamCMD(logPath, scaleReporter(report, 40, 75))
+	if updateErr != nil {
+		if wasRunning {
+			report("更新失败回退", 76, "SteamCMD 更新失败，正在尝试恢复原服务器进程")
+			restartErr := s.start(scaleReporter(report, 76, 90))
+			if restartErr == nil {
+				restartErr = s.waitForREST(scaleReporter(report, 90, 98))
+			}
+			if restartErr != nil {
+				return fmt.Errorf("SteamCMD update failed: %v; rollback restart also failed: %w", updateErr, restartErr)
+			}
+		}
+		return fmt.Errorf("SteamCMD update failed: %w", updateErr)
+	}
+	if wasRunning {
+		if err := s.start(scaleReporter(report, 75, 90)); err != nil {
+			return err
+		}
+		return s.waitForREST(scaleReporter(report, 90, 98))
+	}
+	report("确认更新结果", 98, "SteamCMD 更新完成；服务器保持停止状态")
+	return nil
+}
+
+func (s *Service) runSteamCMD(logPath string, report taskReporter) error {
 	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
@@ -592,56 +779,109 @@ func (s *Service) update(wasRunning bool) error {
 	)
 	command.Dir = filepath.Dir(s.config.SteamCmd)
 	command.Stdout, command.Stderr = logFile, logFile
-	updateErr := command.Run()
-	if updateErr != nil {
-		if wasRunning {
-			restartErr := s.start()
-			if restartErr == nil {
-				restartErr = s.waitForREST()
-			}
-			if restartErr != nil {
-				return fmt.Errorf("SteamCMD update failed: %v; rollback restart also failed: %w", updateErr, restartErr)
-			}
-		}
-		return fmt.Errorf("SteamCMD update failed: %w", updateErr)
+	report("SteamCMD 更新", 5, "正在启动 SteamCMD")
+	if err := command.Start(); err != nil {
+		return err
 	}
-	if wasRunning {
-		if err := s.start(); err != nil {
+	report("SteamCMD 更新", 10, "SteamCMD 已启动，正在检查、下载并校验服务端文件")
+
+	done := make(chan error, 1)
+	go func() {
+		done <- command.Wait()
+	}()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-done:
+			if err == nil {
+				report("SteamCMD 更新", 100, "SteamCMD 已完成下载和文件校验")
+			}
 			return err
+		case <-ticker.C:
+			line := latestLogLine(logPath)
+			if line == "" {
+				report("SteamCMD 更新", 40, "SteamCMD 正在检查、下载并校验服务端文件")
+				continue
+			}
+			progress := 40
+			if match := steamProgressPattern.FindStringSubmatch(line); len(match) == 2 {
+				if value, parseErr := strconv.ParseFloat(match[1], 64); parseErr == nil {
+					progress = max(progress, min(95, int(math.Round(value))))
+				}
+			}
+			report("SteamCMD 更新", progress, line)
 		}
-		return s.waitForREST()
 	}
-	return nil
 }
 
-func (s *Service) waitForREST() error {
-	deadline := time.Now().Add(90 * time.Second)
+func latestLogLine(path string) string {
+	const maxTailBytes int64 = 16 << 10
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.Size() == 0 {
+		return ""
+	}
+	start := max(int64(0), info.Size()-maxTailBytes)
+	buffer := make([]byte, info.Size()-start)
+	read, _ := file.ReadAt(buffer, start)
+	lines := strings.Split(strings.ReplaceAll(string(buffer[:read]), "\r", ""), "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := strings.TrimSpace(lines[index])
+		if line == "" {
+			continue
+		}
+		if len(line) > 200 {
+			line = line[:200] + "…"
+		}
+		return line
+	}
+	return ""
+}
+
+func (s *Service) waitForREST(report taskReporter) error {
+	waitStarted := time.Now()
+	deadline := waitStarted.Add(90 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
+		report("REST 健康检查", 10, "游戏进程已启动，正在等待 REST API 恢复")
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 		_, lastErr = s.rest.info(ctx)
 		cancel()
 		if lastErr == nil {
-			s.apiMu.Lock()
-			s.apiAt = time.Time{}
-			s.apiMu.Unlock()
+			s.invalidateAPIStatus()
+			report("REST 健康检查", 100, "游戏进程与 REST API 均已恢复")
 			return nil
 		}
+		waitProgress := int(time.Since(waitStarted) * 80 / (90 * time.Second))
+		report("REST 健康检查", min(95, 10+waitProgress), "游戏进程已启动，REST API 尚未恢复")
 		time.Sleep(time.Second)
 	}
 	return fmt.Errorf("Palworld process started but REST API did not become healthy: %w", lastErr)
 }
 
-func (s *Service) backup(running bool) error {
+func (s *Service) backup(running bool, report taskReporter) error {
 	if running {
+		report("保存世界", 15, "正在通过 REST API 保存当前世界")
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		err := s.rest.save(ctx)
 		cancel()
 		if err != nil {
 			return fmt.Errorf("save world before backup: %w", err)
 		}
+		report("保存世界", 45, "世界已保存")
+	} else {
+		report("确认停服状态", 35, "Palworld 当前未运行，可以直接读取存档")
 	}
+	report("创建备份", 60, "正在压缩存档和关键配置")
 	_, err := s.createBackup()
+	if err == nil {
+		report("创建备份", 98, "完整 ZIP 备份已创建")
+	}
 	return err
 }
 
@@ -656,7 +896,23 @@ func (s *Service) createBackup() (string, error) {
 	return path, err
 }
 
-func (s *Service) finishActivity(id string, taskErr error) {
+func (s *Service) updateActivity(id, stage string, progress int, detail string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.activities {
+		if s.activities[index].ID != id {
+			continue
+		}
+		progress = max(s.activities[index].Progress, min(progress, 99))
+		s.activities[index].Stage = stage
+		s.activities[index].Progress = progress
+		s.activities[index].Detail = detail
+		s.activities[index].UpdatedAt = time.Now()
+		break
+	}
+}
+
+func (s *Service) finishActivity(id, action string, forced bool, taskErr error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.busy = false
@@ -667,13 +923,18 @@ func (s *Service) finishActivity(id string, taskErr error) {
 		}
 		if taskErr != nil {
 			s.activities[index].Status = "error"
+			s.activities[index].Title = failedActionTitle(action)
 			s.activities[index].Detail = taskErr.Error()
+			s.activities[index].Stage = "失败"
 			slog.Error("palworld task failed", "activity", id, "error", taskErr)
 		} else {
 			s.activities[index].Status = "success"
-			s.activities[index].Detail = "任务执行完成"
+			s.activities[index].Title, s.activities[index].Detail = completedActionResult(action, forced)
+			s.activities[index].Stage = "完成"
+			s.activities[index].Progress = 100
 			slog.Info("palworld task completed", "activity", id, "title", s.activities[index].Title)
 		}
+		s.activities[index].UpdatedAt = time.Now()
 		break
 	}
 }
@@ -681,9 +942,11 @@ func (s *Service) finishActivity(id string, taskErr error) {
 func (s *Service) addCompletedActivity(title, detail string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now := time.Now()
 	s.activities = append([]panel.Activity{{
 		ID: fmt.Sprintf("pal-%d", time.Now().UnixNano()), GameID: palworldID,
-		Title: title, Detail: detail, Status: "success", CreatedAt: time.Now(),
+		Title: title, Detail: detail, Status: "success", Stage: "完成", Progress: 100,
+		CreatedAt: now, UpdatedAt: now,
 	}}, s.activities...)
 	if len(s.activities) > 20 {
 		s.activities = s.activities[:20]
@@ -692,10 +955,38 @@ func (s *Service) addCompletedActivity(title, detail string) {
 
 func productionActionTitle(action string) string {
 	return map[string]string{
-		"start": "正在启动服务器", "stop": "正在安全停止服务器",
-		"restart": "正在安全重启服务器", "update": "正在备份并更新服务器",
+		"start": "正在启动服务器", "stop": "正在停止服务器",
+		"restart": "正在重启服务器", "update": "正在备份并更新服务器",
 		"backup": "正在备份服务器",
 	}[action]
+}
+
+func failedActionTitle(action string) string {
+	return map[string]string{
+		"start": "服务器启动失败", "stop": "服务器停止失败",
+		"restart": "服务器重启失败", "update": "服务器更新失败",
+		"backup": "服务器备份失败",
+	}[action]
+}
+
+func completedActionResult(action string, forced bool) (string, string) {
+	if forced {
+		switch action {
+		case "stop":
+			return "服务器已强制停止", "REST 安全关闭不可用，原进程已终止；最近未自动保存的进度可能丢失"
+		case "restart":
+			return "服务器已强制重启", "REST 安全关闭不可用，原进程已终止并重新启动；健康状态按进程确认"
+		}
+	}
+	results := map[string][2]string{
+		"start":   {"服务器已启动", "Palworld 游戏进程已启动"},
+		"stop":    {"服务器已安全停止", "世界已保存，Palworld 进程已安全退出"},
+		"restart": {"服务器已安全重启", "世界已保存，游戏进程与 REST API 均已恢复"},
+		"update":  {"服务器更新完成", "备份、SteamCMD 更新和恢复检查已完成"},
+		"backup":  {"服务器备份完成", "完整 ZIP 备份已创建"},
+	}
+	result := results[action]
+	return result[0], result[1]
 }
 
 func calculateCPU(previousHost, currentHost hostSample, previousProcess, currentProcess processSample, previousAt, currentAt time.Time) (float64, float64) {

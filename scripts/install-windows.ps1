@@ -173,7 +173,7 @@ Start-ScheduledTask -TaskName $taskName
 
 $settingsText = [IO.File]::ReadAllText($settingsFile)
 if ($settingsText -notmatch 'RESTAPIEnabled\s*=\s*True') {
-    Write-Warning 'Palworld RESTAPIEnabled is not True. The panel will show status, but safe stop/restart/update actions remain locked.'
+    Write-Warning 'Palworld RESTAPIEnabled is not True. Safe update and running backup remain locked; stop/restart require an explicit force-stop risk confirmation.'
 }
 if ($settingsText -match 'AdminPassword\s*=\s*""') {
     Write-Warning 'Palworld AdminPassword is empty. Set it before enabling safe management actions.'

@@ -19,7 +19,7 @@ func TestDemoServiceOverview(t *testing.T) {
 
 func TestDemoServiceRejectsUnknownAction(t *testing.T) {
 	service := NewDemoService()
-	_, err := service.RunAction("palworld", "delete")
+	_, err := service.RunAction("palworld", ActionRequest{Action: "delete"})
 	if !errors.Is(err, ErrBadAction) {
 		t.Fatalf("RunAction() error = %v", err)
 	}
@@ -27,13 +27,13 @@ func TestDemoServiceRejectsUnknownAction(t *testing.T) {
 
 func TestDemoServiceSerializesActionsPerGame(t *testing.T) {
 	service := NewDemoService()
-	if _, err := service.RunAction("palworld", "backup"); err != nil {
+	if _, err := service.RunAction("palworld", ActionRequest{Action: "backup"}); err != nil {
 		t.Fatalf("first RunAction() error = %v", err)
 	}
-	if _, err := service.RunAction("palworld", "restart"); !errors.Is(err, ErrBusy) {
+	if _, err := service.RunAction("palworld", ActionRequest{Action: "restart"}); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second RunAction() error = %v", err)
 	}
-	if _, err := service.RunAction("dont-starve-together", "start"); err != nil {
+	if _, err := service.RunAction("dont-starve-together", ActionRequest{Action: "start"}); err != nil {
 		t.Fatalf("other game RunAction() error = %v", err)
 	}
 }

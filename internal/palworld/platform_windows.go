@@ -4,6 +4,7 @@ package palworld
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 const (
 	th32csSnapProcess             = 0x00000002
+	processTerminate              = 0x0001
 	processVMRead                 = 0x0010
 	processQueryLimitedInfo       = 0x1000
 	detachedProcess               = 0x00000008
@@ -67,6 +69,7 @@ var (
 	procProcessNext          = kernel32Platform.NewProc("Process32NextW")
 	procOpenProcess          = kernel32Platform.NewProc("OpenProcess")
 	procGetProcessTimes      = kernel32Platform.NewProc("GetProcessTimes")
+	procTerminateProcess     = kernel32Platform.NewProc("TerminateProcess")
 	procGetProcessMemoryInfo = psapiPlatform.NewProc("GetProcessMemoryInfo")
 	procGlobalMemoryStatus   = kernel32Platform.NewProc("GlobalMemoryStatusEx")
 	procGetDiskFreeSpace     = kernel32Platform.NewProc("GetDiskFreeSpaceExW")
@@ -222,4 +225,46 @@ func (nativePlatform) startDetached(executable, workingDirectory string, argumen
 		return err
 	}
 	return command.Process.Release()
+}
+
+func (nativePlatform) terminate(processID uint32, expectedStartedAt time.Time) error {
+	if expectedStartedAt.IsZero() {
+		return errors.New("expected process start time is required")
+	}
+	handle, _, callErr := procOpenProcess.Call(
+		processTerminate|processQueryLimitedInfo,
+		0,
+		uintptr(processID),
+	)
+	if handle == 0 {
+		return callErr
+	}
+	defer syscall.CloseHandle(syscall.Handle(handle))
+
+	var created, exited, kernel, user syscall.Filetime
+	result, _, callErr := procGetProcessTimes.Call(
+		handle,
+		uintptr(unsafe.Pointer(&created)),
+		uintptr(unsafe.Pointer(&exited)),
+		uintptr(unsafe.Pointer(&kernel)),
+		uintptr(unsafe.Pointer(&user)),
+	)
+	if result == 0 {
+		return callErr
+	}
+	actualStartedAt := filetimeTime(created)
+	if actualStartedAt.IsZero() || !actualStartedAt.Equal(expectedStartedAt) {
+		return fmt.Errorf(
+			"process PID %d start time changed from %s to %s",
+			processID,
+			expectedStartedAt.Format(time.RFC3339Nano),
+			actualStartedAt.Format(time.RFC3339Nano),
+		)
+	}
+
+	result, _, callErr = procTerminateProcess.Call(handle, 1)
+	if result == 0 {
+		return callErr
+	}
+	return nil
 }

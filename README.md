@@ -98,7 +98,8 @@ Hearth 和启动任务，不会停止、启动、更新或修改正在运行的 
    设置非空 `AdminPassword`、启用 `RESTAPIEnabled` 并确认 `RESTAPIPort=8212`。
 
 Hearth 固定从 `127.0.0.1` 访问 Palworld REST API。REST 不可用时仍允许启动，
-但依赖保存和优雅停服的操作会被锁定，且不会退化为强制结束游戏进程。
+停止和重启会在明确提示存档风险并再次确认后，先尝试安全关闭，再回退为终止当前识别到的
+Palworld 进程。运行中的更新和备份仍要求 REST API，绝不会自动退化为强制结束进程。
 
 完整流程见 [Windows 帕鲁部署指南](docs/windows-palworld.md)。
 

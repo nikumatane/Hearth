@@ -180,9 +180,20 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 func (s *server) overview(w http.ResponseWriter, r *http.Request) {
 	overview := s.service.Overview()
 	if identity, ok := principalFromContext(r.Context()); ok && identity.Role != roleAdmin {
-		overview.Activities = []panel.Activity{}
+		overview.Activities = permittedActivities(identity, overview.Activities)
 	}
 	writeJSON(w, http.StatusOK, overview)
+}
+
+func permittedActivities(identity principal, activities []panel.Activity) []panel.Activity {
+	visible := make([]panel.Activity, 0, len(activities))
+	for _, activity := range activities {
+		permission, ok := permissionForAction(activity.Action)
+		if ok && hasPermission(identity, permission) {
+			visible = append(visible, activity)
+		}
+	}
+	return visible
 }
 
 func (s *server) game(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +221,7 @@ func (s *server) gameAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "当前成员密码没有执行此操作的权限")
 		return
 	}
-	activity, err := s.service.RunAction(r.PathValue("id"), request.Action)
+	activity, err := s.service.RunAction(r.PathValue("id"), request)
 	if err != nil {
 		writeServiceError(w, err)
 		return

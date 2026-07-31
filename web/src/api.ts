@@ -32,10 +32,14 @@ export type Game = {
 export type Activity = {
   id: string;
   gameId?: string;
+  action?: string;
   title: string;
   detail: string;
   status: "success" | "neutral" | "warning" | "running" | "error";
+  stage?: string;
+  progress?: number;
   createdAt: string;
+  updatedAt?: string;
 };
 
 export type Overview = {
@@ -184,10 +188,10 @@ export const api = {
   logout: () => request<void>("/api/v1/session", { method: "DELETE" }),
   overview: () => request<Overview>("/api/v1/overview"),
   game: (id: string) => request<Game>(`/api/v1/games/${id}`),
-  action: (id: string, action: string) =>
+  action: (id: string, action: string, allowUnsafe = false) =>
     request<Activity>(`/api/v1/games/${id}/actions`, {
       method: "POST",
-      body: JSON.stringify({ action })
+      body: JSON.stringify({ action, allowUnsafe })
     }),
   palworldSettings: () =>
     request<PalworldSettings>("/api/v1/games/palworld/settings"),

@@ -99,6 +99,64 @@ func TestLoginUsesSecureCookieBehindHTTPSProxy(t *testing.T) {
 	}
 }
 
+func TestGameActionUnsafeConfirmationBoundary(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "restart accepts explicit fallback confirmation",
+			body:       `{"action":"restart","allowUnsafe":true}`,
+			wantStatus: http.StatusAccepted,
+		},
+		{
+			name:       "update cannot use force fallback",
+			body:       `{"action":"update","allowUnsafe":true}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			handler := newTestHandler(t, config.Config{AdminPassword: "correct"})
+			cookie := loginTestHandler(t, handler)
+			request := httptest.NewRequest(
+				http.MethodPost,
+				"/api/v1/games/palworld/actions",
+				bytes.NewBufferString(test.body),
+			)
+			request.Header.Set("Content-Type", "application/json")
+			request.AddCookie(cookie)
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func loginTestHandler(t *testing.T, handler http.Handler) *http.Cookie {
+	t.Helper()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/session",
+		bytes.NewBufferString(`{"password":"correct"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("login status = %d body = %s", response.Code, response.Body.String())
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("login cookies = %#v", cookies)
+	}
+	return cookies[0]
+}
+
 func newTestHandler(t *testing.T, cfg config.Config) http.Handler {
 	t.Helper()
 	handler, err := New(cfg, panel.NewDemoService())

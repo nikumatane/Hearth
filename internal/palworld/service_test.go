@@ -1,10 +1,16 @@
 package palworld
 
 import (
+	"errors"
+	"io"
+	"net/http"
 	"runtime"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"hearth/internal/config"
 	"hearth/internal/panel"
 )
 
@@ -39,25 +45,218 @@ func TestCalculateCPUResetsWhenProcessChanges(t *testing.T) {
 	}
 }
 
-func TestActionRequiresRESTOnlyForRunningSafetyActions(t *testing.T) {
+func TestActionAllowsUnsafeFallbackOnlyForStopAndRestart(t *testing.T) {
 	tests := []struct {
-		action  string
-		running bool
-		want    bool
+		action string
+		want   bool
 	}{
-		{action: "start", running: false, want: false},
-		{action: "start", running: true, want: false},
-		{action: "stop", running: true, want: true},
-		{action: "restart", running: true, want: true},
-		{action: "update", running: true, want: true},
-		{action: "backup", running: true, want: true},
-		{action: "update", running: false, want: false},
-		{action: "backup", running: false, want: false},
+		{action: "start", want: false},
+		{action: "stop", want: true},
+		{action: "restart", want: true},
+		{action: "update", want: false},
+		{action: "backup", want: false},
 	}
 	for _, test := range tests {
-		if got := actionRequiresREST(test.action, test.running); got != test.want {
-			t.Errorf("actionRequiresREST(%q, %v) = %v, want %v", test.action, test.running, got, test.want)
+		if got := actionAllowsUnsafeFallback(test.action); got != test.want {
+			t.Errorf("actionAllowsUnsafeFallback(%q) = %v, want %v", test.action, got, test.want)
 		}
+	}
+}
+
+func TestUnsafeStopFallsBackToCapturedProcess(t *testing.T) {
+	service, platform := newUnavailableRESTService(t)
+	startedAt := time.Now()
+	activity, err := service.RunAction("palworld", panel.ActionRequest{
+		Action:      "stop",
+		AllowUnsafe: true,
+	})
+	if err != nil {
+		t.Fatalf("RunAction() error = %v", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > 250*time.Millisecond {
+		t.Fatalf("RunAction() blocked for %v; task creation must return immediately", elapsed)
+	}
+
+	completed := waitForActivity(t, service, activity.ID)
+	if completed.Status != "success" || completed.Progress != 100 || completed.Stage != "完成" {
+		t.Fatalf("completed activity = %#v", completed)
+	}
+	if completed.Title != "服务器已强制停止" {
+		t.Fatalf("completed title = %q", completed.Title)
+	}
+	if got := platform.terminatedPIDs(); len(got) != 1 || got[0] != 42 {
+		t.Fatalf("terminated PIDs = %v; want [42]", got)
+	}
+}
+
+func TestConfirmedFallbackStillPrefersRESTSafeStop(t *testing.T) {
+	client, err := newRESTClient("http://127.0.0.1:8212", "admin", func() (string, error) {
+		return "test-password", nil
+	})
+	if err != nil {
+		t.Fatalf("newRESTClient() error = %v", err)
+	}
+	platform := &fakePlatform{running: true, pid: 42, startedAt: time.Now().Add(-time.Minute)}
+	client.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(request.URL.Path, "/shutdown") {
+			platform.setRunning(false, 0)
+		}
+		return &http.Response{
+			StatusCode: http.StatusNoContent,
+			Status:     "204 No Content",
+			Header:     make(http.Header),
+			Body:       http.NoBody,
+		}, nil
+	})
+	service := &Service{
+		config:   configForTest(t),
+		platform: platform,
+		rest:     client,
+	}
+
+	activity, err := service.RunAction("palworld", panel.ActionRequest{
+		Action:      "stop",
+		AllowUnsafe: true,
+	})
+	if err != nil {
+		t.Fatalf("RunAction() error = %v", err)
+	}
+	completed := waitForActivity(t, service, activity.ID)
+	if completed.Status != "success" || completed.Title != "服务器已安全停止" {
+		t.Fatalf("completed activity = %#v", completed)
+	}
+	if got := platform.terminatedPIDs(); len(got) != 0 {
+		t.Fatalf("terminated PIDs = %v; REST safe stop must not force termination", got)
+	}
+}
+
+func TestUnsafeRestartSkipsUnavailableRESTHealthCheck(t *testing.T) {
+	service, platform := newUnavailableRESTService(t)
+	activity, err := service.RunAction("palworld", panel.ActionRequest{
+		Action:      "restart",
+		AllowUnsafe: true,
+	})
+	if err != nil {
+		t.Fatalf("RunAction() error = %v", err)
+	}
+
+	completed := waitForActivity(t, service, activity.ID)
+	if completed.Status != "success" || completed.Title != "服务器已强制重启" {
+		t.Fatalf("completed activity = %#v", completed)
+	}
+	if process, _, sampleErr := platform.sample("PalServer.exe", ""); sampleErr != nil || !process.Running {
+		t.Fatalf("process after restart = %#v, error = %v", process, sampleErr)
+	}
+}
+
+func TestUnsafeConfirmationCannotBypassUpdateSafety(t *testing.T) {
+	service, platform := newUnavailableRESTService(t)
+	_, err := service.RunAction("palworld", panel.ActionRequest{
+		Action:      "update",
+		AllowUnsafe: true,
+	})
+	if !errors.Is(err, panel.ErrInvalid) {
+		t.Fatalf("RunAction() error = %v; want ErrInvalid", err)
+	}
+	if got := platform.terminatedPIDs(); len(got) != 0 {
+		t.Fatalf("terminated PIDs = %v; update must never use force stop", got)
+	}
+}
+
+func TestCachedAPIStatusRefreshesWithoutBlockingOverview(t *testing.T) {
+	client, err := newRESTClient("http://127.0.0.1:8212", "admin", func() (string, error) {
+		return "test-password", nil
+	})
+	if err != nil {
+		t.Fatalf("newRESTClient() error = %v", err)
+	}
+	started := make(chan struct{}, 3)
+	release := make(chan struct{})
+	client.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		started <- struct{}{}
+		<-release
+		body := `{}`
+		if strings.HasSuffix(request.URL.Path, "/players") {
+			body = `{"players":[]}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})
+	service := &Service{rest: client}
+
+	startedAt := time.Now()
+	status := service.cachedAPIStatus()
+	if elapsed := time.Since(startedAt); elapsed > 100*time.Millisecond {
+		t.Fatalf("cachedAPIStatus() blocked for %v", elapsed)
+	}
+	if status.InfoOK || status.MetricsOK || status.PlayerListOK {
+		t.Fatalf("initial cached status = %#v; want empty status", status)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("background REST refresh did not start")
+	}
+	close(release)
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		service.apiMu.Lock()
+		refreshing := service.apiRefreshing
+		refreshed := service.apiStatus
+		service.apiMu.Unlock()
+		if !refreshing {
+			if !refreshed.InfoOK || !refreshed.MetricsOK || !refreshed.PlayerListOK {
+				t.Fatalf("refreshed status = %#v", refreshed)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("background REST refresh did not finish")
+}
+
+func TestForceStopRefusesChangedProcess(t *testing.T) {
+	startedAt := time.Now().Add(-time.Minute)
+	platform := &fakePlatform{running: true, pid: 99, startedAt: startedAt}
+	service := &Service{
+		config:   configForTest(t),
+		platform: platform,
+	}
+	err := service.forceStop(
+		processSample{Running: true, PID: 42, StartedAt: startedAt},
+		func(string, int, string) {},
+	)
+	if err == nil {
+		t.Fatal("forceStop() succeeded after PID changed")
+	}
+	if got := platform.terminatedPIDs(); len(got) != 0 {
+		t.Fatalf("terminated PIDs = %v; changed process must remain untouched", got)
+	}
+}
+
+func TestForceStopRefusesReusedPID(t *testing.T) {
+	startedAt := time.Now().Add(-time.Minute)
+	platform := &fakePlatform{
+		running: true, pid: 42, startedAt: startedAt.Add(time.Second),
+	}
+	service := &Service{
+		config:   configForTest(t),
+		platform: platform,
+	}
+	err := service.forceStop(
+		processSample{Running: true, PID: 42, StartedAt: startedAt},
+		func(string, int, string) {},
+	)
+	if err == nil {
+		t.Fatal("forceStop() succeeded after PID was reused by a newer process")
+	}
+	if got := platform.terminatedPIDs(); len(got) != 0 {
+		t.Fatalf("terminated PIDs = %v; reused PID must remain untouched", got)
 	}
 }
 
@@ -101,4 +300,108 @@ func TestApplyAPIStatusFallsBackToMetrics(t *testing.T) {
 	if game.PlayersSource != "REST API 指标" {
 		t.Fatalf("players source = %q", game.PlayersSource)
 	}
+}
+
+type fakePlatform struct {
+	mu         sync.Mutex
+	running    bool
+	pid        uint32
+	startedAt  time.Time
+	terminated []uint32
+}
+
+func (p *fakePlatform) sample(processName, _ string) (processSample, hostSample, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if processName == "steamcmd.exe" {
+		return processSample{}, hostSample{}, nil
+	}
+	return processSample{Running: p.running, PID: p.pid, StartedAt: p.startedAt}, hostSample{}, nil
+}
+
+func (p *fakePlatform) startDetached(_, _ string, _ []string, _ string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.running = true
+	p.pid = 84
+	p.startedAt = time.Now()
+	return nil
+}
+
+func (p *fakePlatform) terminate(processID uint32, startedAt time.Time) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.running || p.pid != processID || !p.startedAt.Equal(startedAt) {
+		return errors.New("process identity changed")
+	}
+	p.terminated = append(p.terminated, processID)
+	p.running = false
+	p.startedAt = time.Time{}
+	return nil
+}
+
+func (p *fakePlatform) terminatedPIDs() []uint32 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]uint32(nil), p.terminated...)
+}
+
+func (p *fakePlatform) setRunning(running bool, pid uint32) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.running = running
+	p.pid = pid
+	if !running {
+		p.startedAt = time.Time{}
+	}
+}
+
+func newUnavailableRESTService(t *testing.T) (*Service, *fakePlatform) {
+	t.Helper()
+	client, err := newRESTClient("http://127.0.0.1:8212", "admin", func() (string, error) {
+		return "test-password", nil
+	})
+	if err != nil {
+		t.Fatalf("newRESTClient() error = %v", err)
+	}
+	client.client.Transport = roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Status:     "503 Service Unavailable",
+			Header:     make(http.Header),
+			Body:       http.NoBody,
+		}, nil
+	})
+	platform := &fakePlatform{running: true, pid: 42, startedAt: time.Now().Add(-time.Minute)}
+	return &Service{
+		config:   configForTest(t),
+		platform: platform,
+		rest:     client,
+	}, platform
+}
+
+func configForTest(t *testing.T) config.GameConfig {
+	t.Helper()
+	return config.GameConfig{
+		InstallDir:          t.TempDir(),
+		SteamCmd:            "steamcmd.exe",
+		Executable:          "PalServer.exe",
+		ProcessName:         "PalServer.exe",
+		ShutdownWaitSeconds: 1,
+	}
+}
+
+func waitForActivity(t *testing.T, service *Service, id string) panel.Activity {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, activity := range service.activitySnapshot() {
+			if activity.ID == id && activity.Status != "running" {
+				return activity
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("activity %s did not finish", id)
+	return panel.Activity{}
 }

@@ -144,6 +144,14 @@ const selectedGame = computed(() =>
   overview.value?.games.find((game) => game.id === selectedGameId.value)
 );
 
+const selectedGameActivity = computed(() =>
+  (overview.value?.activities ?? []).find(
+    (item) =>
+      item.status === "running" &&
+      (!item.gameId || item.gameId === selectedGameId.value)
+  )
+);
+
 const runningCount = computed(
   () => overview.value?.games.filter((game) => game.state === "running").length ?? 0
 );
@@ -255,7 +263,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  if (pollTimer) window.clearInterval(pollTimer);
+  if (pollTimer) window.clearTimeout(pollTimer);
   if (toastTimer) window.clearTimeout(toastTimer);
 });
 
@@ -289,12 +297,27 @@ async function logout() {
   currentPermissions.value = [];
   members.value = [];
   auditEntries.value = [];
-  if (pollTimer) window.clearInterval(pollTimer);
+  if (pollTimer) window.clearTimeout(pollTimer);
+  pollTimer = undefined;
 }
 
 function startPolling() {
-  if (pollTimer) window.clearInterval(pollTimer);
-  pollTimer = window.setInterval(() => void refresh(true), 5000);
+  schedulePolling();
+}
+
+function schedulePolling(delay?: number) {
+  if (pollTimer) window.clearTimeout(pollTimer);
+  pollTimer = undefined;
+  if (!loggedIn.value) return;
+  const activeTask =
+    (overview.value?.activities ?? []).some((item) => item.status === "running") ||
+    (overview.value?.games ?? []).some(
+      (game) => game.state === "starting" || game.state === "stopping"
+    );
+  pollTimer = window.setTimeout(async () => {
+    await refresh(true);
+    schedulePolling();
+  }, delay ?? (activeTask ? 1000 : 5000));
 }
 
 async function refresh(silent = false) {
@@ -308,11 +331,15 @@ async function refresh(silent = false) {
       games: nextOverview.games ?? [],
       activities: nextOverview.activities ?? []
     };
+    if (logs.value) {
+      logs.value = { ...logs.value, activities: nextOverview.activities ?? [] };
+    }
     loadError.value = "";
   } catch (error) {
     if (isUnauthorized(error)) {
       loggedIn.value = false;
-      if (pollTimer) window.clearInterval(pollTimer);
+      if (pollTimer) window.clearTimeout(pollTimer);
+      pollTimer = undefined;
     } else if (!silent) {
       loadError.value = error instanceof Error ? error.message : "无法加载服务器状态";
     }
@@ -504,7 +531,13 @@ function hasActionPermission(action: ActionName): boolean {
 
 function actionDisabledReason(game: Game, action: ActionName): string | undefined {
   if (!hasActionPermission(action)) return "当前成员密码没有此操作权限";
-  if (action !== "start" && game.state === "running" && !game.restAvailable) {
+  if (
+    game.state === "running" &&
+    !game.restAvailable &&
+    action !== "start" &&
+    action !== "stop" &&
+    action !== "restart"
+  ) {
     return "REST API 不可用，无法安全执行此操作";
   }
   return undefined;
@@ -520,21 +553,39 @@ function askAction(game: Game, action: ActionName) {
     return;
   }
   if (!canRunSafeAction(game, action)) {
-    showToast("error", "REST API 当前不可用；为保护存档，运行中的停止、重启、更新和备份已锁定");
+    showToast("error", "REST API 当前不可用；运行中的更新和备份仍需先安全保存世界");
     return;
   }
   confirmAction.value = { game, action };
 }
 
+function usesUnsafeFallback(game: Game, action: ActionName): boolean {
+  return (
+    game.state === "running" &&
+    !game.restAvailable &&
+    actionAllowsUnsafeFallback(action)
+  );
+}
+
+function actionAllowsUnsafeFallback(action: ActionName): boolean {
+  return action === "stop" || action === "restart";
+}
+
+function activityProgress(item: { progress?: number }): number {
+  return Math.max(0, Math.min(100, item.progress ?? 0));
+}
+
 async function executeAction() {
   if (!confirmAction.value) return;
   const { game, action } = confirmAction.value;
+  const allowUnsafe = actionAllowsUnsafeFallback(action);
   actionBusy.value = true;
   try {
-    await api.action(game.id, action);
+    await api.action(game.id, action, allowUnsafe);
     confirmAction.value = null;
     showToast("success", `${actionLabel(action)}任务已进入执行队列`);
     await refresh(true);
+    schedulePolling(1000);
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "操作失败");
   } finally {
@@ -949,7 +1000,7 @@ function gameAccent(id: string) {
               <div :class="['player-data-status', { unavailable: playerSummary.online === null }]">
                 <span></span>{{ playerSummary.source }}
               </div>
-              <footer>每 5 秒刷新一次</footer>
+              <footer>任务期间每 1 秒刷新</footer>
             </article>
           </section>
 
@@ -1056,11 +1107,17 @@ function gameAccent(id: string) {
                     <Check v-else-if="item.status === 'success'" :size="16" />
                     <Activity v-else :size="16" />
                   </span>
-                  <div>
+                  <div class="activity-copy">
                     <strong>{{ item.title }}</strong>
                     <span>{{ item.detail }}</span>
+                    <div v-if="item.status === 'running'" class="activity-progress-row">
+                      <div class="activity-progress-track">
+                        <i :style="{ width: `${activityProgress(item)}%` }"></i>
+                      </div>
+                      <small>{{ item.stage || "执行中" }} · {{ activityProgress(item) }}%</small>
+                    </div>
                   </div>
-                  <time>{{ formatRelative(item.createdAt) }}</time>
+                  <time>{{ formatRelative(item.updatedAt || item.createdAt) }}</time>
                 </div>
               </div>
             </article>
@@ -1152,6 +1209,27 @@ function gameAccent(id: string) {
                     <TerminalSquare :size="15" />查看日志
                   </button>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="selectedGameActivity" class="detail-task-banner panel-card">
+            <span class="activity-icon running">
+              <LoaderCircle class="spin" :size="17" />
+            </span>
+            <div class="detail-task-copy">
+              <div>
+                <strong>{{ selectedGameActivity.title }}</strong>
+                <span>{{ selectedGameActivity.detail }}</span>
+              </div>
+              <div class="detail-task-progress">
+                <div class="activity-progress-track">
+                  <i :style="{ width: `${activityProgress(selectedGameActivity)}%` }"></i>
+                </div>
+                <small>
+                  {{ selectedGameActivity.stage || "执行中" }} ·
+                  {{ activityProgress(selectedGameActivity) }}%
+                </small>
               </div>
             </div>
           </section>
@@ -1516,8 +1594,17 @@ function gameAccent(id: string) {
                     <Check v-else-if="item.status === 'success'" :size="16" />
                     <Activity v-else :size="16" />
                   </span>
-                  <div><strong>{{ item.title }}</strong><span>{{ item.detail }}</span></div>
-                  <time>{{ formatRelative(item.createdAt) }}</time>
+                  <div class="activity-copy">
+                    <strong>{{ item.title }}</strong>
+                    <span>{{ item.detail }}</span>
+                    <div v-if="item.status === 'running'" class="activity-progress-row">
+                      <div class="activity-progress-track">
+                        <i :style="{ width: `${activityProgress(item)}%` }"></i>
+                      </div>
+                      <small>{{ item.stage || "执行中" }} · {{ activityProgress(item) }}%</small>
+                    </div>
+                  </div>
+                  <time>{{ formatRelative(item.updatedAt || item.createdAt) }}</time>
                 </div>
                 <div v-if="logs.activities.length === 0" class="log-empty">暂时没有操作记录</div>
               </div>
@@ -1772,8 +1859,13 @@ function gameAccent(id: string) {
           <p v-if="confirmAction.action === 'update'">
             面板会先通知在线玩家、保存世界并安全停止服务器，然后执行 SteamCMD 更新和健康检查。
           </p>
-          <p v-else-if="confirmAction.action === 'restart'">
-            面板会先保存世界并安全停止进程，再重新启动服务器。
+          <p v-else-if="usesUnsafeFallback(confirmAction.game, confirmAction.action)">
+            面板仍会先尝试通过 REST API 保存并安全关闭；如果失败，将只终止当前识别到的
+            Palworld 进程。最近未自动保存的游戏进度可能丢失。
+          </p>
+          <p v-else-if="actionAllowsUnsafeFallback(confirmAction.action)">
+            面板会先通过 REST API 保存世界并安全关闭；如果执行期间 REST API 失效，
+            本次确认允许面板只终止当前识别到的 Palworld 进程，最近未自动保存的进度可能丢失。
           </p>
           <p v-else>
             操作会进入该游戏的串行任务队列，并在活动记录中保留结果。
@@ -1789,11 +1881,24 @@ function gameAccent(id: string) {
             <Users :size="17" />
             当前有 {{ confirmAction.game.playersOnline }} 名玩家在线
           </div>
+          <div
+            v-if="usesUnsafeFallback(confirmAction.game, confirmAction.action)"
+            class="modal-warning danger"
+          >
+            <AlertTriangle :size="17" />
+            REST API 当前不可用；已明确确认后才会启用强制停止回退
+          </div>
           <div class="modal-actions">
             <button class="button secondary" :disabled="actionBusy" @click="confirmAction = null">取消</button>
             <button class="button primary" :disabled="actionBusy" @click="executeAction">
               <LoaderCircle v-if="actionBusy" class="spin" :size="16" />
-              {{ actionBusy ? "正在提交…" : `确认${actionLabel(confirmAction.action)}` }}
+              {{
+                actionBusy
+                  ? "正在提交…"
+                  : usesUnsafeFallback(confirmAction.game, confirmAction.action)
+                    ? `确认强制${actionLabel(confirmAction.action)}`
+                    : `确认${actionLabel(confirmAction.action)}`
+              }}
             </button>
           </div>
         </section>

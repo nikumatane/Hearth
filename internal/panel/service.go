@@ -19,7 +19,7 @@ var (
 type Service interface {
 	Overview() Overview
 	Game(id string) (Game, error)
-	RunAction(id, action string) (Activity, error)
+	RunAction(id string, request ActionRequest) (Activity, error)
 	PalworldSettings() (PalworldSettings, error)
 	UpdatePalworldSettings(patch PalworldSettingsPatch) (PalworldSettings, error)
 	WorldOption() (WorldOptionDocument, error)
@@ -61,9 +61,9 @@ func NewDemoService() *DemoService {
 			},
 		},
 		activities: []Activity{
-			{ID: "a-1", GameID: "palworld", Title: "自动备份完成", Detail: "世界存档与服务器配置已归档", Status: "success", CreatedAt: backup},
-			{ID: "a-2", GameID: "dont-starve-together", Title: "服务器已停止", Detail: "由管理员执行", Status: "neutral", CreatedAt: now.Add(-8 * time.Hour)},
-			{ID: "a-3", GameID: "palworld", Title: "检测到新版本", Detail: "1.0.2.77142 可更新", Status: "warning", CreatedAt: now.Add(-26 * time.Minute)},
+			{ID: "a-1", GameID: "palworld", Title: "自动备份完成", Detail: "世界存档与服务器配置已归档", Status: "success", Stage: "完成", Progress: 100, CreatedAt: backup, UpdatedAt: backup},
+			{ID: "a-2", GameID: "dont-starve-together", Title: "服务器已停止", Detail: "由管理员执行", Status: "neutral", Stage: "完成", Progress: 100, CreatedAt: now.Add(-8 * time.Hour), UpdatedAt: now.Add(-8 * time.Hour)},
+			{ID: "a-3", GameID: "palworld", Title: "检测到新版本", Detail: "1.0.2.77142 可更新", Status: "warning", Stage: "完成", Progress: 100, CreatedAt: now.Add(-26 * time.Minute), UpdatedAt: now.Add(-26 * time.Minute)},
 		},
 		settings: demoPalworldSettings(now),
 	}
@@ -101,9 +101,13 @@ func (s *DemoService) Game(id string) (Game, error) {
 	return Game{}, ErrNotFound
 }
 
-func (s *DemoService) RunAction(id, action string) (Activity, error) {
+func (s *DemoService) RunAction(id string, request ActionRequest) (Activity, error) {
+	action := request.Action
 	if action != "start" && action != "stop" && action != "restart" && action != "update" && action != "backup" {
 		return Activity{}, ErrBadAction
+	}
+	if request.AllowUnsafe && action != "stop" && action != "restart" {
+		return Activity{}, fmt.Errorf("%w: 强制回退确认仅适用于停止和重启", ErrInvalid)
 	}
 
 	s.mu.Lock()
@@ -117,10 +121,11 @@ func (s *DemoService) RunAction(id, action string) (Activity, error) {
 		return Activity{}, ErrBusy
 	}
 	s.busy[id] = true
+	now := time.Now()
 	activity := Activity{
 		ID: fmt.Sprintf("a-%d", time.Now().UnixNano()), GameID: id,
-		Title: actionTitle(action), Detail: "任务已进入安全执行队列",
-		Status: "running", CreatedAt: time.Now(),
+		Action: action, Title: actionTitle(action), Detail: "任务已进入执行队列",
+		Status: "running", Stage: "排队", Progress: 5, CreatedAt: now, UpdatedAt: now,
 	}
 	s.activities = append([]Activity{activity}, s.activities...)
 	if len(s.activities) > 12 {
@@ -158,10 +163,11 @@ func (s *DemoService) UpdatePalworldSettings(patch PalworldSettingsPatch) (Palwo
 	s.settings.Version = "1.0"
 	s.settings.Revision = fmt.Sprintf("demo-%d", time.Now().UnixNano())
 	s.settings.LastModified = time.Now()
+	now := time.Now()
 	s.activities = append([]Activity{{
 		ID: fmt.Sprintf("a-%d", time.Now().UnixNano()), GameID: "palworld",
 		Title: "INI 配置已保存", Detail: "演示模式未写入服务器文件",
-		Status: "success", CreatedAt: time.Now(),
+		Status: "success", Stage: "完成", Progress: 100, CreatedAt: now, UpdatedAt: now,
 	}}, s.activities...)
 	return cloneSettings(s.settings), nil
 }
@@ -175,7 +181,20 @@ func (s *DemoService) UpdateWorldOption(WorldOptionDocument) (WorldOptionDocumen
 }
 
 func (s *DemoService) completeAction(id, action, activityID string) {
-	time.Sleep(1400 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
+	s.mu.Lock()
+	for i := range s.activities {
+		if s.activities[i].ID == activityID {
+			s.activities[i].Stage = "执行中"
+			s.activities[i].Progress = 55
+			s.activities[i].Detail = "演示任务正在执行"
+			s.activities[i].UpdatedAt = time.Now()
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	time.Sleep(900 * time.Millisecond)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -201,7 +220,10 @@ func (s *DemoService) completeAction(id, action, activityID string) {
 	for i := range s.activities {
 		if s.activities[i].ID == activityID {
 			s.activities[i].Status = "success"
+			s.activities[i].Stage = "完成"
+			s.activities[i].Progress = 100
 			s.activities[i].Detail = "演示任务执行完成"
+			s.activities[i].UpdatedAt = time.Now()
 			break
 		}
 	}

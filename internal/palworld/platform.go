@@ -23,4 +23,5 @@ type hostSample struct {
 type platformAdapter interface {
 	sample(processName, diskPath string) (processSample, hostSample, error)
 	startDetached(executable, workingDirectory string, arguments []string, logPath string) error
+	terminate(processID uint32, startedAt time.Time) error
 }
