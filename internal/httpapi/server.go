@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,11 +26,15 @@ import (
 )
 
 type server struct {
-	config   config.Config
-	service  panel.Service
-	sessions *sessionStore
-	logins   *loginGate
-	access   *accessStore
+	config       config.Config
+	service      panel.Service
+	sessions     *sessionStore
+	logins       *loginGate
+	access       *accessStore
+	configAudits *configAuditStore
+	proxy        *proxyResolver
+	devices      *deviceCookieManager
+	ipRules      *ipRuleStore
 }
 
 func New(cfg config.Config, service panel.Service) (http.Handler, error) {
@@ -36,12 +42,32 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	configAudits, err := newConfigAuditStore(cfg.ConfigAuditFile)
+	if err != nil {
+		return nil, err
+	}
+	proxy, err := newProxyResolver(cfg.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, err
+	}
+	devices, err := newDeviceCookieManager(cfg.DeviceKeyFile)
+	if err != nil {
+		return nil, err
+	}
+	ipRules, err := newIPRuleStore(cfg.IPRulesFile)
+	if err != nil {
+		return nil, err
+	}
 	s := &server{
-		config:   cfg,
-		service:  service,
-		sessions: newSessionStore(),
-		logins:   newLoginGate(10, time.Minute),
-		access:   access,
+		config:       cfg,
+		service:      service,
+		sessions:     newSessionStore(),
+		logins:       newLoginGate(),
+		access:       access,
+		configAudits: configAudits,
+		proxy:        proxy,
+		devices:      devices,
+		ipRules:      ipRules,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
@@ -53,19 +79,19 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 	mux.HandleFunc("POST /api/v1/games/{id}/actions", s.auth(s.gameAction))
 	mux.HandleFunc(
 		"GET /api/v1/games/palworld/settings",
-		s.permitted(permissionPalworldSettings, s.palworldSettings),
+		s.permitted(permissionPalworldGameplay, s.palworldSettings),
 	)
 	mux.HandleFunc(
 		"PATCH /api/v1/games/palworld/settings",
-		s.permitted(permissionPalworldSettings, s.updatePalworldSettings),
+		s.permitted(permissionPalworldGameplay, s.updatePalworldSettings),
 	)
 	mux.HandleFunc(
 		"GET /api/v1/games/palworld/world-option",
-		s.permitted(permissionPalworldSettings, s.worldOption),
+		s.admin(s.worldOption),
 	)
 	mux.HandleFunc(
 		"PUT /api/v1/games/palworld/world-option",
-		s.permitted(permissionPalworldSettings, s.updateWorldOption),
+		s.admin(s.updateWorldOption),
 	)
 	mux.HandleFunc("GET /api/v1/logs", s.admin(s.logs))
 	mux.HandleFunc("GET /api/v1/access/members", s.admin(s.members))
@@ -73,6 +99,10 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 	mux.HandleFunc("PATCH /api/v1/access/members/{id}", s.admin(s.updateMember))
 	mux.HandleFunc("DELETE /api/v1/access/members/{id}", s.admin(s.deleteMember))
 	mux.HandleFunc("GET /api/v1/access/audit", s.admin(s.loginAudit))
+	mux.HandleFunc("GET /api/v1/access/config-audit", s.admin(s.configAudit))
+	mux.HandleFunc("GET /api/v1/access/ip-rules", s.admin(s.listIPRules))
+	mux.HandleFunc("POST /api/v1/access/ip-rules", s.admin(s.createIPRule))
+	mux.HandleFunc("DELETE /api/v1/access/ip-rules/{id}", s.admin(s.deleteIPRule))
 	mux.Handle("/", spaHandler())
 	return securityHeaders(mux), nil
 }
@@ -84,14 +114,45 @@ func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
-	ip := requestIP(r)
+	ip := s.proxy.clientIP(r)
 	now := time.Now()
-	if allowed, retryAfter := s.logins.allow(time.Now()); !allowed {
-		s.access.recordAudit(auditEntry{
-			ID: newAuditID(), IP: ip, CredentialID: "RATE-LIMITED",
-			Success: false, Reason: "登录尝试过多", CreatedAt: now,
-		})
-		w.Header().Set("Retry-After", retryAfterHeader(retryAfter))
+	rule, hasRule, shouldAuditRule := s.ipRules.match(ip, now)
+	if hasRule && rule.Kind == ipRuleDeny {
+		if shouldAuditRule {
+			s.access.recordAudit(auditEntry{
+				ID: newAuditID(), IP: ip, CredentialID: "BLOCKED",
+				Success: false, Event: "attack_blocked", Severity: "critical",
+				Reason: "疑似攻击：命中 IP 黑名单", RuleID: rule.ID,
+				RuleKind: rule.Kind, CreatedAt: now,
+			})
+		}
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "登录尝试过多，请稍后再试")
+		return
+	}
+	device, knownDevice := s.devices.read(r, now)
+	trustedLane := knownDevice || (hasRule && rule.Kind == ipRuleAllow)
+	gateKey := "ip:" + ip
+	if knownDevice {
+		gateKey = "device:" + device.ID
+	} else if trustedLane {
+		gateKey = "allow:" + ip
+	}
+	decision, admission := s.logins.begin(gateKey, trustedLane, now)
+	if !decision.Allowed {
+		if decision.ShouldAudit {
+			reason := decision.Reason
+			if decision.Severity != "" {
+				reason = "疑似攻击：" + reason
+			}
+			s.access.recordAudit(auditEntry{
+				ID: newAuditID(), IP: ip, CredentialID: "RATE-LIMITED",
+				Success: false, Event: "attack_limited", Reason: reason,
+				Severity: decision.Severity, AttemptCount: decision.AttemptCount,
+				KnownDevice: knownDevice, CreatedAt: now,
+			})
+		}
+		w.Header().Set("Retry-After", retryAfterHeader(decision.RetryAfter))
 		writeError(w, http.StatusTooManyRequests, "登录尝试过多，请稍后再试")
 		return
 	}
@@ -99,26 +160,28 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := decodeJSON(r, &request); err != nil {
+		admission.cancel()
 		s.access.recordAudit(auditEntry{
 			ID: newAuditID(), IP: ip, CredentialID: "INVALID-REQUEST",
-			Success: false, Reason: "请求格式不正确", CreatedAt: now,
+			Success: false, Event: "login", Reason: "请求格式不正确",
+			KnownDevice: knownDevice, CreatedAt: now,
 		})
 		writeError(w, http.StatusBadRequest, "请求格式不正确")
 		return
 	}
 	identity, authenticated := s.access.authenticate(request.Password)
 	request.Password = ""
+	assessment := admission.finish(authenticated, time.Now())
 	if !authenticated {
-		s.logins.recordFailure(time.Now())
 		s.access.recordAudit(auditEntry{
 			ID: newAuditID(), IP: ip, CredentialID: "UNMATCHED",
-			Success: false, Reason: "密码不匹配", CreatedAt: now,
+			Success: false, Event: "login", Reason: assessment.Reason,
+			Severity: assessment.Severity, AttemptCount: assessment.Failures,
+			KnownDevice: knownDevice, CreatedAt: now,
 		})
-		time.Sleep(250 * time.Millisecond)
 		writeError(w, http.StatusUnauthorized, "密码不正确")
 		return
 	}
-	s.logins.reset()
 	token, err := s.sessions.create(identity)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "无法创建会话")
@@ -126,12 +189,25 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	s.access.recordAudit(auditEntry{
 		ID: newAuditID(), IP: ip, CredentialID: identity.CredentialID,
-		Role: identity.Role, Success: true, CreatedAt: now,
+		Role: identity.Role, Success: true, Event: "login",
+		KnownDevice: knownDevice, CreatedAt: now,
 	})
+	secure := s.secureCookie(r)
 	http.SetCookie(w, &http.Cookie{
 		Name: "hearth_session", Value: token, Path: "/", HttpOnly: true,
-		Secure: s.secureCookie(r), SameSite: http.SameSiteStrictMode,
+		Secure: secure, SameSite: http.SameSiteStrictMode,
 	})
+	var deviceCookie *http.Cookie
+	if !knownDevice {
+		deviceCookie, _, err = s.devices.newCookie(now, secure)
+	} else if now.Sub(device.IssuedAt) >= deviceCookieRefreshAge {
+		deviceCookie, err = s.devices.refreshCookie(device, now, secure)
+	}
+	if err != nil {
+		slog.Warn("issue known-device cookie", "error", err)
+	} else if deviceCookie != nil {
+		http.SetCookie(w, deviceCookie)
+	}
 	name := "管理员"
 	if identity.Role == roleMember {
 		name = "成员 " + identity.CredentialID
@@ -189,7 +265,7 @@ func permittedActivities(identity principal, activities []panel.Activity) []pane
 	visible := make([]panel.Activity, 0, len(activities))
 	for _, activity := range activities {
 		permission, ok := permissionForAction(activity.Action)
-		if ok && hasPermission(identity, permission) {
+		if activity.Status == "running" && ok && hasPermission(identity, permission) {
 			visible = append(visible, activity)
 		}
 	}
@@ -233,7 +309,7 @@ func permissionForAction(action string) (string, bool) {
 	switch action {
 	case "start", "stop", "restart":
 		return permissionGameControl, true
-	case "update":
+	case "update", "check-update":
 		return permissionGameUpdate, true
 	case "backup":
 		return permissionGameBackup, true
@@ -242,11 +318,14 @@ func permissionForAction(action string) (string, bool) {
 	}
 }
 
-func (s *server) palworldSettings(w http.ResponseWriter, _ *http.Request) {
+func (s *server) palworldSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.service.PalworldSettings()
 	if err != nil {
 		writeServiceError(w, err)
 		return
+	}
+	if identity, ok := principalFromContext(r.Context()); ok && identity.Role == roleMember {
+		settings = memberPalworldSettings(settings)
 	}
 	writeJSON(w, http.StatusOK, settings)
 }
@@ -257,12 +336,95 @@ func (s *server) updatePalworldSettings(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "配置增量格式不正确")
 		return
 	}
+	before, err := s.service.PalworldSettings()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	identity, _ := principalFromContext(r.Context())
+	if identity.Role == roleMember {
+		if key, ok := firstDisallowedMemberSetting(before, patch); ok {
+			writeError(w, http.StatusForbidden, "成员不能修改系统或高风险参数："+key)
+			return
+		}
+		if err := validateMemberSettingValues(patch); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	updated, err := s.service.UpdatePalworldSettings(patch)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
+	if entry, ok := buildConfigAuditEntry(before, updated, patch, identity, s.proxy.clientIP(r)); ok {
+		recordConfigAudit(s.configAudits, entry)
+	}
+	if identity.Role == roleMember {
+		updated = memberPalworldSettings(updated)
+	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+func memberPalworldSettings(document panel.PalworldSettings) panel.PalworldSettings {
+	document.Raw = ""
+	groups := make([]panel.SettingGroup, 0, len(document.Groups))
+	for _, group := range document.Groups {
+		settings := make([]panel.Setting, 0, len(group.Settings))
+		for _, setting := range group.Settings {
+			if setting.MemberEditable && panel.IsMemberEditablePalworldSetting(setting.Key) {
+				settings = append(settings, setting)
+			}
+		}
+		if len(settings) == 0 {
+			continue
+		}
+		group.Settings = settings
+		groups = append(groups, group)
+	}
+	document.Groups = groups
+	return document
+}
+
+func firstDisallowedMemberSetting(
+	document panel.PalworldSettings,
+	patch panel.PalworldSettingsPatch,
+) (string, bool) {
+	available := settingsByKey(document)
+	keys := make([]string, 0, len(patch.Changes))
+	for key := range patch.Changes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		setting, ok := available[key]
+		if !ok || !setting.MemberEditable || !panel.IsMemberEditablePalworldSetting(key) {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func validateMemberSettingValues(patch panel.PalworldSettingsPatch) error {
+	for key, value := range patch.Changes {
+		text, ok := value.(string)
+		if !ok {
+			continue
+		}
+		limit := 0
+		switch key {
+		case "ServerName":
+			limit = 128
+		case "ServerDescription":
+			limit = 1024
+		case "DenyTechnologyList":
+			limit = 16 << 10
+		}
+		if limit > 0 && len([]rune(text)) > limit {
+			return fmt.Errorf("成员提交的参数 %s 超过长度限制", key)
+		}
+	}
+	return nil
 }
 
 func (s *server) worldOption(w http.ResponseWriter, _ *http.Request) {
@@ -408,8 +570,7 @@ func (s *server) secureCookie(r *http.Request) bool {
 	if s.config.SecureCookies || r.TLS != nil {
 		return true
 	}
-	proto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
-	return strings.EqualFold(proto, "https")
+	return s.proxy.forwardedProto(r) == "https"
 }
 
 func spaHandler() http.Handler {
@@ -461,12 +622,26 @@ func decodeJSON(r *http.Request, target any) error {
 }
 
 func decodeJSONLimit(r *http.Request, target any, limit int64) error {
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+	mediaType := strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])
+	if !strings.EqualFold(mediaType, "application/json") {
 		return errors.New("content type must be application/json")
 	}
-	decoder := json.NewDecoder(io.LimitReader(r.Body, limit))
+	data, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		return err
+	}
+	if int64(len(data)) > limit {
+		return errors.New("request body is too large")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("request body must contain exactly one JSON value")
+	}
+	return nil
 }
 
 func writeServiceError(w http.ResponseWriter, err error) {
@@ -496,6 +671,8 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
+const maxSessions = 1000
+
 type sessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]session
@@ -523,6 +700,16 @@ func (s *sessionStore) create(identity principal) (string, error) {
 		if item.ExpiresAt.Before(now) {
 			delete(s.sessions, key)
 		}
+	}
+	if len(s.sessions) >= maxSessions {
+		var oldestToken string
+		var oldestExpiry time.Time
+		for key, item := range s.sessions {
+			if oldestToken == "" || item.ExpiresAt.Before(oldestExpiry) {
+				oldestToken, oldestExpiry = key, item.ExpiresAt
+			}
+		}
+		delete(s.sessions, oldestToken)
 	}
 	s.sessions[token] = session{Principal: identity, ExpiresAt: now.Add(12 * time.Hour)}
 	return token, nil
@@ -553,62 +740,4 @@ func (s *sessionStore) deleteCredential(credentialID string) {
 			delete(s.sessions, token)
 		}
 	}
-}
-
-type loginGate struct {
-	mu          sync.Mutex
-	maxFailures int
-	window      time.Duration
-	windowStart time.Time
-	failures    int
-}
-
-func newLoginGate(maxFailures int, window time.Duration) *loginGate {
-	return &loginGate{maxFailures: maxFailures, window: window}
-}
-
-func (g *loginGate) allow(now time.Time) (bool, time.Duration) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.rollWindow(now)
-	if g.failures < g.maxFailures {
-		return true, 0
-	}
-	return false, maxDuration(time.Second, g.window-now.Sub(g.windowStart))
-}
-
-func (g *loginGate) recordFailure(now time.Time) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.rollWindow(now)
-	g.failures++
-}
-
-func (g *loginGate) reset() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.windowStart = time.Time{}
-	g.failures = 0
-}
-
-func (g *loginGate) rollWindow(now time.Time) {
-	if g.windowStart.IsZero() || now.Sub(g.windowStart) >= g.window {
-		g.windowStart = now
-		g.failures = 0
-	}
-}
-
-func retryAfterHeader(duration time.Duration) string {
-	seconds := int64(duration.Round(time.Second) / time.Second)
-	if seconds < 1 {
-		seconds = 1
-	}
-	return fmt.Sprintf("%d", seconds)
-}
-
-func maxDuration(left, right time.Duration) time.Duration {
-	if left > right {
-		return left
-	}
-	return right
 }

@@ -390,7 +390,9 @@ func buildSettingGroups(document iniDocument, defaults map[string]string) []pane
 			Type: definition.Type, Value: value, Default: defaultValue,
 			Min: definition.Min, Max: definition.Max, Step: definition.Step,
 			Options: definition.Options, Sensitive: definition.Sensitive,
-			Risk: definition.Risk, RestartRequired: true, Configured: configured,
+			Risk:            definition.Risk,
+			MemberEditable:  panel.IsMemberEditablePalworldSetting(option.Key),
+			RestartRequired: true, Configured: configured,
 		})
 	}
 
@@ -607,8 +609,9 @@ func encodeSettingValue(value any, definition settingDefinition) (string, error)
 			return "", errors.New("line breaks are not allowed")
 		}
 		if definition.RawText {
-			if strings.Contains(text, ",") && !strings.HasPrefix(strings.TrimSpace(text), "(") {
-				return "", errors.New("composite values containing commas must be wrapped in parentheses")
+			candidate, err := parseINI("OptionSettings=(Value=" + text + ")")
+			if err != nil || len(candidate.Options) != 1 || candidate.Options[0].Key != "Value" {
+				return "", errors.New("composite value must be one balanced INI value")
 			}
 			return text, nil
 		}

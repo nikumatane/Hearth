@@ -5,25 +5,29 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
 type GameConfig struct {
-	Enabled             bool     `json:"enabled"`
-	ServiceUnit         string   `json:"serviceUnit,omitempty"`
-	InstallDir          string   `json:"installDir"`
-	SteamCmd            string   `json:"steamCmd"`
-	SettingsFile        string   `json:"settingsFile,omitempty"`
-	DefaultSettingsFile string   `json:"defaultSettingsFile,omitempty"`
-	Executable          string   `json:"executable,omitempty"`
-	ProcessName         string   `json:"processName,omitempty"`
-	StartArgs           []string `json:"startArgs,omitempty"`
-	BackupDir           string   `json:"backupDir,omitempty"`
-	RESTURL             string   `json:"restUrl,omitempty"`
-	RESTUsername        string   `json:"restUsername,omitempty"`
-	ShutdownWaitSeconds int      `json:"shutdownWaitSeconds,omitempty"`
-	Port                int      `json:"port,omitempty"`
-	ClusterDir          string   `json:"clusterDir,omitempty"`
+	Enabled                   bool     `json:"enabled"`
+	ServiceUnit               string   `json:"serviceUnit,omitempty"`
+	InstallDir                string   `json:"installDir"`
+	SteamCmd                  string   `json:"steamCmd"`
+	SettingsFile              string   `json:"settingsFile,omitempty"`
+	DefaultSettingsFile       string   `json:"defaultSettingsFile,omitempty"`
+	Executable                string   `json:"executable,omitempty"`
+	ProcessName               string   `json:"processName,omitempty"`
+	StartArgs                 []string `json:"startArgs,omitempty"`
+	BackupDir                 string   `json:"backupDir,omitempty"`
+	BackupRetentionDays       int      `json:"backupRetentionDays,omitempty"`
+	BackupMaxTotalGB          int64    `json:"backupMaxTotalGB,omitempty"`
+	RESTURL                   string   `json:"restUrl,omitempty"`
+	RESTUsername              string   `json:"restUsername,omitempty"`
+	ShutdownWaitSeconds       int      `json:"shutdownWaitSeconds,omitempty"`
+	SteamCmdNoProgressMinutes int      `json:"steamCmdNoProgressMinutes,omitempty"`
+	Port                      int      `json:"port,omitempty"`
+	ClusterDir                string   `json:"clusterDir,omitempty"`
 }
 
 type GamesConfig struct {
@@ -32,15 +36,19 @@ type GamesConfig struct {
 }
 
 type Config struct {
-	Listen        string      `json:"listen"`
-	Demo          bool        `json:"demo"`
-	SecureCookies bool        `json:"secureCookies"`
-	LogFile       string      `json:"-"`
-	AdminPassword string      `json:"-"`
-	PasswordFile  string      `json:"adminPasswordFile,omitempty"`
-	AccessFile    string      `json:"accessFile,omitempty"`
-	AuditFile     string      `json:"auditFile,omitempty"`
-	Games         GamesConfig `json:"games"`
+	Listen            string      `json:"listen"`
+	Demo              bool        `json:"demo"`
+	SecureCookies     bool        `json:"secureCookies"`
+	LogFile           string      `json:"-"`
+	AdminPassword     string      `json:"-"`
+	PasswordFile      string      `json:"adminPasswordFile,omitempty"`
+	AccessFile        string      `json:"accessFile,omitempty"`
+	AuditFile         string      `json:"auditFile,omitempty"`
+	ConfigAuditFile   string      `json:"configAuditFile,omitempty"`
+	IPRulesFile       string      `json:"ipRulesFile,omitempty"`
+	DeviceKeyFile     string      `json:"deviceKeyFile,omitempty"`
+	TrustedProxyCIDRs []string    `json:"trustedProxyCidrs,omitempty"`
+	Games             GamesConfig `json:"games"`
 }
 
 func Load(path string) (Config, error) {
@@ -84,6 +92,18 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.AdminPassword == "" {
 		return Config{}, errors.New("Hearth admin password is required through HEARTH_ADMIN_PASSWORD or adminPasswordFile")
+	}
+	if cfg.ConfigAuditFile == "" && cfg.AuditFile != "" {
+		cfg.ConfigAuditFile = filepath.Join(filepath.Dir(cfg.AuditFile), "config-audit.jsonl")
+	}
+	if cfg.IPRulesFile == "" && cfg.AuditFile != "" {
+		cfg.IPRulesFile = filepath.Join(filepath.Dir(cfg.AuditFile), "ip-rules.json")
+	}
+	if cfg.DeviceKeyFile == "" && cfg.AuditFile != "" {
+		cfg.DeviceKeyFile = filepath.Join(filepath.Dir(cfg.AuditFile), "device-cookie.key")
+	}
+	if cfg.TrustedProxyCIDRs == nil {
+		cfg.TrustedProxyCIDRs = []string{"127.0.0.0/8", "::1/128"}
 	}
 	return cfg, nil
 }

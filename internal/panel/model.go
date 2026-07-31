@@ -28,6 +28,7 @@ type Game struct {
 	Version          string        `json:"version"`
 	AvailableVersion string        `json:"availableVersion,omitempty"`
 	UpdateAvailable  bool          `json:"updateAvailable"`
+	VersionCheck     string        `json:"versionCheck,omitempty"`
 	PlayersOnline    int           `json:"playersOnline"`
 	PlayersMax       int           `json:"playersMax"`
 	PlayersAvailable bool          `json:"playersAvailable"`
@@ -89,8 +90,35 @@ type Setting struct {
 	Options         []SettingOption `json:"options,omitempty"`
 	Sensitive       bool            `json:"sensitive,omitempty"`
 	Risk            string          `json:"risk,omitempty"`
+	MemberEditable  bool            `json:"memberEditable,omitempty"`
 	RestartRequired bool            `json:"restartRequired"`
 	Configured      bool            `json:"configured"`
+}
+
+var memberEditablePalworldSettings = map[string]struct{}{
+	"ServerName":         {},
+	"ServerDescription":  {},
+	"ServerPlayerMaxNum": {},
+	"DayTimeSpeedRate":   {},
+	"NightTimeSpeedRate": {},
+	"ExpRate":            {},
+	"PalCaptureRate":     {},
+	"CollectionDropRate": {},
+	"Difficulty":         {},
+	"DeathPenalty":       {},
+	"RandomizerType":     {},
+	"bEnableVoiceChat":   {},
+	"bEnableFastTravel":  {},
+	"bShowPlayerList":    {},
+	"DenyTechnologyList": {},
+}
+
+// IsMemberEditablePalworldSetting is the server-side allowlist for gameplay
+// parameters that a member credential may change. Unknown, sensitive,
+// performance, storage, networking, and management parameters fail closed.
+func IsMemberEditablePalworldSetting(key string) bool {
+	_, ok := memberEditablePalworldSettings[key]
+	return ok
 }
 
 type SettingGroup struct {

@@ -37,8 +37,14 @@ func TestLoadFileAndEnvironmentOverride(t *testing.T) {
 	t.Setenv("HEARTH_ADMIN_PASSWORD", "secret")
 	t.Setenv("HEARTH_LISTEN", "127.0.0.1:9090")
 
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"listen":"0.0.0.0:8080","secureCookies":true}`), 0o600); err != nil {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "config.json")
+	auditPath := filepath.Join(directory, "login-audit.jsonl")
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"listen":"0.0.0.0:8080","secureCookies":true,"auditFile":`+strconv.Quote(auditPath)+`}`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -51,6 +57,20 @@ func TestLoadFileAndEnvironmentOverride(t *testing.T) {
 	}
 	if !cfg.SecureCookies {
 		t.Fatal("SecureCookies = false")
+	}
+	if cfg.ConfigAuditFile != filepath.Join(directory, "config-audit.jsonl") {
+		t.Fatalf("ConfigAuditFile = %q", cfg.ConfigAuditFile)
+	}
+	if cfg.IPRulesFile != filepath.Join(directory, "ip-rules.json") {
+		t.Fatalf("IPRulesFile = %q", cfg.IPRulesFile)
+	}
+	if cfg.DeviceKeyFile != filepath.Join(directory, "device-cookie.key") {
+		t.Fatalf("DeviceKeyFile = %q", cfg.DeviceKeyFile)
+	}
+	if len(cfg.TrustedProxyCIDRs) != 2 ||
+		cfg.TrustedProxyCIDRs[0] != "127.0.0.0/8" ||
+		cfg.TrustedProxyCIDRs[1] != "::1/128" {
+		t.Fatalf("TrustedProxyCIDRs = %#v", cfg.TrustedProxyCIDRs)
 	}
 }
 

@@ -2,8 +2,11 @@ package palworld
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -60,6 +63,111 @@ func TestActionAllowsUnsafeFallbackOnlyForStopAndRestart(t *testing.T) {
 		if got := actionAllowsUnsafeFallback(test.action); got != test.want {
 			t.Errorf("actionAllowsUnsafeFallback(%q) = %v, want %v", test.action, got, test.want)
 		}
+	}
+}
+
+func TestApplyDefaultsSetsRetentionAndSteamTimeout(t *testing.T) {
+	gameConfig := config.GameConfig{InstallDir: t.TempDir()}
+	applyDefaults(&gameConfig)
+
+	if gameConfig.BackupRetentionDays != 30 {
+		t.Fatalf("BackupRetentionDays = %d", gameConfig.BackupRetentionDays)
+	}
+	if gameConfig.BackupMaxTotalGB != 20 {
+		t.Fatalf("BackupMaxTotalGB = %d", gameConfig.BackupMaxTotalGB)
+	}
+	if gameConfig.SteamCmdNoProgressMinutes != 30 {
+		t.Fatalf("SteamCmdNoProgressMinutes = %d", gameConfig.SteamCmdNoProgressMinutes)
+	}
+}
+
+func TestValidateConfigRejectsRetentionValuesThatOverflowDurations(t *testing.T) {
+	directory := t.TempDir()
+	gameConfig := config.GameConfig{
+		InstallDir:                directory,
+		SteamCmd:                  filepath.Join(directory, "steamcmd.exe"),
+		SettingsFile:              filepath.Join(directory, "settings.ini"),
+		Executable:                filepath.Join(directory, "PalServer.exe"),
+		ProcessName:               "PalServer.exe",
+		BackupRetentionDays:       maxBackupRetentionDays + 1,
+		BackupMaxTotalGB:          20,
+		SteamCmdNoProgressMinutes: 30,
+	}
+	err := validateConfig(gameConfig)
+	if !errors.Is(err, panel.ErrInvalid) || !strings.Contains(err.Error(), "backupRetentionDays") {
+		t.Fatalf("validateConfig() error = %v", err)
+	}
+}
+
+func TestRunSteamCMDRetriesOnceAfterCleanSelfUpdateExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX shell script")
+	}
+	directory := t.TempDir()
+	counterPath := filepath.Join(directory, "attempts")
+	scriptPath := filepath.Join(directory, "steamcmd")
+	script := fmt.Sprintf(`#!/bin/sh
+count=0
+if [ -f %q ]; then count=$(cat %q); fi
+count=$((count + 1))
+printf "%%s" "$count" > %q
+if [ "$count" -eq 1 ]; then
+  echo "[----] Update complete, launching..."
+  exit 0
+fi
+echo "Success! App '2394010' fully installed."
+`, counterPath, counterPath, counterPath)
+	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(directory, "steamcmd.log")
+	service := &Service{config: config.GameConfig{
+		SteamCmd:                  scriptPath,
+		InstallDir:                directory,
+		SteamCmdNoProgressMinutes: 1,
+	}}
+
+	if err := service.runSteamCMD(logPath, func(string, int, string) {}); err != nil {
+		t.Fatalf("runSteamCMD() error = %v", err)
+	}
+	attempts, err := os.ReadFile(counterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(attempts) != "2" {
+		t.Fatalf("attempts = %q", attempts)
+	}
+}
+
+func TestRunSteamCMDAttemptStopsAfterNoLogProgress(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX shell script")
+	}
+	directory := t.TempDir()
+	scriptPath := filepath.Join(directory, "steamcmd")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nsleep 10\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(directory, "steamcmd.log")
+	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logFile.Close()
+	service := &Service{config: config.GameConfig{SteamCmd: scriptPath, InstallDir: directory}}
+
+	started := time.Now()
+	err = service.runSteamCMDAttempt(
+		logFile,
+		logPath,
+		150*time.Millisecond,
+		func(string, int, string) {},
+	)
+	if err == nil || !strings.Contains(err.Error(), "no log progress") {
+		t.Fatalf("runSteamCMDAttempt() error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("no-progress termination took %v", elapsed)
 	}
 }
 

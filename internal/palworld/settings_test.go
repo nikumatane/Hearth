@@ -49,6 +49,23 @@ func TestReadSettingsRedactsSecretsAndIncludesUnknownOptions(t *testing.T) {
 	if settingByKey(settings, "FutureOption") == nil {
 		t.Fatal("future option was not exposed through the dynamic 1.0 group")
 	}
+	for _, test := range []struct {
+		key  string
+		want bool
+	}{
+		{key: "ServerName", want: true},
+		{key: "ExpRate", want: true},
+		{key: "DenyTechnologyList", want: true},
+		{key: "AdminPassword", want: false},
+		{key: "RESTAPIEnabled", want: false},
+		{key: "CrossplayPlatforms", want: false},
+		{key: "FutureOption", want: false},
+	} {
+		setting := settingByKey(settings, test.key)
+		if setting == nil || setting.MemberEditable != test.want {
+			t.Fatalf("%s memberEditable = %#v; want %v", test.key, setting, test.want)
+		}
+	}
 }
 
 func TestReadSettingsDoesNotMaskEmptyPasswords(t *testing.T) {
@@ -132,6 +149,36 @@ func TestPatchSettingsRejectsStaleRevisionAndMaskedPassword(t *testing.T) {
 	}
 	if string(raw) != testSettings {
 		t.Fatal("settings changed after rejected patches")
+	}
+}
+
+func TestPatchSettingsRejectsRawTextOptionInjection(t *testing.T) {
+	path := writeTestSettings(t, testSettings)
+	settings, err := readPalworldSettings(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = patchPalworldSettings(path, "", panel.PalworldSettingsPatch{
+		Revision: settings.Revision,
+		Changes: map[string]any{
+			"DenyTechnologyList": `("PALBOX"),InjectedSystemOption=True`,
+		},
+	})
+	if !errors.Is(err, panel.ErrInvalid) {
+		t.Fatalf("raw option injection error = %v", err)
+	}
+	raw, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(raw), "InjectedSystemOption") {
+		t.Fatalf("raw option injection changed settings: %s", raw)
+	}
+	if _, err := patchPalworldSettings(path, "", panel.PalworldSettingsPatch{
+		Revision: settings.Revision,
+		Changes:  map[string]any{"DenyTechnologyList": `("RepairBench")`},
+	}); err != nil {
+		t.Fatalf("valid composite value was rejected: %v", err)
 	}
 }
 

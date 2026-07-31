@@ -42,7 +42,10 @@ import {
 import {
   api,
   isUnauthorized,
+  type ConfigAuditChange,
+  type ConfigAuditEntry,
   type Game,
+  type IPRule,
   type LoginAuditEntry,
   type Logs,
   type MemberCredential,
@@ -73,7 +76,11 @@ const permissionDefinitions: Array<{
   { id: "game.control", label: "控制运行状态", description: "启动、停止和重启游戏服务器" },
   { id: "game.update", label: "更新服务端", description: "执行 SteamCMD 更新流程" },
   { id: "game.backup", label: "创建存档备份", description: "手动创建游戏存档备份" },
-  { id: "palworld.settings", label: "修改帕鲁配置", description: "查看并保存两个帕鲁配置来源" }
+  {
+    id: "palworld.settings.gameplay",
+    label: "修改帕鲁玩法参数",
+    description: "仅可查看和保存开放的日常玩法参数；系统与安全设置仍由管理员管理"
+  }
 ];
 
 const permissionPresets: Array<{
@@ -99,6 +106,7 @@ const loading = ref(false);
 const loadError = ref("");
 const confirmAction = ref<{ game: Game; action: ActionName } | null>(null);
 const actionBusy = ref(false);
+const versionCheckSubmitting = ref(false);
 const toast = ref<{ type: "success" | "error"; message: string } | null>(null);
 const worldSettings = ref<PalworldSettings | null>(null);
 const iniSettings = ref<PalworldSettings | null>(null);
@@ -128,16 +136,28 @@ const credentialId = ref("");
 const currentPermissions = ref<Permission[]>([]);
 const members = ref<MemberCredential[]>([]);
 const auditEntries = ref<LoginAuditEntry[]>([]);
+const configAuditEntries = ref<ConfigAuditEntry[]>([]);
+const ipRules = ref<IPRule[]>([]);
 const accessLoading = ref(false);
-const accessTab = ref<"members" | "audit">("members");
+const accessTab = ref<"members" | "audit" | "config-audit" | "ip-rules">("members");
+const auditMenuEntryId = ref("");
+const newRuleIP = ref("");
+const newRuleKind = ref<IPRule["kind"]>("deny");
+const newRuleHours = ref(24);
+const newRulePermanent = ref(false);
+const newRuleNote = ref("");
+const savingIPRule = ref(false);
+const deletingIPRuleId = ref("");
 const newMemberPassword = ref("");
 const newMemberPermissions = ref<Permission[]>([]);
 const editingMemberId = ref("");
 const editingMemberPassword = ref("");
 const editingMemberPermissions = ref<Permission[]>([]);
 const deletingMemberId = ref("");
+const currentTime = ref(new Date());
 let pollTimer: number | undefined;
 let toastTimer: number | undefined;
+let clockTimer: number | undefined;
 let refreshInFlight = false;
 
 const selectedGame = computed(() =>
@@ -191,8 +211,17 @@ const todayLabel = computed(() =>
     month: "long",
     day: "numeric",
     weekday: "long"
-  }).format(new Date())
+  }).format(currentTime.value)
 );
+
+const greetingLabel = computed(() => {
+  const hour = currentTime.value.getHours();
+  if (hour < 6) return "晚上好";
+  if (hour < 9) return "早上好";
+  if (hour < 12) return "上午好";
+  if (hour < 18) return "下午好";
+  return "晚上好";
+});
 
 const nodeHealthScore = computed(() => {
   if (!overview.value) return 0;
@@ -244,9 +273,12 @@ const selectedLog = computed(() =>
 );
 
 const isAdmin = computed(() => currentRole.value === "admin");
-const canManageSettings = computed(() => hasPermission("palworld.settings"));
+const canManageSettings = computed(() => hasPermission("palworld.settings.gameplay"));
 
 onMounted(async () => {
+  clockTimer = window.setInterval(() => {
+    currentTime.value = new Date();
+  }, 60_000);
   try {
     const session = await api.session();
     buildVersion.value = session.version || "未知";
@@ -265,6 +297,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (pollTimer) window.clearTimeout(pollTimer);
   if (toastTimer) window.clearTimeout(toastTimer);
+  if (clockTimer) window.clearInterval(clockTimer);
 });
 
 async function login() {
@@ -297,6 +330,8 @@ async function logout() {
   currentPermissions.value = [];
   members.value = [];
   auditEntries.value = [];
+  configAuditEntries.value = [];
+  ipRules.value = [];
   if (pollTimer) window.clearTimeout(pollTimer);
   pollTimer = undefined;
 }
@@ -351,7 +386,7 @@ async function refresh(silent = false) {
 
 function navigate(next: Page, gameId?: string) {
   if (next === "settings" && !canManageSettings.value) {
-    showToast("error", "当前成员密码没有修改帕鲁配置的权限");
+    showToast("error", "当前成员密码没有修改帕鲁玩法参数的权限");
     return;
   }
   if (!isAdmin.value && (next === "logs" || next === "access")) {
@@ -387,12 +422,16 @@ async function loadAccess() {
   if (!isAdmin.value) return;
   accessLoading.value = true;
   try {
-    const [memberResult, auditResult] = await Promise.all([
+    const [memberResult, auditResult, configAuditResult, ipRuleResult] = await Promise.all([
       api.members(),
-      api.loginAudit()
+      api.loginAudit(),
+      api.configAudit(),
+      api.ipRules()
     ]);
     members.value = memberResult.members ?? [];
     auditEntries.value = auditResult.entries ?? [];
+    configAuditEntries.value = configAuditResult.entries ?? [];
+    ipRules.value = ipRuleResult.rules ?? [];
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "权限数据加载失败");
   } finally {
@@ -401,8 +440,8 @@ async function loadAccess() {
 }
 
 async function addMember() {
-  if (newMemberPassword.value.length < 10) {
-    showToast("error", "成员密码至少需要 10 个字符");
+  if (newMemberPassword.value.length < 14) {
+    showToast("error", "成员密码至少需要 14 个字符");
     return;
   }
   try {
@@ -427,8 +466,8 @@ function beginMemberEdit(member: MemberCredential) {
 }
 
 async function saveMember(member: MemberCredential) {
-  if (editingMemberPassword.value.length > 0 && editingMemberPassword.value.length < 10) {
-    showToast("error", "新密码留空表示不修改；填写时至少需要 10 个字符");
+  if (editingMemberPassword.value.length > 0 && editingMemberPassword.value.length < 14) {
+    showToast("error", "新密码留空表示不修改；填写时至少需要 14 个字符");
     return;
   }
   try {
@@ -460,7 +499,9 @@ async function loadSettings() {
   settingsLoading.value = true;
   try {
     const [worldResult, iniResult] = await Promise.allSettled([
-      api.worldOption(),
+      isAdmin.value
+        ? api.worldOption()
+        : Promise.reject(new Error("WorldOption.sav 仅管理员可访问")),
       api.palworldSettings()
     ]);
     worldSettings.value = null;
@@ -593,6 +634,24 @@ async function executeAction() {
   }
 }
 
+async function requestVersionCheck(game: Game) {
+  if (!hasPermission("game.update")) {
+    showToast("error", "当前成员密码没有检查服务端版本的权限");
+    return;
+  }
+  versionCheckSubmitting.value = true;
+  try {
+    await api.action(game.id, "check-update");
+    showToast("success", "版本检查任务已进入执行队列");
+    await refresh(true);
+    schedulePolling(1000);
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "版本检查失败");
+  } finally {
+    versionCheckSubmitting.value = false;
+  }
+}
+
 async function saveSettings() {
   if (!settings.value) return;
   if (settingsSource.value === "world" && !parsedWorldOption.value) return;
@@ -721,6 +780,19 @@ function stateLabel(state: Game["state"]) {
   }[state];
 }
 
+function versionCheckLabel(game: Game) {
+  if (game.versionCheck === "unchecked") return "尚未检查 Steam public 分支";
+  if (game.versionCheck === "checking") return "正在检查 Steam 版本";
+  if (game.versionCheck === "current") return "已是最新版本";
+  if (game.versionCheck === "update_available") {
+    return game.availableVersion
+      ? `有新版本 · Steam Build ${game.availableVersion}`
+      : "Steam 提示有新版本";
+  }
+  if (game.versionCheck === "unavailable") return "版本检查暂不可用";
+  return "";
+}
+
 function formatDuration(seconds: number) {
   if (!seconds) return "—";
   const hours = Math.floor(seconds / 3600);
@@ -755,8 +827,113 @@ function auditCredentialLabel(entry: LoginAuditEntry) {
   if (entry.credentialId === "ADMIN") return "管理员凭据";
   if (entry.credentialId.startsWith("M-")) return `成员密码 ${entry.credentialId}`;
   if (entry.credentialId === "RATE-LIMITED") return "已触发登录限制";
+  if (entry.credentialId === "BLOCKED") return "IP 黑名单拦截";
   if (entry.credentialId === "INVALID-REQUEST") return "无效登录请求";
   return "未匹配凭据";
+}
+
+function auditResultLabel(entry: LoginAuditEntry) {
+  if (entry.event === "ip_rule_added" || entry.event === "ip_rule_removed") {
+    return entry.reason || "IP 规则已变更";
+  }
+  if (entry.success) return "登录成功";
+  return entry.reason || "登录失败";
+}
+
+function upsertIPRule(rule: IPRule) {
+  ipRules.value = [rule, ...ipRules.value.filter((item) => item.ip !== rule.ip)];
+}
+
+async function addIPRule() {
+  const ip = newRuleIP.value.trim();
+  if (!ip) {
+    showToast("error", "请输入一个明确的 IPv4 或 IPv6 地址");
+    return;
+  }
+  if (
+    newRuleKind.value === "deny" &&
+    !window.confirm("确认加入黑名单？如果这是当前访问 IP，保存后当前网络将无法继续登录。")
+  ) return;
+  savingIPRule.value = true;
+  try {
+    const rule = await api.createIPRule(ip, newRuleKind.value, {
+      note: newRuleNote.value.trim() || undefined,
+      expiresInHours: newRulePermanent.value ? undefined : newRuleHours.value,
+      permanent: newRulePermanent.value,
+      confirmCurrentIp: newRuleKind.value === "deny"
+    });
+    upsertIPRule(rule);
+    newRuleIP.value = "";
+    newRuleNote.value = "";
+    auditEntries.value = (await api.loginAudit()).entries ?? [];
+    showToast("success", `${ip} 已加入${newRuleKind.value === "deny" ? "黑" : "白"}名单`);
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "IP 规则保存失败");
+  } finally {
+    savingIPRule.value = false;
+  }
+}
+
+async function quickSetIPRule(entry: LoginAuditEntry, kind: IPRule["kind"]) {
+  auditMenuEntryId.value = "";
+  if (!entry.ip) return;
+  const label = kind === "deny" ? "黑名单 24 小时" : "白名单 7 天";
+  if (!window.confirm(`确认将 ${entry.ip} 加入${label}？`)) return;
+  try {
+    const rule = await api.createIPRule(entry.ip, kind, {
+      note: `从登录审计 ${entry.id} 快速添加`,
+      expiresInHours: kind === "deny" ? 24 : 7 * 24,
+      confirmCurrentIp: kind === "deny"
+    });
+    upsertIPRule(rule);
+    auditEntries.value = (await api.loginAudit()).entries ?? [];
+    showToast("success", `${entry.ip} 已加入${kind === "deny" ? "黑" : "白"}名单`);
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "IP 规则保存失败");
+  }
+}
+
+async function removeIPRule(rule: IPRule) {
+  if (!window.confirm(`确认删除 ${rule.ip} 的${rule.kind === "deny" ? "黑" : "白"}名单规则？`)) {
+    return;
+  }
+  deletingIPRuleId.value = rule.id;
+  try {
+    await api.deleteIPRule(rule.id);
+    ipRules.value = ipRules.value.filter((item) => item.id !== rule.id);
+    auditEntries.value = (await api.loginAudit()).entries ?? [];
+    showToast("success", "IP 规则已删除");
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "IP 规则删除失败");
+  } finally {
+    deletingIPRuleId.value = "";
+  }
+}
+
+async function copyAuditIP(entry: LoginAuditEntry) {
+  auditMenuEntryId.value = "";
+  try {
+    await navigator.clipboard.writeText(entry.ip);
+    showToast("success", "IP 地址已复制");
+  } catch {
+    showToast("error", "浏览器未允许复制，请手动选择 IP");
+  }
+}
+
+function ruleExpiryLabel(rule: IPRule) {
+  if (!rule.expiresAt) return "永久";
+  const expiresAt = new Date(rule.expiresAt).getTime();
+  if (expiresAt <= Date.now()) return "已到期";
+  return `有效至 ${formatDateTime(rule.expiresAt)}`;
+}
+
+function configAuditCredentialLabel(entry: ConfigAuditEntry) {
+  return entry.role === "admin" ? "管理员" : `成员 ${entry.credentialId}`;
+}
+
+function configAuditChangeLabel(change: ConfigAuditChange) {
+  if (change.sensitive) return "敏感值已修改";
+  return `${change.before || "（空）"} → ${change.after || "（空）"}`;
 }
 
 function gameAccent(id: string) {
@@ -941,7 +1118,7 @@ function gameAccent(id: string) {
           <section class="welcome-row">
             <div>
               <span class="eyebrow">{{ todayLabel }}</span>
-              <h1>下午好，{{ isAdmin ? "管理员" : "成员" }}</h1>
+              <h1>{{ greetingLabel }}，{{ isAdmin ? "管理员" : "成员" }}</h1>
               <p>{{ runningCount }} 个服务器正在运行，节点资源处于正常范围。</p>
             </div>
             <button class="button ghost" @click="refresh()">
@@ -1050,7 +1227,10 @@ function gameAccent(id: string) {
                   <div v-if="game.updateAvailable" class="update-callout">
                     <div>
                       <RefreshCw :size="16" />
-                      <span><strong>有新版本</strong>{{ game.availableVersion }}</span>
+                      <span>
+                        <strong>有新版本</strong>
+                        {{ game.availableVersion ? `Steam Build ${game.availableVersion}` : "Steam 提示需更新" }}
+                      </span>
                     </div>
                     <button
                       :disabled="!canRunSafeAction(game, 'update')"
@@ -1238,7 +1418,10 @@ function gameAccent(id: string) {
             <div class="banner-icon"><RefreshCw :size="20" /></div>
             <div>
               <strong>发现新的服务端版本</strong>
-              <span>{{ selectedGame.version }} → {{ selectedGame.availableVersion }}</span>
+              <span>
+                当前 {{ selectedGame.version }} ·
+                {{ selectedGame.availableVersion ? `可更新至 Steam Build ${selectedGame.availableVersion}` : "Steam 提示需更新" }}
+              </span>
             </div>
             <button
               class="button primary small"
@@ -1285,7 +1468,29 @@ function gameAccent(id: string) {
                 <div><dt>玩家数据</dt><dd>{{ selectedGame.playersSource || "未知" }}</dd></div>
                 <div><dt>游戏端口</dt><dd>{{ selectedGame.port }} / UDP</dd></div>
                 <div><dt>最近备份</dt><dd>{{ formatRelative(selectedGame.lastBackupAt) }}</dd></div>
-                <div><dt>当前版本</dt><dd>{{ selectedGame.version }}</dd></div>
+                <div>
+                  <dt>当前版本</dt>
+                  <dd class="version-detail">
+                    <span>{{ selectedGame.version }}</span>
+                    <span class="version-check-row">
+                      <small
+                        v-if="versionCheckLabel(selectedGame)"
+                        :class="{ current: selectedGame.versionCheck === 'current', available: selectedGame.updateAvailable }"
+                      >
+                        {{ versionCheckLabel(selectedGame) }}
+                      </small>
+                      <button
+                        v-if="selectedGame.versionCheck === 'unchecked' || selectedGame.versionCheck === 'unavailable'"
+                        class="version-check-button"
+                        :disabled="versionCheckSubmitting || Boolean(selectedGameActivity) || !hasPermission('game.update')"
+                        :title="!hasPermission('game.update') ? '需要更新服务端权限' : undefined"
+                        @click="requestVersionCheck(selectedGame)"
+                      >
+                        {{ versionCheckSubmitting ? "提交中…" : "检查新版本" }}
+                      </button>
+                    </span>
+                  </dd>
+                </div>
                 <div><dt>进程状态</dt><dd class="good">{{ stateLabel(selectedGame.state) }}</dd></div>
                 <div><dt>REST 管理</dt><dd :class="selectedGame.restAvailable ? 'good' : ''">{{ selectedGame.restAvailable ? "已连接" : selectedGame.restEnabled ? "已启用但不可用" : "未启用" }}</dd></div>
               </dl>
@@ -1356,9 +1561,25 @@ function gameAccent(id: string) {
               登录 IP 审计
               <span>{{ auditEntries.length }}</span>
             </button>
+            <button
+              :class="{ active: accessTab === 'config-audit' }"
+              @click="accessTab = 'config-audit'"
+            >
+              <SlidersHorizontal :size="17" />
+              参数审计
+              <span>{{ configAuditEntries.length }}</span>
+            </button>
+            <button :class="{ active: accessTab === 'ip-rules' }" @click="accessTab = 'ip-rules'">
+              <ShieldCheck :size="17" />
+              IP 黑白名单
+              <span>{{ ipRules.length }}</span>
+            </button>
           </section>
 
-          <div v-if="accessLoading && members.length === 0 && auditEntries.length === 0" class="page-loader">
+          <div
+            v-if="accessLoading && members.length === 0 && auditEntries.length === 0 && configAuditEntries.length === 0 && ipRules.length === 0"
+            class="page-loader"
+          >
             <LoaderCircle class="spin" :size="22" />正在读取权限数据…
           </div>
 
@@ -1378,9 +1599,9 @@ function gameAccent(id: string) {
                     v-model="newMemberPassword"
                     type="password"
                     autocomplete="new-password"
-                    minlength="10"
+                    minlength="14"
                     maxlength="256"
-                    placeholder="至少 10 个字符"
+                    placeholder="至少 14 个字符"
                   />
                 </div>
                 <div class="permission-presets" aria-label="权限模板">
@@ -1411,13 +1632,13 @@ function gameAccent(id: string) {
                     </span>
                   </label>
                 </div>
-                <button class="button primary" :disabled="newMemberPassword.length < 10">
+                <button class="button primary" :disabled="newMemberPassword.length < 14">
                   <UserPlus :size="16" />添加成员
                 </button>
               </form>
               <div class="access-note">
                 <ShieldCheck :size="17" />
-                <span>模板只是快捷选择，最终以后端勾选项为准。任务日志、登录审计和成员管理始终只对管理员开放。</span>
+                <span>模板只是快捷选择，最终以后端勾选项为准。任务日志、两类审计和成员管理始终只对管理员开放。</span>
               </div>
             </article>
 
@@ -1463,7 +1684,7 @@ function gameAccent(id: string) {
                       />
                       <button
                         class="button primary small"
-                        :disabled="editingMemberPassword.length > 0 && editingMemberPassword.length < 10"
+                        :disabled="editingMemberPassword.length > 0 && editingMemberPassword.length < 14"
                       >
                         <Save :size="14" />保存修改
                       </button>
@@ -1523,7 +1744,7 @@ function gameAccent(id: string) {
             </article>
           </section>
 
-          <section v-else class="panel-card audit-card">
+          <section v-else-if="accessTab === 'audit'" class="panel-card audit-card">
             <div class="card-heading">
               <div>
                 <h2>登录源审计</h2>
@@ -1539,19 +1760,49 @@ function gameAccent(id: string) {
                     <th>来源 IP</th>
                     <th>使用凭据</th>
                     <th>结果</th>
+                    <th aria-label="操作"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="entry in auditEntries" :key="entry.id">
+                  <tr
+                    v-for="entry in auditEntries"
+                    :key="entry.id"
+                    :class="{ 'attack-row': !!entry.severity }"
+                  >
                     <td>{{ formatDateTime(entry.createdAt) }}</td>
                     <td><code>{{ entry.ip || "未知" }}</code></td>
                     <td>{{ auditCredentialLabel(entry) }}</td>
                     <td>
-                      <span :class="['audit-result', entry.success ? 'success' : 'failure']">
+                      <span
+                        :class="[
+                          'audit-result',
+                          entry.success ? 'success' : 'failure',
+                          entry.severity || ''
+                        ]"
+                      >
                         <Check v-if="entry.success" :size="13" />
                         <AlertTriangle v-else :size="13" />
-                        {{ entry.success ? "登录成功" : (entry.reason || "登录失败") }}
+                        {{ auditResultLabel(entry) }}
+                        <small v-if="entry.attemptCount">第 {{ entry.attemptCount }} 次</small>
                       </span>
+                    </td>
+                    <td class="audit-actions-cell">
+                      <button
+                        class="icon-button"
+                        title="IP 快捷操作"
+                        @click="auditMenuEntryId = auditMenuEntryId === entry.id ? '' : entry.id"
+                      >
+                        <MoreHorizontal :size="17" />
+                      </button>
+                      <div v-if="auditMenuEntryId === entry.id" class="audit-action-menu">
+                        <button @click="copyAuditIP(entry)">复制 IP</button>
+                        <button class="danger" @click="quickSetIPRule(entry, 'deny')">
+                          加入黑名单 24 小时
+                        </button>
+                        <button @click="quickSetIPRule(entry, 'allow')">
+                          加入白名单 7 天
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 </tbody>
@@ -1562,6 +1813,159 @@ function gameAccent(id: string) {
               <strong>还没有登录审计记录</strong>
               <span>下一次登录尝试会显示在这里。</span>
             </div>
+          </section>
+
+          <section v-else-if="accessTab === 'config-audit'" class="panel-card audit-card">
+            <div class="card-heading">
+              <div>
+                <h2>帕鲁参数审计</h2>
+                <p>保留最近 1000 次成功的 INI 保存记录；文件达到 5 MiB 后自动轮转。</p>
+              </div>
+              <SlidersHorizontal :size="19" />
+            </div>
+            <div v-if="configAuditEntries.length" class="audit-table-wrap">
+              <table class="audit-table config-audit-table">
+                <thead>
+                  <tr>
+                    <th>保存时间</th>
+                    <th>操作来源</th>
+                    <th>参数变更</th>
+                    <th>配置来源</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in configAuditEntries" :key="entry.id">
+                    <td>{{ formatDateTime(entry.createdAt) }}</td>
+                    <td>
+                      <strong>{{ configAuditCredentialLabel(entry) }}</strong>
+                      <code>{{ entry.ip || "未知 IP" }}</code>
+                    </td>
+                    <td>
+                      <div class="config-audit-changes">
+                        <div v-for="change in entry.changes" :key="change.key">
+                          <strong>{{ change.label }}</strong>
+                          <code>{{ change.key }}</code>
+                          <span :class="{ sensitive: change.sensitive }">
+                            {{ configAuditChangeLabel(change) }}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span>{{ entry.source }}</span>
+                      <small>
+                        {{ entry.revisionBefore.slice(0, 8) }} →
+                        {{ entry.revisionAfter.slice(0, 8) }}
+                      </small>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="access-empty">
+              <SlidersHorizontal :size="24" />
+              <strong>还没有参数审计记录</strong>
+              <span>下一次成功保存 PalWorldSettings.ini 后会显示在这里。</span>
+            </div>
+          </section>
+
+          <section v-else class="ip-rules-layout">
+            <article class="panel-card ip-rule-create-card">
+              <div class="card-heading">
+                <div>
+                  <h2>添加 IP 规则</h2>
+                  <p>当前仅支持单个精确 IP，避免误封整段网络。</p>
+                </div>
+                <ShieldCheck :size="19" />
+              </div>
+              <form class="ip-rule-form" @submit.prevent="addIPRule">
+                <label>
+                  <span>IP 地址</span>
+                  <input v-model="newRuleIP" placeholder="例如 203.0.113.8" />
+                </label>
+                <div class="ip-rule-kind">
+                  <button
+                    type="button"
+                    :class="{ active: newRuleKind === 'deny', danger: newRuleKind === 'deny' }"
+                    @click="newRuleKind = 'deny'; newRuleHours = 24"
+                  >
+                    黑名单 · 拒绝登录
+                  </button>
+                  <button
+                    type="button"
+                    :class="{ active: newRuleKind === 'allow' }"
+                    @click="newRuleKind = 'allow'; newRuleHours = 168"
+                  >
+                    白名单 · 独立限流
+                  </button>
+                </div>
+                <label>
+                  <span>有效期（小时）</span>
+                  <input
+                    v-model.number="newRuleHours"
+                    type="number"
+                    min="1"
+                    max="8760"
+                    :disabled="newRulePermanent"
+                  />
+                </label>
+                <label class="ip-rule-permanent">
+                  <input v-model="newRulePermanent" type="checkbox" />
+                  <span>永久生效</span>
+                </label>
+                <label>
+                  <span>备注（可选）</span>
+                  <input v-model="newRuleNote" maxlength="200" placeholder="添加原因或负责人" />
+                </label>
+                <button class="button primary" :disabled="savingIPRule || !newRuleIP.trim()">
+                  <LoaderCircle v-if="savingIPRule" class="spin" :size="16" />
+                  <ShieldCheck v-else :size="16" />
+                  保存规则
+                </button>
+              </form>
+              <div class="access-note">
+                <ShieldCheck :size="17" />
+                <span>白名单只使用保留的登录校验通道，不会跳过密码；可信设备 Cookie 也不会创建登录会话。</span>
+              </div>
+            </article>
+
+            <article class="panel-card ip-rule-list-card">
+              <div class="card-heading">
+                <div>
+                  <h2>现有规则</h2>
+                  <p>过期规则自动失效；本机和可信代理地址不能被加入名单。</p>
+                </div>
+                <span>{{ ipRules.length }} 条</span>
+              </div>
+              <div v-if="ipRules.length" class="ip-rule-list">
+                <div v-for="rule in ipRules" :key="rule.id" class="ip-rule-row">
+                  <span :class="['ip-rule-badge', rule.kind]">
+                    {{ rule.kind === "deny" ? "黑名单" : "白名单" }}
+                  </span>
+                  <div>
+                    <code>{{ rule.ip }}</code>
+                    <small>
+                      {{ ruleExpiryLabel(rule) }} · 命中 {{ rule.hitCount }} 次
+                      <template v-if="rule.note"> · {{ rule.note }}</template>
+                    </small>
+                  </div>
+                  <button
+                    class="icon-button member-delete-button"
+                    title="删除 IP 规则"
+                    :disabled="deletingIPRuleId === rule.id"
+                    @click="removeIPRule(rule)"
+                  >
+                    <LoaderCircle v-if="deletingIPRuleId === rule.id" class="spin" :size="16" />
+                    <Trash2 v-else :size="16" />
+                  </button>
+                </div>
+              </div>
+              <div v-else class="access-empty">
+                <ShieldCheck :size="24" />
+                <strong>还没有 IP 规则</strong>
+                <span>可以从登录审计的三点菜单快速添加。</span>
+              </div>
+            </article>
           </section>
         </template>
 
@@ -1668,8 +2072,13 @@ function gameAccent(id: string) {
             </div>
           </section>
 
-          <div class="settings-source-tabs" role="tablist" aria-label="配置来源">
+          <div
+            :class="['settings-source-tabs', { single: !isAdmin }]"
+            role="tablist"
+            aria-label="配置来源"
+          >
             <button
+              v-if="isAdmin"
               :class="{ active: settingsSource === 'world' }"
               :disabled="!worldSettings"
               role="tab"
@@ -1719,6 +2128,13 @@ function gameAccent(id: string) {
             </aside>
 
             <div class="settings-main">
+              <article v-if="!isAdmin" class="settings-source-warning panel-card member-scope">
+                <ShieldCheck :size="18" />
+                <div>
+                  <strong>当前为成员玩法参数权限</strong>
+                  <span>这里只展示管理员开放的日常玩法参数；系统、安全和 WorldOption.sav 仍为管理员专属，成功保存会进入参数审计。</span>
+                </div>
+              </article>
               <article v-if="settingsSource === 'ini' && restAPIEnabled === false" class="settings-source-warning panel-card">
                 <AlertTriangle :size="18" />
                 <div>

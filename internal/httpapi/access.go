@@ -13,8 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,16 +22,18 @@ import (
 )
 
 const (
-	roleAdmin                  = "admin"
-	roleMember                 = "member"
-	permissionGameControl      = "game.control"
-	permissionGameUpdate       = "game.update"
-	permissionGameBackup       = "game.backup"
-	permissionPalworldSettings = "palworld.settings"
-	passwordIterations         = 120_000
-	passwordLength             = 32
-	maxMemberCredentials       = 20
-	maxAuditEntries            = 500
+	roleAdmin                        = "admin"
+	roleMember                       = "member"
+	permissionGameControl            = "game.control"
+	permissionGameUpdate             = "game.update"
+	permissionGameBackup             = "game.backup"
+	permissionPalworldGameplay       = "palworld.settings.gameplay"
+	legacyPermissionPalworldSettings = "palworld.settings"
+	passwordIterations               = 120_000
+	passwordLength                   = 32
+	maxMemberCredentials             = 20
+	maxAuditEntries                  = 500
+	maxLoginAuditSize                = 5 << 20
 )
 
 var (
@@ -45,7 +45,7 @@ var (
 		permissionGameControl,
 		permissionGameUpdate,
 		permissionGameBackup,
-		permissionPalworldSettings,
+		permissionPalworldGameplay,
 	}
 )
 
@@ -90,6 +90,12 @@ type auditEntry struct {
 	Role         string    `json:"role,omitempty"`
 	Success      bool      `json:"success"`
 	Reason       string    `json:"reason,omitempty"`
+	Event        string    `json:"event,omitempty"`
+	Severity     string    `json:"severity,omitempty"`
+	AttemptCount int       `json:"attemptCount,omitempty"`
+	KnownDevice  bool      `json:"knownDevice,omitempty"`
+	RuleID       string    `json:"ruleId,omitempty"`
+	RuleKind     string    `json:"ruleKind,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
@@ -122,14 +128,23 @@ func newAccessStore(adminPassword, path, auditPath string) (*accessStore, error)
 
 func (s *accessStore) authenticate(password string) (principal, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if verifyPassword(password, s.adminPassword) {
+	adminPassword := s.adminPassword
+	members := slices.Clone(s.members)
+	s.mu.Unlock()
+
+	if verifyPassword(password, adminPassword) {
 		return principal{
 			Role: roleAdmin, CredentialID: "ADMIN", Permissions: slices.Clone(allPermissions),
 		}, true
 	}
-	for index := range s.members {
-		if !verifyPassword(password, s.members[index].Password) {
+	for _, candidate := range members {
+		if !verifyPassword(password, candidate.Password) {
+			continue
+		}
+		s.mu.Lock()
+		index := s.memberIndexLocked(candidate.ID)
+		if index < 0 || s.members[index].Password != candidate.Password {
+			s.mu.Unlock()
 			continue
 		}
 		now := time.Now()
@@ -137,10 +152,12 @@ func (s *accessStore) authenticate(password string) (principal, bool) {
 		if err := s.persistMembersLocked(); err != nil {
 			slog.Error("persist member last-used time", "error", err)
 		}
-		return principal{
+		identity := principal{
 			Role: roleMember, CredentialID: s.members[index].ID,
 			Permissions: slices.Clone(s.members[index].Permissions),
-		}, true
+		}
+		s.mu.Unlock()
+		return identity, true
 	}
 	return principal{}, false
 }
@@ -311,14 +328,28 @@ func (s *accessStore) recordAudit(entry auditEntry) {
 		slog.Error("create audit directory", "error", err)
 		return
 	}
+	line, err := json.Marshal(entry)
+	if err != nil {
+		slog.Error("encode login audit log", "error", err)
+		return
+	}
+	line = append(line, '\n')
+	if err := rotateAuditLogIfNeeded(s.auditPath, int64(len(line)), maxLoginAuditSize); err != nil {
+		slog.Error("rotate login audit log", "error", err)
+		return
+	}
 	file, err := os.OpenFile(s.auditPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		slog.Error("open login audit log", "error", err)
 		return
 	}
 	defer file.Close()
-	if err := json.NewEncoder(file).Encode(entry); err != nil {
+	if _, err := file.Write(line); err != nil {
 		slog.Error("append login audit log", "error", err)
+		return
+	}
+	if err := file.Sync(); err != nil {
+		slog.Error("sync login audit log", "error", err)
 	}
 }
 
@@ -349,14 +380,24 @@ func (s *accessStore) loadMembers() error {
 	if len(document.Members) > maxMemberCredentials {
 		return fmt.Errorf("member credential count exceeds %d", maxMemberCredentials)
 	}
+	permissionsMigrated := false
 	for index := range document.Members {
+		previous := slices.Clone(document.Members[index].Permissions)
 		permissions, err := normalizePermissions(document.Members[index].Permissions)
 		if err != nil {
 			return fmt.Errorf("member %s permissions: %w", document.Members[index].ID, err)
 		}
 		document.Members[index].Permissions = permissions
+		if !slices.Equal(previous, permissions) {
+			permissionsMigrated = true
+		}
 	}
 	s.members = document.Members
+	if permissionsMigrated {
+		if err := s.persistMembersLocked(); err != nil {
+			return fmt.Errorf("persist migrated member permissions: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -364,24 +405,13 @@ func (s *accessStore) loadAudits() error {
 	if s.auditPath == "" {
 		return nil
 	}
-	file, err := os.Open(s.auditPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read login audit log: %w", err)
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
 	entries := make([]auditEntry, 0, maxAuditEntries)
-	for scanner.Scan() {
-		var entry auditEntry
-		if json.Unmarshal(scanner.Bytes(), &entry) == nil {
-			entries = append(entries, entry)
+	for _, path := range []string{s.auditPath + ".1", s.auditPath} {
+		fileEntries, err := readLoginAuditFile(path)
+		if err != nil {
+			return err
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan login audit log: %w", err)
+		entries = append(entries, fileEntries...)
 	}
 	if len(entries) > maxAuditEntries {
 		entries = entries[len(entries)-maxAuditEntries:]
@@ -389,6 +419,31 @@ func (s *accessStore) loadAudits() error {
 	slices.Reverse(entries)
 	s.audits = entries
 	return nil
+}
+
+func readLoginAuditFile(path string) ([]auditEntry, error) {
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read login audit log: %w", err)
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64<<10), 1<<20)
+	entries := make([]auditEntry, 0)
+	for scanner.Scan() {
+		var entry auditEntry
+		if json.Unmarshal(scanner.Bytes(), &entry) == nil &&
+			entry.ID != "" && !entry.CreatedAt.IsZero() {
+			entries = append(entries, entry)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan login audit log: %w", err)
+	}
+	return entries, nil
 }
 
 func (s *accessStore) persistMembersLocked() error {
@@ -489,8 +544,8 @@ func pbkdf2SHA256(password, salt []byte, iterations, keyLength int) []byte {
 }
 
 func validateMemberPassword(password string) error {
-	if len(password) < 10 {
-		return errors.New("成员密码至少需要 10 个字符")
+	if len(password) < 14 {
+		return errors.New("成员密码至少需要 14 个字符")
 	}
 	if len(password) > 256 {
 		return errors.New("成员密码不能超过 256 个字符")
@@ -504,6 +559,9 @@ func normalizePermissions(permissions []string) ([]string, error) {
 		permission = strings.TrimSpace(permission)
 		if permission == "" {
 			continue
+		}
+		if permission == legacyPermissionPalworldSettings {
+			permission = permissionPalworldGameplay
 		}
 		if !slices.Contains(allPermissions, permission) {
 			return nil, fmt.Errorf("%w: %s", errInvalidPermission, permission)
@@ -537,17 +595,4 @@ func newAuditID() string {
 		return base64.RawURLEncoding.EncodeToString(buffer)
 	}
 	return fmt.Sprintf("%d", time.Now().UnixNano())
-}
-
-func requestIP(r *http.Request) string {
-	if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); forwarded != "" {
-		if ip := net.ParseIP(forwarded); ip != nil {
-			return ip.String()
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
-	}
-	return strings.TrimSpace(r.RemoteAddr)
 }

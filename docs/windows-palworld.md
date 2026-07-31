@@ -1,8 +1,8 @@
 # Hearth：Windows 帕鲁部署与安全接管
 
-## 当前服务器状态
+## 初始发现基线
 
-2026-07-29 的只读发现报告确认：
+2026-07-29 的只读发现报告曾确认：
 
 - Windows Server 2022 Datacenter，4 个逻辑处理器、8 GB 内存
 - SteamCMD 位于当前用户的 `Downloads\steamcmd`
@@ -13,8 +13,8 @@
 - 没有发现 TCP 8212 监听
 - 当时存在两个 `steamcmd.exe` 进程
 
-最后两项意味着：REST API 很可能尚未启用，而且再次更新前必须先退出原有
-SteamCMD 会话。
+这是首次接管前的历史基线，不代表升级后的实时状态。最后两项在当时意味着 REST API
+很可能尚未启用，而且再次更新前必须先退出原有 SteamCMD 会话。
 
 ## 推荐的首次部署方式
 
@@ -47,20 +47,29 @@ Set-ExecutionPolicy -Scope Process Bypass
 不要只复制旧目录里的 EXE；应完整解压同一版本的 ZIP，确保 `VERSION`、
 `install-windows.ps1` 和 `hearth.exe` 来自同一个包。升级已有 Hearth 时
 运行 `.\install-windows.ps1 -Force`。安装器会核对启动后健康接口的版本号，登录页
-和左下角节点卡片也会显示当前版本。升级后，旧成员记录因为没有权限字段会按“只读”处理，
-管理员登录后再为需要操作服务器的成员明确勾选权限。
+和左下角节点卡片也会显示当前版本。升级后，没有权限字段的旧成员记录会按“只读”处理；
+旧版“修改帕鲁配置”权限会自动收敛为“修改帕鲁玩法参数”，不会继续获得系统参数或
+`WorldOption.sav` 访问。
 
 安装器会：
 
 1. 验证 SteamCMD、PalServer、当前配置和默认配置文件。
 2. 把面板复制到 `C:\ProgramData\Hearth`。
 3. 创建独立的面板管理员密码文件并收紧 ACL。
-4. 配置成员密码摘要文件和登录审计文件；升级时保留已有内容。
+4. 配置成员密码摘要、登录审计和参数审计文件；升级时保留已有内容。
 5. 注册开机启动的 `Hearth` 计划任务。
 6. 仅监听 `127.0.0.1:8080`。
 7. 验证面板健康接口。
 8. 将启动、停止和运行错误写入
    `C:\ProgramData\Hearth\panel.log`。
+
+新配置默认启用两项长期运行保护：
+
+- `backupRetentionDays: 30` 与 `backupMaxTotalGB: 20`：每次成功创建新备份后，先清理
+  超过 30 天的 Hearth ZIP，再从最旧文件开始清理到总量不超过 20 GiB。新备份与非
+  Hearth 命名文件不会被误删。
+- `steamCmdNoProgressMinutes: 30`：SteamCMD 日志连续 30 分钟没有增长才判定卡死。
+  SteamCMD 自身更新、Palworld 下载和文件校验只要仍输出日志，就会持续刷新计时。
 
 安装器不会：
 
@@ -90,10 +99,16 @@ Palworld 的 `AdminPassword`。管理员登录后可在“访问权限”添加�
 
 - 不设置用户名，每个密码自动分配一个 `M-...` 编号。
 - 新成员默认只能查看状态；管理员可选择“只读、日常管理、服主管理”模板。
-- 可分别勾选启动/停止/重启、更新服务端、创建备份和修改帕鲁配置。
-- 任务日志、成员密码管理和登录 IP 审计始终仅管理员可见。
+- 可分别勾选启动/停止/重启、更新服务端、创建备份和修改帕鲁玩法参数。
+- 玩法参数只包含后端白名单中的日常规则；密码、REST/RCON、跨平台、模组、性能与磁盘
+  参数、未知高级参数和 `WorldOption.sav` 始终仅管理员可操作。
+- 任务日志、成员密码管理、登录 IP 审计和参数审计始终仅管理员可见。
 - 修改成员密码或权限后，该成员已有会话会立即退出；每次打开或刷新页面仍需重新登录。
-- 登录审计显示来源 IP、管理员/成员凭据编号、结果与时间，不保存输入密码。
+- 登录审计显示来源 IP、管理员/成员凭据编号、结果、疑似攻击等级与时间，不保存输入密码。
+- 审计记录的三点菜单可把精确 IP 快速加入黑名单 24 小时或白名单 7 天；完整规则在
+  “IP 黑白名单”页管理。黑名单在密码计算前拒绝，白名单仍然要求正确密码。
+- 登录成功后浏览器会保存签名的可信设备 Cookie，但它只获得独立限流通道，不能免密
+  登录或访问已认证接口。刷新页面仍会注销旧会话并要求重新输入密码。
 
 相关文件都位于 `C:\ProgramData\Hearth`，并继承只允许 `SYSTEM` 和
 Administrators 访问的 ACL：
@@ -102,7 +117,32 @@ Administrators 访问的 ACL：
 admin-password.txt
 member-credentials.json
 login-audit.jsonl
+config-audit.jsonl
+ip-rules.json
+device-cookie.key
 ```
+
+`device-cookie.key` 用于签名可信设备标识，丢失只会让已有设备重新建立信任，不会丢失
+成员凭据；不得把它复制到公开目录。`ip-rules.json` 保存管理员配置的精确 IP 规则，
+命中次数是本次 Hearth 进程的运行时观测值，不会在攻击期间逐次写盘。
+
+每次成功保存 `PalWorldSettings.ini`，服务端会记录操作者、来源 IP、保存时间、配置版本
+和实际发生的参数变化。敏感值只显示“已修改”。管理员可在“访问权限 → 参数审计”查看
+最近 1000 条；JSONL 文件达到 5 MiB 后轮转为 `.1` 并保留一代。当前不对
+`WorldOption.sav` 做逐参数审计。登录审计文件采用相同的 5 MiB 单代轮转策略。
+
+### 反向代理与真实 IP
+
+安装器默认配置：
+
+```json
+"trustedProxyCidrs": ["127.0.0.0/8", "::1/128"]
+```
+
+因此只有与 Hearth 同机、从回环地址连接的反向代理可以提供
+`X-Forwarded-For` / `X-Forwarded-Proto`。代理在另一台机器时，只加入那台代理的固定
+地址或最小网段，并重启 Hearth；不要信任公网全网段。Hearth 从转发链右侧开始剥离可信
+代理，格式异常、头部超过 1 KiB 或超过 8 跳时直接使用 TCP 对端地址。
 
 Palworld 官方 1.0 REST API 不是启动 PalServer.exe 的前提；它用于玩家数据、保存和优雅停服。
 如需玩家数据、运行中的安全停止/重启、更新和备份，INI 配置至少需要：
@@ -129,6 +169,8 @@ REST API 未启用或暂时不可用时，面板仍允许停止和重启，但�
 5. 确认 `RESTAPIPort` 为 `8212`，保存 INI 配置。
 
 配置页把 `WorldOption.sav` 与 `PalWorldSettings.ini` 作为两个独立来源读取和保存。
+管理员可以访问两个来源及全部参数；获授权成员只会看到 INI 白名单中的玩法参数，响应中
+不包含原始 INI。即使绕过前端直接调用 API，系统或高风险参数也会被后端拒绝。
 `WorldOption.sav` 按以下概念分类展示已支持参数：
 
 - 服务器与连接
@@ -158,6 +200,29 @@ Test-NetConnection 127.0.0.1 -Port 8212
 运行中的更新和备份会被拒绝。停止和重启仍会先尝试安全停服；只有用户在确认框中
 明确接受存档风险后，REST 安全关闭失败时才会终止任务创建时识别到的原进程。
 
+## 检查是否有新版本
+
+详情页“当前版本”会优先显示 Palworld REST API 返回的游戏版本；REST 不可用时显示
+本机 `appmanifest_2394010.acf` 中的 Build ID。两者格式不同，所以面板不会直接把
+游戏版本字符串与 Steam Build ID 混在一起比较。
+
+拥有“更新服务端”权限的用户可以点击“检查新版本”。检查过程：
+
+1. 读取本机 Steam manifest 的 `buildid`。
+2. 确认没有其他 SteamCMD 或 Hearth 任务正在执行。
+3. 运行 SteamCMD 的 `app_info_print 2394010`，只刷新应用元数据，不下载或修改
+   Palworld 服务端文件。
+4. 读取 public 分支的 `buildid` 并与本机值比较。
+5. 在当前版本旁显示“已是最新版本”“有新版本”或“版本检查暂不可用”。
+
+检查会显示任务阶段和进度，最长等待两分钟。结果只保存在 Hearth 当前进程内；重启面板
+或本机 Build ID 变化后会恢复为“尚未检查”。若 SteamCMD 查询在当前网络不可用，不影响
+启动、停止、备份或正式更新。
+
+Valve 将 [`app_info_print`](https://partner.steamgames.com/doc/sdk/uploading?l=english#DebuggingBuildIssues)
+定义为显示当前 Steamworks 应用配置的调试命令；Hearth 只从其输出读取 public 分支
+`buildid`。
+
 ## 安全更新流程
 
 面板的更新顺序固定为：
@@ -173,9 +238,14 @@ Test-NetConnection 127.0.0.1 -Port 8212
    steamcmd.exe +force_install_dir <安装目录> +login anonymous +app_update 2394010 +quit
    ```
 
-7. 重新启动 PalServer，检查进程恢复。
+7. 等待 SteamCMD 明确输出 App ID `2394010` 更新成功。首次运行如果只完成了 SteamCMD
+   自身更新并正常退出，自动重试一次；不会把仅更新 SteamCMD 误报为 Palworld 更新完成。
+8. 重新启动 PalServer，检查进程恢复。
 
-任何安全前置条件失败时，任务停止，不会强杀游戏进程。
+SteamCMD 自更新、下载和校验期间，只要日志仍在增长，就不会触发无进展超时。默认连续
+30 分钟没有日志变化时，Hearth 使用 Windows 进程树终止方式停止本次 SteamCMD，并提示
+管理员重试；下一次运行仍会由 SteamCMD 自己校验和修复未完成文件。任何安全前置条件
+失败时，任务停止，不会强杀游戏进程。
 
 ## 回滚面板
 
@@ -193,39 +263,3 @@ Test-NetConnection 127.0.0.1 -Port 8212
 - `panel-backups` 中的备份
 
 因此回滚面板不会影响正在运行的游戏。
-
-## 给朋友使用的公网 HTTPS
-
-可选方案有两种：
-
-1. Tailscale Funnel：ECS 上安装一次，朋友只使用 HTTPS 地址和面板密码；不需要
-   域名，也不需要开放面板端口。
-2. Cloudflare Tunnel：能力更完整，但需要 Cloudflare 账户、域名和额外的访问策略
-   配置。
-
-四人自用采用第一种。Windows Server 2022 安装并登录 Tailscale 后，在管理员
-PowerShell 执行：
-
-```powershell
-tailscale funnel --bg 8080
-tailscale funnel status
-```
-
-把状态输出中的 `https://...ts.net` 地址发给朋友。Funnel 会自动提供 HTTPS，
-面板在 ECS 上仍只监听 `127.0.0.1:8080`。
-
-必须同时做到：
-
-- 从 ECS 安全组删除临时 TCP 8080 公网规则。
-- Windows 防火墙不开放 8080。
-- 不开放帕鲁 REST API 8212。
-- 面板密码使用至少 16 位、且不与帕鲁管理密码相同的随机密码。
-
-关闭入口：
-
-```powershell
-tailscale funnel reset
-```
-
-Funnel 当前为 beta。若它不可用，回滚只需执行上面的 reset；面板、帕鲁进程和存档
-都不会受到影响，仍可在 RDP 内使用 `http://127.0.0.1:8080`。

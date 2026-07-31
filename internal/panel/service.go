@@ -44,8 +44,8 @@ func NewDemoService() *DemoService {
 		games: map[string]Game{
 			"palworld": {
 				ID: "palworld", Name: "幻兽帕鲁", ShortName: "PAL",
-				State: "running", Version: "1.0.1.76890", AvailableVersion: "1.0.2.77142",
-				UpdateAvailable: true, PlayersOnline: 2, PlayersMax: 8,
+				State: "running", Version: "1.0.1.76890", AvailableVersion: "77142",
+				UpdateAvailable: true, VersionCheck: "update_available", PlayersOnline: 2, PlayersMax: 8,
 				PlayersAvailable: true, PlayersSource: "演示数据",
 				UptimeSeconds: 5*3600 + 42*60, CPUPercent: 36.8, MemoryGB: 5.72,
 				Port: 8211, SaveID: "E67C6D5A4D25543748EBC2BAB926DC80",
@@ -103,7 +103,8 @@ func (s *DemoService) Game(id string) (Game, error) {
 
 func (s *DemoService) RunAction(id string, request ActionRequest) (Activity, error) {
 	action := request.Action
-	if action != "start" && action != "stop" && action != "restart" && action != "update" && action != "backup" {
+	if action != "start" && action != "stop" && action != "restart" &&
+		action != "update" && action != "backup" && action != "check-update" {
 		return Activity{}, ErrBadAction
 	}
 	if request.AllowUnsafe && action != "stop" && action != "restart" {
@@ -204,13 +205,16 @@ func (s *DemoService) completeAction(id, action, activityID string) {
 		game.State, game.PlayersOnline, game.CPUPercent, game.MemoryGB = "stopped", 0, 0, 0
 	case "update":
 		game.State = "running"
-		game.Version = game.AvailableVersion
+		game.Version = "1.0.2.77142"
 		game.AvailableVersion = ""
 		game.UpdateAvailable = false
+		game.VersionCheck = "current"
 		game.UptimeSeconds = 3
 	case "backup":
 		now := time.Now()
 		game.LastBackupAt = &now
+	case "check-update":
+		game.VersionCheck = "update_available"
 	default:
 		game.State = "running"
 		game.UptimeSeconds = 3
@@ -243,7 +247,7 @@ func actionTitle(action string) string {
 	return map[string]string{
 		"start": "正在启动服务器", "stop": "正在安全停止服务器",
 		"restart": "正在重启服务器", "update": "正在更新服务器",
-		"backup": "正在备份服务器",
+		"backup": "正在备份服务器", "check-update": "正在检查服务端版本",
 	}[action]
 }
 
@@ -274,10 +278,10 @@ func number(value float64) *float64 { return &value }
 
 func demoPalworldSettings(now time.Time) PalworldSettings {
 	boolean := func(key, label, description string, value bool, risk string) Setting {
-		return Setting{Key: key, Label: label, Description: description, Type: "boolean", Value: value, Default: value, Risk: risk, RestartRequired: true}
+		return Setting{Key: key, Label: label, Description: description, Type: "boolean", Value: value, Default: value, Risk: risk, MemberEditable: IsMemberEditablePalworldSetting(key), RestartRequired: true}
 	}
 	numeric := func(key, label, description string, value, min, max, step float64, risk string) Setting {
-		return Setting{Key: key, Label: label, Description: description, Type: "number", Value: value, Default: value, Min: number(min), Max: number(max), Step: number(step), Risk: risk, RestartRequired: true}
+		return Setting{Key: key, Label: label, Description: description, Type: "number", Value: value, Default: value, Min: number(min), Max: number(max), Step: number(step), Risk: risk, MemberEditable: IsMemberEditablePalworldSetting(key), RestartRequired: true}
 	}
 	return PalworldSettings{
 		Version:      "1.0",
@@ -286,8 +290,8 @@ func demoPalworldSettings(now time.Time) PalworldSettings {
 OptionSettings=(Difficulty=None,DayTimeSpeedRate=1.000000,NightTimeSpeedRate=1.000000,ExpRate=1.000000,ServerPlayerMaxNum=8,ServerName="四人小队",RESTAPIEnabled=True)`,
 		Groups: []SettingGroup{
 			{ID: "server", Label: "服务器", Description: "名称、人数与访问控制", Settings: []Setting{
-				{Key: "ServerName", Label: "服务器名称", Description: "显示在服务器列表中的名称", Type: "text", Value: "四人小队", Default: "Default Palworld Server", RestartRequired: true},
-				{Key: "ServerDescription", Label: "服务器描述", Description: "服务器列表和详情中显示的描述", Type: "text", Value: "朋友联机专用", Default: "", RestartRequired: true},
+				{Key: "ServerName", Label: "服务器名称", Description: "显示在服务器列表中的名称", Type: "text", Value: "四人小队", Default: "Default Palworld Server", MemberEditable: true, RestartRequired: true},
+				{Key: "ServerDescription", Label: "服务器描述", Description: "服务器列表和详情中显示的描述", Type: "text", Value: "朋友联机专用", Default: "", MemberEditable: true, RestartRequired: true},
 				numeric("ServerPlayerMaxNum", "最大玩家数", "允许同时加入服务器的玩家数量", 8, 1, 32, 1, ""),
 				{Key: "ServerPassword", Label: "加入密码", Description: "留空表示无需密码", Type: "password", Value: "", Default: "", Sensitive: true, RestartRequired: true},
 				{Key: "AdminPassword", Label: "管理员密码", Description: "REST API、RCON 和游戏内管理使用", Type: "password", Value: "••••••••••", Default: "", Sensitive: true, RestartRequired: true},

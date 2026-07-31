@@ -44,12 +44,13 @@ func TestLoginAndAuthenticatedOverview(t *testing.T) {
 		t.Fatalf("login status = %d body = %s", login.Code, login.Body.String())
 	}
 	cookies := login.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != "hearth_session" {
+	sessionCookie := cookieNamed(cookies, "hearth_session")
+	if sessionCookie == nil || cookieNamed(cookies, deviceCookieName) == nil {
 		t.Fatalf("login cookies = %#v", cookies)
 	}
 
 	overviewRequest := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
-	overviewRequest.AddCookie(cookies[0])
+	overviewRequest.AddCookie(sessionCookie)
 	overview := httptest.NewRecorder()
 	handler.ServeHTTP(overview, overviewRequest)
 	if overview.Code != http.StatusOK {
@@ -70,18 +71,74 @@ func TestLoginRejectsWrongPassword(t *testing.T) {
 }
 
 func TestLoginGateLimitsFailuresAndResets(t *testing.T) {
-	gate := newLoginGate(2, time.Minute)
+	gate := newLoginGate()
 	now := time.Now()
-	gate.recordFailure(now)
-	gate.recordFailure(now)
-
-	if allowed, retryAfter := gate.allow(now); allowed || retryAfter <= 0 {
-		t.Fatalf("allow() = %v, %v; want blocked with retry duration", allowed, retryAfter)
+	for attempt := 1; attempt <= 5; attempt++ {
+		decision, admission := gate.begin("ip:198.51.100.10", false, now)
+		if !decision.Allowed || admission == nil {
+			t.Fatalf("attempt %d was unexpectedly blocked: %#v", attempt, decision)
+		}
+		assessment := admission.finish(false, now)
+		if assessment.Failures != attempt {
+			t.Fatalf("attempt failures = %d; want %d", assessment.Failures, attempt)
+		}
+	}
+	decision, _ := gate.begin("ip:198.51.100.10", false, now)
+	if decision.Allowed || decision.RetryAfter <= 0 || decision.Severity != "warning" {
+		t.Fatalf("begin() = %#v; want warning backoff", decision)
+	}
+	if other, admission := gate.begin("ip:198.51.100.11", false, now); !other.Allowed {
+		t.Fatal("one source IP blocked a different source IP")
+	} else {
+		admission.cancel()
 	}
 
-	gate.reset()
-	if allowed, _ := gate.allow(now); !allowed {
-		t.Fatal("allow() remained blocked after reset")
+	decision, admission := gate.begin("ip:198.51.100.10", false, now.Add(time.Second))
+	if !decision.Allowed {
+		t.Fatalf("begin() remained blocked after backoff: %#v", decision)
+	}
+	admission.finish(true, now.Add(time.Second))
+	if reset, admission := gate.begin("ip:198.51.100.10", false, now.Add(time.Second)); !reset.Allowed {
+		t.Fatal("begin() remained blocked after successful verification")
+	} else {
+		admission.cancel()
+	}
+}
+
+func TestSessionStoreHasBoundedSize(t *testing.T) {
+	store := newSessionStore()
+	for index := 0; index < maxSessions+25; index++ {
+		if _, err := store.create(principal{
+			Role: roleMember, CredentialID: "M-BOUNDED",
+		}); err != nil {
+			t.Fatalf("create session %d: %v", index, err)
+		}
+	}
+	if len(store.sessions) != maxSessions {
+		t.Fatalf("session count = %d; want %d", len(store.sessions), maxSessions)
+	}
+}
+
+func TestDecodeJSONRejectsTrailingAndOversizedBodies(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		body  string
+		limit int64
+	}{
+		{name: "trailing value", body: `{"value":"ok"} {"value":"extra"}`, limit: 1024},
+		{name: "trailing junk", body: `{"value":"ok"} junk`, limit: 1024},
+		{name: "oversized", body: `{"value":"` + strings.Repeat("x", 64) + `"}`, limit: 32},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(test.body))
+			request.Header.Set("Content-Type", "application/json")
+			var target struct {
+				Value string `json:"value"`
+			}
+			if err := decodeJSONLimit(request, &target, test.limit); err == nil {
+				t.Fatal("decodeJSONLimit() accepted an invalid request body")
+			}
+		})
 	}
 }
 
@@ -90,11 +147,15 @@ func TestLoginUsesSecureCookieBehindHTTPSProxy(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/session", bytes.NewBufferString(`{"password":"correct"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Forwarded-Proto", "https")
+	request.RemoteAddr = "127.0.0.1:12345"
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
 	cookies := response.Result().Cookies()
-	if len(cookies) != 1 || !cookies[0].Secure {
+	if cookieNamed(cookies, "hearth_session") == nil ||
+		!cookieNamed(cookies, "hearth_session").Secure ||
+		cookieNamed(cookies, deviceCookieName) == nil ||
+		!cookieNamed(cookies, deviceCookieName).Secure {
 		t.Fatalf("cookies = %#v; want a Secure session cookie", cookies)
 	}
 }
@@ -113,6 +174,16 @@ func TestGameActionUnsafeConfirmationBoundary(t *testing.T) {
 		{
 			name:       "update cannot use force fallback",
 			body:       `{"action":"update","allowUnsafe":true}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "version check is an accepted read-only Steam task",
+			body:       `{"action":"check-update"}`,
+			wantStatus: http.StatusAccepted,
+		},
+		{
+			name:       "version check cannot use force fallback",
+			body:       `{"action":"check-update","allowUnsafe":true}`,
 			wantStatus: http.StatusBadRequest,
 		},
 	}
@@ -151,10 +222,20 @@ func loginTestHandler(t *testing.T, handler http.Handler) *http.Cookie {
 		t.Fatalf("login status = %d body = %s", response.Code, response.Body.String())
 	}
 	cookies := response.Result().Cookies()
-	if len(cookies) != 1 {
+	sessionCookie := cookieNamed(cookies, "hearth_session")
+	if sessionCookie == nil {
 		t.Fatalf("login cookies = %#v", cookies)
 	}
-	return cookies[0]
+	return sessionCookie
+}
+
+func cookieNamed(cookies []*http.Cookie, name string) *http.Cookie {
+	for _, cookie := range cookies {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	return nil
 }
 
 func newTestHandler(t *testing.T, cfg config.Config) http.Handler {
@@ -204,5 +285,30 @@ func TestSecurityHeadersCachePolicy(t *testing.T) {
 		if got := response.Header().Get("Cache-Control"); got != test.want {
 			t.Errorf("%s Cache-Control = %q; want %q", test.path, got, test.want)
 		}
+	}
+}
+
+func TestVersionCheckUsesUpdatePermission(t *testing.T) {
+	permission, ok := permissionForAction("check-update")
+	if !ok {
+		t.Fatal("check-update action was rejected")
+	}
+	if permission != permissionGameUpdate {
+		t.Fatalf("permission = %q; want %q", permission, permissionGameUpdate)
+	}
+}
+
+func TestMemberOverviewOnlyIncludesPermittedRunningActivities(t *testing.T) {
+	identity := principal{Role: roleMember, Permissions: []string{permissionGameControl}}
+	activities := []panel.Activity{
+		{ID: "running-control", Action: "restart", Status: "running"},
+		{ID: "completed-control", Action: "restart", Status: "success"},
+		{ID: "failed-control", Action: "stop", Status: "error"},
+		{ID: "running-update", Action: "update", Status: "running"},
+	}
+
+	visible := permittedActivities(identity, activities)
+	if len(visible) != 1 || visible[0].ID != "running-control" {
+		t.Fatalf("visible activities = %#v; want only permitted running activity", visible)
 	}
 }

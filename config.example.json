@@ -5,6 +5,10 @@
   "adminPasswordFile": "C:\\ProgramData\\Hearth\\admin-password.txt",
   "accessFile": "C:\\ProgramData\\Hearth\\member-credentials.json",
   "auditFile": "C:\\ProgramData\\Hearth\\login-audit.jsonl",
+  "configAuditFile": "C:\\ProgramData\\Hearth\\config-audit.jsonl",
+  "ipRulesFile": "C:\\ProgramData\\Hearth\\ip-rules.json",
+  "deviceKeyFile": "C:\\ProgramData\\Hearth\\device-cookie.key",
+  "trustedProxyCidrs": ["127.0.0.0/8", "::1/128"],
   "games": {
     "palworld": {
       "enabled": true,
@@ -16,9 +20,12 @@
       "processName": "PalServer-Win64-Shipping-Cmd.exe",
       "startArgs": [],
       "backupDir": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common\\PalServer\\panel-backups",
+      "backupRetentionDays": 30,
+      "backupMaxTotalGB": 20,
       "restUrl": "http://127.0.0.1:8212",
       "restUsername": "admin",
       "shutdownWaitSeconds": 30,
+      "steamCmdNoProgressMinutes": 30,
       "port": 8211
     },
     "dontStarveTogether": {

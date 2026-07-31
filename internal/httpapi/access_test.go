@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hearth/internal/config"
 	"hearth/internal/panel"
@@ -25,7 +26,7 @@ func TestAccessStorePersistsOnlyPasswordDigests(t *testing.T) {
 	}
 	member, err := store.createMember(
 		"friend-secret-123",
-		[]string{permissionGameControl, permissionPalworldSettings},
+		[]string{permissionGameControl, legacyPermissionPalworldSettings},
 	)
 	if err != nil {
 		t.Fatalf("create member: %v", err)
@@ -39,17 +40,35 @@ func TestAccessStorePersistsOnlyPasswordDigests(t *testing.T) {
 		strings.Contains(string(data), "friend-secret-123") {
 		t.Fatalf("member file contains a plaintext password: %s", data)
 	}
+	if strings.Contains(string(data), legacyPermissionPalworldSettings+`"`) ||
+		!strings.Contains(string(data), permissionPalworldGameplay) {
+		t.Fatalf("legacy settings permission was not migrated safely: %s", data)
+	}
 
 	identity, ok := store.authenticate("friend-secret-123")
 	if !ok || identity.Role != roleMember || identity.CredentialID != member.ID ||
 		!hasPermission(identity, permissionGameControl) ||
-		!hasPermission(identity, permissionPalworldSettings) {
+		!hasPermission(identity, permissionPalworldGameplay) {
 		t.Fatalf("member authentication = %#v, %v", identity, ok)
 	}
 
+	legacyData := strings.ReplaceAll(
+		string(data), permissionPalworldGameplay, legacyPermissionPalworldSettings,
+	)
+	if err := os.WriteFile(memberPath, []byte(legacyData), 0o600); err != nil {
+		t.Fatalf("seed legacy member permission: %v", err)
+	}
 	reloaded, err := newAccessStore("admin-secret-123", memberPath, auditPath)
 	if err != nil {
 		t.Fatalf("reload access store: %v", err)
+	}
+	migratedData, err := os.ReadFile(memberPath)
+	if err != nil {
+		t.Fatalf("read migrated member file: %v", err)
+	}
+	if strings.Contains(string(migratedData), legacyPermissionPalworldSettings+`"`) ||
+		!strings.Contains(string(migratedData), permissionPalworldGameplay) {
+		t.Fatalf("stored legacy permission was not persisted as gameplay permission: %s", migratedData)
 	}
 	if _, ok := reloaded.authenticate("friend-secret-123"); !ok {
 		t.Fatal("persisted member password did not authenticate")
@@ -73,12 +92,38 @@ func TestAccessStorePersistsOnlyPasswordDigests(t *testing.T) {
 	}
 }
 
+func TestLoginAuditRotatesAndReloads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "login-audit.jsonl")
+	filler := bytes.Repeat([]byte("{}\n"), maxLoginAuditSize/3+1)
+	if err := os.WriteFile(path, filler, 0o600); err != nil {
+		t.Fatalf("seed login audit: %v", err)
+	}
+	store := &accessStore{auditPath: path, audits: []auditEntry{}}
+	entry := auditEntry{
+		ID: "login-1", IP: "198.51.100.20", CredentialID: "ADMIN",
+		Role: roleAdmin, Success: true, CreatedAt: time.Now(),
+	}
+	store.recordAudit(entry)
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("rotated login audit not found: %v", err)
+	}
+	reloaded := &accessStore{auditPath: path, audits: []auditEntry{}}
+	if err := reloaded.loadAudits(); err != nil {
+		t.Fatalf("reload login audit: %v", err)
+	}
+	entries := reloaded.auditEntries()
+	if len(entries) != 1 || entries[0].ID != entry.ID {
+		t.Fatalf("reloaded login audit = %#v", entries)
+	}
+}
+
 func TestAdminAndMemberPermissionsAndLoginAudit(t *testing.T) {
 	directory := t.TempDir()
 	cfg := config.Config{
-		AdminPassword: "admin-secret-123",
-		AccessFile:    filepath.Join(directory, "member-credentials.json"),
-		AuditFile:     filepath.Join(directory, "login-audit.jsonl"),
+		AdminPassword:   "admin-secret-123",
+		AccessFile:      filepath.Join(directory, "member-credentials.json"),
+		AuditFile:       filepath.Join(directory, "login-audit.jsonl"),
+		ConfigAuditFile: filepath.Join(directory, "config-audit.jsonl"),
 	}
 	handler := newTestHandler(t, cfg)
 
@@ -109,6 +154,7 @@ func TestAdminAndMemberPermissionsAndLoginAudit(t *testing.T) {
 	)
 	failedLogin.Header.Set("Content-Type", "application/json")
 	failedLogin.Header.Set("X-Forwarded-For", "192.0.2.33")
+	failedLogin.RemoteAddr = "127.0.0.1:12345"
 	failedResponse := httptest.NewRecorder()
 	handler.ServeHTTP(failedResponse, failedLogin)
 	if failedResponse.Code != http.StatusUnauthorized {
@@ -122,14 +168,71 @@ func TestAdminAndMemberPermissionsAndLoginAudit(t *testing.T) {
 		{path: "/api/v1/overview", want: http.StatusOK},
 		{path: "/api/v1/logs", want: http.StatusForbidden},
 		{path: "/api/v1/games/palworld/settings", want: http.StatusOK},
-		{path: "/api/v1/games/palworld/world-option", want: http.StatusNotFound},
+		{path: "/api/v1/games/palworld/world-option", want: http.StatusForbidden},
 		{path: "/api/v1/access/members", want: http.StatusForbidden},
 		{path: "/api/v1/access/audit", want: http.StatusForbidden},
+		{path: "/api/v1/access/config-audit", want: http.StatusForbidden},
+		{path: "/api/v1/access/ip-rules", want: http.StatusForbidden},
 	} {
 		response := requestForTest(t, handler, http.MethodGet, test.path, "", memberCookie)
 		if response.Code != test.want {
 			t.Errorf("%s status = %d body = %s; want %d", test.path, response.Code, response.Body.String(), test.want)
 		}
+	}
+
+	settingsResponse := requestForTest(
+		t, handler, http.MethodGet, "/api/v1/games/palworld/settings", "", memberCookie,
+	)
+	var memberSettings panel.PalworldSettings
+	if err := json.Unmarshal(settingsResponse.Body.Bytes(), &memberSettings); err != nil {
+		t.Fatalf("decode member settings: %v", err)
+	}
+	if memberSettings.Raw != "" {
+		t.Fatal("member settings response exposed raw INI")
+	}
+	for _, group := range memberSettings.Groups {
+		for _, setting := range group.Settings {
+			if !setting.MemberEditable || !panel.IsMemberEditablePalworldSetting(setting.Key) {
+				t.Fatalf("member settings exposed disallowed parameter %q", setting.Key)
+			}
+		}
+	}
+	deniedSettingsUpdate := requestForTest(
+		t, handler, http.MethodPatch, "/api/v1/games/palworld/settings",
+		`{"revision":"","changes":{"RESTAPIEnabled":false}}`, memberCookie,
+	)
+	if deniedSettingsUpdate.Code != http.StatusForbidden {
+		t.Fatalf("system setting update status = %d body = %s", deniedSettingsUpdate.Code, deniedSettingsUpdate.Body.String())
+	}
+	oversizedSettingsUpdate := requestForTest(
+		t, handler, http.MethodPatch, "/api/v1/games/palworld/settings",
+		`{"revision":"","changes":{"ServerName":"`+strings.Repeat("界", 129)+`"}}`, memberCookie,
+	)
+	if oversizedSettingsUpdate.Code != http.StatusBadRequest {
+		t.Fatalf("oversized setting update status = %d body = %s", oversizedSettingsUpdate.Code, oversizedSettingsUpdate.Body.String())
+	}
+	allowedSettingsUpdate := requestForTest(
+		t, handler, http.MethodPatch, "/api/v1/games/palworld/settings",
+		`{"revision":"","changes":{"ServerName":"成员修改后的服务器"}}`, memberCookie,
+	)
+	if allowedSettingsUpdate.Code != http.StatusOK {
+		t.Fatalf("gameplay setting update status = %d body = %s", allowedSettingsUpdate.Code, allowedSettingsUpdate.Body.String())
+	}
+	configAudit := requestForTest(
+		t, handler, http.MethodGet, "/api/v1/access/config-audit", "", adminCookie,
+	)
+	if configAudit.Code != http.StatusOK ||
+		!strings.Contains(configAudit.Body.String(), member.ID) ||
+		!strings.Contains(configAudit.Body.String(), "ServerName") ||
+		!strings.Contains(configAudit.Body.String(), "成员修改后的服务器") {
+		t.Fatalf("parameter audit response = %d %s", configAudit.Code, configAudit.Body.String())
+	}
+	configAuditData, err := os.ReadFile(cfg.ConfigAuditFile)
+	if err != nil {
+		t.Fatalf("read parameter audit file: %v", err)
+	}
+	if !strings.Contains(string(configAuditData), "PalWorldSettings.ini") {
+		t.Fatalf("parameter audit file is missing source: %s", configAuditData)
 	}
 
 	allowedAction := requestForTest(
@@ -230,6 +333,7 @@ func loginForTest(t *testing.T, handler http.Handler, password, ip string) (*htt
 	)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Forwarded-For", ip)
+	request.RemoteAddr = "127.0.0.1:12345"
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -242,10 +346,11 @@ func loginForTest(t *testing.T, handler http.Handler, password, ip string) (*htt
 		t.Fatalf("decode login response: %v", err)
 	}
 	cookies := response.Result().Cookies()
-	if len(cookies) != 1 {
+	sessionCookie := cookieNamed(cookies, "hearth_session")
+	if sessionCookie == nil {
 		t.Fatalf("login cookies = %#v", cookies)
 	}
-	return cookies[0], session.Role
+	return sessionCookie, session.Role
 }
 
 func requestForTest(

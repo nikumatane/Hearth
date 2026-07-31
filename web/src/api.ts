@@ -11,6 +11,7 @@ export type Game = {
   version: string;
   availableVersion?: string;
   updateAvailable: boolean;
+  versionCheck?: "unchecked" | "checking" | "current" | "update_available" | "unavailable";
   playersOnline: number;
   playersMax: number;
   playersAvailable: boolean;
@@ -73,6 +74,7 @@ export type Setting = {
   options?: Array<{ label: string; value: string }>;
   sensitive?: boolean;
   risk?: "performance" | "disk" | "security" | "";
+  memberEditable?: boolean;
   restartRequired: boolean;
   configured: boolean;
 };
@@ -101,7 +103,7 @@ export type Permission =
   | "game.control"
   | "game.update"
   | "game.backup"
-  | "palworld.settings";
+  | "palworld.settings.gameplay";
 
 export type Session = {
   authenticated: boolean;
@@ -127,6 +129,45 @@ export type LoginAuditEntry = {
   role?: "admin" | "member";
   success: boolean;
   reason?: string;
+  event?: "login" | "attack_limited" | "attack_blocked" | "ip_rule_added" | "ip_rule_removed";
+  severity?: "warning" | "critical";
+  attemptCount?: number;
+  knownDevice?: boolean;
+  ruleId?: string;
+  ruleKind?: "allow" | "deny";
+  createdAt: string;
+};
+
+export type IPRule = {
+  id: string;
+  ip: string;
+  kind: "allow" | "deny";
+  note?: string;
+  createdBy: string;
+  createdAt: string;
+  expiresAt?: string;
+  hitCount: number;
+  lastHitAt?: string;
+};
+
+export type ConfigAuditChange = {
+  key: string;
+  label: string;
+  before?: string;
+  after?: string;
+  sensitive?: boolean;
+};
+
+export type ConfigAuditEntry = {
+  id: string;
+  gameId: string;
+  source: string;
+  credentialId: string;
+  role: "admin" | "member";
+  ip: string;
+  revisionBefore: string;
+  revisionAfter: string;
+  changes: ConfigAuditChange[];
   createdAt: string;
 };
 
@@ -228,7 +269,29 @@ export const api = {
       method: "DELETE"
     }),
   loginAudit: () =>
-    request<{ entries: LoginAuditEntry[] }>("/api/v1/access/audit")
+    request<{ entries: LoginAuditEntry[] }>("/api/v1/access/audit"),
+  configAudit: () =>
+    request<{ entries: ConfigAuditEntry[] }>("/api/v1/access/config-audit"),
+  ipRules: () =>
+    request<{ rules: IPRule[] }>("/api/v1/access/ip-rules"),
+  createIPRule: (
+    ip: string,
+    kind: IPRule["kind"],
+    options: {
+      note?: string;
+      expiresInHours?: number;
+      permanent?: boolean;
+      confirmCurrentIp?: boolean;
+    } = {}
+  ) =>
+    request<IPRule>("/api/v1/access/ip-rules", {
+      method: "POST",
+      body: JSON.stringify({ ip, kind, ...options })
+    }),
+  deleteIPRule: (id: string) =>
+    request<void>(`/api/v1/access/ip-rules/${encodeURIComponent(id)}`, {
+      method: "DELETE"
+    })
 };
 
 export function isUnauthorized(error: unknown): boolean {

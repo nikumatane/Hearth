@@ -34,6 +34,9 @@ $configPath = Join-Path $installRoot 'config.json'
 $passwordPath = Join-Path $installRoot 'admin-password.txt'
 $accessPath = Join-Path $installRoot 'member-credentials.json'
 $auditPath = Join-Path $installRoot 'login-audit.jsonl'
+$configAuditPath = Join-Path $installRoot 'config-audit.jsonl'
+$ipRulesPath = Join-Path $installRoot 'ip-rules.json'
+$deviceKeyPath = Join-Path $installRoot 'device-cookie.key'
 $logPath = Join-Path $installRoot 'panel.log'
 $palworldRoot = Join-Path $SteamCmdRoot 'steamapps\common\PalServer'
 $steamCmd = Join-Path $SteamCmdRoot 'steamcmd.exe'
@@ -62,8 +65,8 @@ $securePassword = Read-Host -AsSecureString 'Panel administrator password'
 $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
 try {
     $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
-    if ([string]::IsNullOrWhiteSpace($plainPassword) -or $plainPassword.Length -lt 10) {
-        throw 'Panel administrator password must contain at least 10 characters.'
+    if ([string]::IsNullOrWhiteSpace($plainPassword) -or $plainPassword.Length -lt 14) {
+        throw 'Panel administrator password must contain at least 14 characters.'
     }
 
     New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
@@ -113,6 +116,10 @@ try {
         adminPasswordFile = $passwordPath
         accessFile        = $accessPath
         auditFile         = $auditPath
+        configAuditFile   = $configAuditPath
+        ipRulesFile       = $ipRulesPath
+        deviceKeyFile     = $deviceKeyPath
+        trustedProxyCidrs = @('127.0.0.0/8', '::1/128')
         games             = [ordered]@{
             palworld = [ordered]@{
                 enabled             = $true
@@ -124,9 +131,12 @@ try {
                 processName         = 'PalServer-Win64-Shipping-Cmd.exe'
                 startArgs           = @()
                 backupDir           = (Join-Path $palworldRoot 'panel-backups')
+                backupRetentionDays = 30
+                backupMaxTotalGB    = 20
                 restUrl             = 'http://127.0.0.1:8212'
                 restUsername        = 'admin'
                 shutdownWaitSeconds = 30
+                steamCmdNoProgressMinutes = 30
                 port                = 8211
             }
             dontStarveTogether = [ordered]@{
