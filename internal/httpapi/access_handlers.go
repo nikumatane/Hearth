@@ -27,6 +27,14 @@ func (s *server) createMember(w http.ResponseWriter, r *http.Request) {
 		writeAccessError(w, err)
 		return
 	}
+	identity, _ := principalFromContext(r.Context())
+	recordOperationAudit(s.operationAudits, operationAuditEntry{
+		ID: newAuditID(), Event: operationEventMemberCreated,
+		ActorCredentialID: identity.CredentialID, ActorRole: identity.Role,
+		ActorIP: s.proxy.clientIP(r), TargetType: operationTargetMember,
+		TargetID: member.ID, CurrentPermissions: member.Permissions,
+		Success: true, CreatedAt: time.Now(),
+	})
 	writeJSON(w, http.StatusCreated, member)
 }
 
@@ -39,7 +47,8 @@ func (s *server) updateMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "成员密码请求格式不正确")
 		return
 	}
-	member, err := s.access.updateMember(
+	passwordChanged := request.Password != nil
+	member, permissionsChanged, err := s.access.updateMember(
 		r.PathValue("id"), request.Password, request.Permissions,
 	)
 	if request.Password != nil {
@@ -50,6 +59,15 @@ func (s *server) updateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sessions.deleteCredential(member.ID)
+	identity, _ := principalFromContext(r.Context())
+	recordOperationAudit(s.operationAudits, operationAuditEntry{
+		ID: newAuditID(), Event: operationEventMemberUpdated,
+		ActorCredentialID: identity.CredentialID, ActorRole: identity.Role,
+		ActorIP: s.proxy.clientIP(r), TargetType: operationTargetMember,
+		TargetID: member.ID, PasswordChanged: passwordChanged,
+		PermissionsChanged: permissionsChanged, CurrentPermissions: member.Permissions,
+		Success: true, CreatedAt: time.Now(),
+	})
 	writeJSON(w, http.StatusOK, member)
 }
 
@@ -60,6 +78,13 @@ func (s *server) deleteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sessions.deleteCredential(id)
+	identity, _ := principalFromContext(r.Context())
+	recordOperationAudit(s.operationAudits, operationAuditEntry{
+		ID: newAuditID(), Event: operationEventMemberDeleted,
+		ActorCredentialID: identity.CredentialID, ActorRole: identity.Role,
+		ActorIP: s.proxy.clientIP(r), TargetType: operationTargetMember,
+		TargetID: id, Success: true, CreatedAt: time.Now(),
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -69,6 +94,10 @@ func (s *server) loginAudit(w http.ResponseWriter, _ *http.Request) {
 
 func (s *server) configAudit(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"entries": s.configAudits.all()})
+}
+
+func (s *server) operationAudit(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"entries": s.operationAudits.all()})
 }
 
 func (s *server) listIPRules(w http.ResponseWriter, _ *http.Request) {
@@ -128,11 +157,12 @@ func (s *server) createIPRule(w http.ResponseWriter, r *http.Request) {
 		writeIPRuleError(w, err)
 		return
 	}
-	s.access.recordAudit(auditEntry{
-		ID: newAuditID(), IP: sourceIP, CredentialID: identity.CredentialID,
-		Role: identity.Role, Success: true, Event: "ip_rule_added",
-		Reason: "添加 IP " + ruleKindLabel(rule.Kind) + "规则：" + rule.IP,
-		RuleID: rule.ID, RuleKind: rule.Kind, CreatedAt: now,
+	recordOperationAudit(s.operationAudits, operationAuditEntry{
+		ID: newAuditID(), Event: operationEventIPRuleAdded,
+		ActorCredentialID: identity.CredentialID, ActorRole: identity.Role,
+		ActorIP: sourceIP, TargetType: operationTargetIPRule,
+		TargetID: rule.ID, TargetIP: rule.IP, RuleKind: rule.Kind,
+		ExpiresAt: rule.ExpiresAt, Success: true, CreatedAt: now,
 	})
 	writeJSON(w, http.StatusCreated, rule)
 }
@@ -144,20 +174,14 @@ func (s *server) deleteIPRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity, _ := principalFromContext(r.Context())
-	s.access.recordAudit(auditEntry{
-		ID: newAuditID(), IP: s.proxy.clientIP(r), CredentialID: identity.CredentialID,
-		Role: identity.Role, Success: true, Event: "ip_rule_removed",
-		Reason: "删除 IP " + ruleKindLabel(rule.Kind) + "规则：" + rule.IP,
-		RuleID: rule.ID, RuleKind: rule.Kind, CreatedAt: time.Now(),
+	recordOperationAudit(s.operationAudits, operationAuditEntry{
+		ID: newAuditID(), Event: operationEventIPRuleRemoved,
+		ActorCredentialID: identity.CredentialID, ActorRole: identity.Role,
+		ActorIP: s.proxy.clientIP(r), TargetType: operationTargetIPRule,
+		TargetID: rule.ID, TargetIP: rule.IP, RuleKind: rule.Kind,
+		Success: true, CreatedAt: time.Now(),
 	})
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func ruleKindLabel(kind string) string {
-	if kind == ipRuleDeny {
-		return "黑名单"
-	}
-	return "白名单"
 }
 
 func writeIPRuleError(w http.ResponseWriter, err error) {

@@ -39,19 +39,20 @@ type GamesConfig struct {
 }
 
 type Config struct {
-	Listen            string      `json:"listen"`
-	Demo              bool        `json:"demo"`
-	SecureCookies     bool        `json:"secureCookies"`
-	LogFile           string      `json:"-"`
-	AdminPassword     string      `json:"-"`
-	PasswordFile      string      `json:"adminPasswordFile,omitempty"`
-	AccessFile        string      `json:"accessFile,omitempty"`
-	AuditFile         string      `json:"auditFile,omitempty"`
-	ConfigAuditFile   string      `json:"configAuditFile,omitempty"`
-	IPRulesFile       string      `json:"ipRulesFile,omitempty"`
-	DeviceKeyFile     string      `json:"deviceKeyFile,omitempty"`
-	TrustedProxyCIDRs []string    `json:"trustedProxyCidrs,omitempty"`
-	Games             GamesConfig `json:"games"`
+	Listen             string      `json:"listen"`
+	Demo               bool        `json:"demo"`
+	SecureCookies      bool        `json:"secureCookies"`
+	LogFile            string      `json:"-"`
+	AdminPassword      string      `json:"-"`
+	PasswordFile       string      `json:"adminPasswordFile,omitempty"`
+	AccessFile         string      `json:"accessFile,omitempty"`
+	AuditFile          string      `json:"auditFile,omitempty"`
+	ConfigAuditFile    string      `json:"configAuditFile,omitempty"`
+	OperationAuditFile string      `json:"operationAuditFile,omitempty"`
+	IPRulesFile        string      `json:"ipRulesFile,omitempty"`
+	DeviceKeyFile      string      `json:"deviceKeyFile,omitempty"`
+	TrustedProxyCIDRs  []string    `json:"trustedProxyCidrs,omitempty"`
+	Games              GamesConfig `json:"games"`
 }
 
 func Load(path string) (Config, error) {
@@ -101,6 +102,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.ConfigAuditFile == "" && cfg.AuditFile != "" {
 		cfg.ConfigAuditFile = filepath.Join(filepath.Dir(cfg.AuditFile), "config-audit.jsonl")
+	}
+	if cfg.OperationAuditFile == "" && cfg.AuditFile != "" {
+		cfg.OperationAuditFile = filepath.Join(filepath.Dir(cfg.AuditFile), "operation-audit.jsonl")
 	}
 	if cfg.IPRulesFile == "" && cfg.AuditFile != "" {
 		cfg.IPRulesFile = filepath.Join(filepath.Dir(cfg.AuditFile), "ip-rules.json")

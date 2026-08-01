@@ -11,6 +11,16 @@ Unreleased and moves to a version section when a formal package is built.
 
 None.
 
+## 1.0.1 - 2026-08-01
+
+- Login and attack audit no longer mixes in IP-rule mutations. Legacy mixed records remain on disk,
+  but rule events are not shown as login attempts and cannot expose an action menu for the actor IP.
+- Added a separate administrator security-operation audit with structured actor and target fields.
+  It covers member-credential creation, updates, deletion, and IP allow/deny rule changes without
+  recording passwords, digests, or other credential secrets.
+- Security operations use an independent `operation-audit.jsonl`, retain the latest 1,000 entries,
+  and rotate at 5 MiB with one previous generation. Windows upgrades configure and preserve it.
+
 ## 1.0.0 - 2026-07-31
 
 - Added an on-demand check beside Current version on the Palworld detail page. SteamCMD compares the

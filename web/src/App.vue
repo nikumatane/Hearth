@@ -49,6 +49,7 @@ import {
   type LoginAuditEntry,
   type Logs,
   type MemberCredential,
+  type OperationAuditEntry,
   type Overview,
   type PalworldSettings,
   type Permission,
@@ -141,10 +142,11 @@ const credentialId = ref("");
 const currentPermissions = ref<Permission[]>([]);
 const members = ref<MemberCredential[]>([]);
 const auditEntries = ref<LoginAuditEntry[]>([]);
+const operationAuditEntries = ref<OperationAuditEntry[]>([]);
 const configAuditEntries = ref<ConfigAuditEntry[]>([]);
 const ipRules = ref<IPRule[]>([]);
 const accessLoading = ref(false);
-const accessTab = ref<"members" | "audit" | "config-audit" | "ip-rules">("members");
+const accessTab = ref<"members" | "audit" | "operation-audit" | "config-audit" | "ip-rules">("members");
 const auditMenuEntryId = ref("");
 const newRuleIP = ref("");
 const newRuleKind = ref<IPRule["kind"]>("deny");
@@ -335,6 +337,7 @@ async function logout() {
   currentPermissions.value = [];
   members.value = [];
   auditEntries.value = [];
+  operationAuditEntries.value = [];
   configAuditEntries.value = [];
   ipRules.value = [];
   if (pollTimer) window.clearTimeout(pollTimer);
@@ -427,20 +430,31 @@ async function loadAccess() {
   if (!isAdmin.value) return;
   accessLoading.value = true;
   try {
-    const [memberResult, auditResult, configAuditResult, ipRuleResult] = await Promise.all([
+    const [memberResult, auditResult, operationAuditResult, configAuditResult, ipRuleResult] = await Promise.all([
       api.members(),
       api.loginAudit(),
+      api.operationAudit(),
       api.configAudit(),
       api.ipRules()
     ]);
     members.value = memberResult.members ?? [];
     auditEntries.value = auditResult.entries ?? [];
+    operationAuditEntries.value = operationAuditResult.entries ?? [];
     configAuditEntries.value = configAuditResult.entries ?? [];
     ipRules.value = ipRuleResult.rules ?? [];
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "权限数据加载失败");
   } finally {
     accessLoading.value = false;
+  }
+}
+
+async function refreshOperationAuditAfterMutation() {
+  try {
+    operationAuditEntries.value = (await api.operationAudit()).entries ?? [];
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -457,7 +471,8 @@ async function addMember() {
     newMemberPassword.value = "";
     newMemberPermissions.value = [];
     members.value = [member, ...members.value];
-    showToast("success", `成员密码 ${member.id} 已添加`);
+    const auditRefreshed = await refreshOperationAuditAfterMutation();
+    showToast("success", `成员密码 ${member.id} 已添加${auditRefreshed ? "" : "；刷新页面可查看审计记录"}`);
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "成员密码添加失败");
   }
@@ -486,7 +501,8 @@ async function saveMember(member: MemberCredential) {
     members.value = members.value.map((item) => item.id === member.id ? updated : item);
     editingMemberId.value = "";
     editingMemberPassword.value = "";
-    showToast("success", `成员密码 ${member.id} 的密码或权限已更新，原会话已退出`);
+    const auditRefreshed = await refreshOperationAuditAfterMutation();
+    showToast("success", `成员密码 ${member.id} 的密码或权限已更新，原会话已退出${auditRefreshed ? "" : "；刷新页面可查看审计记录"}`);
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "成员密码更新失败");
   }
@@ -497,7 +513,8 @@ async function removeMember(member: MemberCredential) {
     await api.deleteMember(member.id);
     members.value = members.value.filter((item) => item.id !== member.id);
     deletingMemberId.value = "";
-    showToast("success", `成员密码 ${member.id} 已删除`);
+    const auditRefreshed = await refreshOperationAuditAfterMutation();
+    showToast("success", `成员密码 ${member.id} 已删除${auditRefreshed ? "" : "；刷新页面可查看审计记录"}`);
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "成员密码删除失败");
   }
@@ -841,9 +858,6 @@ function auditCredentialLabel(entry: LoginAuditEntry) {
 }
 
 function auditResultLabel(entry: LoginAuditEntry) {
-  if (entry.event === "ip_rule_added" || entry.event === "ip_rule_removed") {
-    return entry.reason || "IP 规则已变更";
-  }
   if (entry.success) return "登录成功";
   return entry.reason || "登录失败";
 }
@@ -873,8 +887,8 @@ async function addIPRule() {
     upsertIPRule(rule);
     newRuleIP.value = "";
     newRuleNote.value = "";
-    auditEntries.value = (await api.loginAudit()).entries ?? [];
-    showToast("success", `${ip} 已加入${newRuleKind.value === "deny" ? "黑" : "白"}名单`);
+    const auditRefreshed = await refreshOperationAuditAfterMutation();
+    showToast("success", `${ip} 已加入${newRuleKind.value === "deny" ? "黑" : "白"}名单${auditRefreshed ? "" : "；刷新页面可查看审计记录"}`);
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "IP 规则保存失败");
   } finally {
@@ -894,8 +908,8 @@ async function quickSetIPRule(entry: LoginAuditEntry, kind: IPRule["kind"]) {
       confirmCurrentIp: kind === "deny"
     });
     upsertIPRule(rule);
-    auditEntries.value = (await api.loginAudit()).entries ?? [];
-    showToast("success", `${entry.ip} 已加入${kind === "deny" ? "黑" : "白"}名单`);
+    const auditRefreshed = await refreshOperationAuditAfterMutation();
+    showToast("success", `${entry.ip} 已加入${kind === "deny" ? "黑" : "白"}名单${auditRefreshed ? "" : "；刷新页面可查看审计记录"}`);
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "IP 规则保存失败");
   }
@@ -909,8 +923,8 @@ async function removeIPRule(rule: IPRule) {
   try {
     await api.deleteIPRule(rule.id);
     ipRules.value = ipRules.value.filter((item) => item.id !== rule.id);
-    auditEntries.value = (await api.loginAudit()).entries ?? [];
-    showToast("success", "IP 规则已删除");
+    const auditRefreshed = await refreshOperationAuditAfterMutation();
+    showToast("success", `IP 规则已删除${auditRefreshed ? "" : "；刷新页面可查看审计记录"}`);
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "IP 规则删除失败");
   } finally {
@@ -942,6 +956,47 @@ function configAuditCredentialLabel(entry: ConfigAuditEntry) {
 function configAuditChangeLabel(change: ConfigAuditChange) {
   if (change.sensitive) return "敏感值已修改";
   return `${change.before || "（空）"} → ${change.after || "（空）"}`;
+}
+
+function operationActorLabel(entry: OperationAuditEntry) {
+  return entry.actorRole === "admin" ? "管理员" : `成员 ${entry.actorCredentialId}`;
+}
+
+function operationActionLabel(entry: OperationAuditEntry) {
+  switch (entry.event) {
+    case "member_created": return "创建成员凭据";
+    case "member_updated": return "修改成员凭据";
+    case "member_deleted": return "删除成员凭据";
+    case "ip_rule_added": return `保存${entry.ruleKind === "deny" ? "黑" : "白"}名单规则`;
+    case "ip_rule_removed": return `删除${entry.ruleKind === "deny" ? "黑" : "白"}名单规则`;
+  }
+}
+
+function operationTargetLabel(entry: OperationAuditEntry) {
+  return entry.targetType === "member" ? entry.targetId || "未知成员" : entry.targetIp || "未知 IP";
+}
+
+function operationDetailLabel(entry: OperationAuditEntry) {
+  if (entry.event === "member_created") {
+    return entry.currentPermissions?.length
+      ? `初始权限：${entry.currentPermissions.map(permissionLabel).join("、")}`
+      : "初始权限：只读";
+  }
+  if (entry.event === "member_updated") {
+    const changes: string[] = [];
+    if (entry.passwordChanged) changes.push("密码已修改");
+    if (entry.permissionsChanged) {
+      changes.push(entry.currentPermissions?.length
+        ? `权限：${entry.currentPermissions.map(permissionLabel).join("、")}`
+        : "权限：只读");
+    }
+    return changes.join(" · ") || "成员信息已更新";
+  }
+  if (entry.event === "ip_rule_added") {
+    return entry.expiresAt ? `有效至 ${formatDateTime(entry.expiresAt)}` : "永久生效";
+  }
+  if (entry.event === "member_deleted") return "成员凭据已删除，原会话已失效";
+  return "IP 规则已删除";
 }
 
 function gameAccent(id: string) {
@@ -1566,8 +1621,16 @@ function gameAccent(id: string) {
             </button>
             <button :class="{ active: accessTab === 'audit' }" @click="accessTab = 'audit'">
               <History :size="17" />
-              登录 IP 审计
+              登录与攻击
               <span>{{ auditEntries.length }}</span>
+            </button>
+            <button
+              :class="{ active: accessTab === 'operation-audit' }"
+              @click="accessTab = 'operation-audit'"
+            >
+              <ShieldCheck :size="17" />
+              安全操作审计
+              <span>{{ operationAuditEntries.length }}</span>
             </button>
             <button
               :class="{ active: accessTab === 'config-audit' }"
@@ -1585,7 +1648,7 @@ function gameAccent(id: string) {
           </section>
 
           <div
-            v-if="accessLoading && members.length === 0 && auditEntries.length === 0 && configAuditEntries.length === 0 && ipRules.length === 0"
+            v-if="accessLoading && members.length === 0 && auditEntries.length === 0 && operationAuditEntries.length === 0 && configAuditEntries.length === 0 && ipRules.length === 0"
             class="page-loader"
           >
             <LoaderCircle class="spin" :size="22" />正在读取权限数据…
@@ -1649,7 +1712,7 @@ function gameAccent(id: string) {
               </form>
               <div class="access-note">
                 <ShieldCheck :size="17" />
-                <span>模板只是快捷选择，最终以后端勾选项为准。任务日志、两类审计和成员管理始终只对管理员开放。</span>
+                <span>模板只是快捷选择，最终以后端勾选项为准。任务日志、三类审计和成员管理始终只对管理员开放。</span>
               </div>
             </article>
 
@@ -1761,8 +1824,8 @@ function gameAccent(id: string) {
           <section v-else-if="accessTab === 'audit'" class="panel-card audit-card">
             <div class="card-heading">
               <div>
-                <h2>登录源审计</h2>
-                <p>保留最近 500 次登录尝试，包含来源 IP、凭据身份、结果与时间。</p>
+                <h2>登录与攻击审计</h2>
+                <p>只记录登录尝试、限流和黑名单拦截；安全配置操作不会混入这里。</p>
               </div>
               <History :size="19" />
             </div>
@@ -1771,7 +1834,7 @@ function gameAccent(id: string) {
                 <thead>
                   <tr>
                     <th>登录时间</th>
-                    <th>来源 IP</th>
+                    <th>登录来源 IP</th>
                     <th>使用凭据</th>
                     <th>结果</th>
                     <th aria-label="操作"></th>
@@ -1811,10 +1874,10 @@ function gameAccent(id: string) {
                       <div v-if="auditMenuEntryId === entry.id" class="audit-action-menu">
                         <button @click="copyAuditIP(entry)">复制 IP</button>
                         <button class="danger" @click="quickSetIPRule(entry, 'deny')">
-                          加入黑名单 24 小时
+                          将该登录来源加入黑名单 24 小时
                         </button>
                         <button @click="quickSetIPRule(entry, 'allow')">
-                          加入白名单 7 天
+                          将该登录来源加入白名单 7 天
                         </button>
                       </div>
                     </td>
@@ -1826,6 +1889,54 @@ function gameAccent(id: string) {
               <History :size="24" />
               <strong>还没有登录审计记录</strong>
               <span>下一次登录尝试会显示在这里。</span>
+            </div>
+          </section>
+
+          <section v-else-if="accessTab === 'operation-audit'" class="panel-card audit-card">
+            <div class="card-heading">
+              <div>
+                <h2>安全操作审计</h2>
+                <p>独立记录成员凭据与 IP 规则变更，明确区分操作者来源和操作目标。</p>
+              </div>
+              <ShieldCheck :size="19" />
+            </div>
+            <div v-if="operationAuditEntries.length" class="audit-table-wrap">
+              <table class="audit-table operation-audit-table">
+                <thead>
+                  <tr>
+                    <th>操作时间</th>
+                    <th>操作者</th>
+                    <th>操作来源 IP</th>
+                    <th>操作内容</th>
+                    <th>操作目标</th>
+                    <th>结果</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="entry in operationAuditEntries" :key="entry.id">
+                    <td>{{ formatDateTime(entry.createdAt) }}</td>
+                    <td>{{ operationActorLabel(entry) }}</td>
+                    <td><code>{{ entry.actorIp || "未知" }}</code></td>
+                    <td>
+                      <strong>{{ operationActionLabel(entry) }}</strong>
+                      <small>{{ operationDetailLabel(entry) }}</small>
+                    </td>
+                    <td><code>{{ operationTargetLabel(entry) }}</code></td>
+                    <td>
+                      <span :class="['audit-result', entry.success ? 'success' : 'failure']">
+                        <Check v-if="entry.success" :size="13" />
+                        <AlertTriangle v-else :size="13" />
+                        {{ entry.success ? "成功" : "失败" }}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="access-empty">
+              <ShieldCheck :size="24" />
+              <strong>还没有安全操作记录</strong>
+              <span>下一次成功修改成员凭据或 IP 规则后会显示在这里。</span>
             </div>
           </section>
 

@@ -36,6 +36,7 @@ $passwordPath = Join-Path $installRoot 'admin-password.txt'
 $accessPath = Join-Path $installRoot 'member-credentials.json'
 $auditPath = Join-Path $installRoot 'login-audit.jsonl'
 $configAuditPath = Join-Path $installRoot 'config-audit.jsonl'
+$operationAuditPath = Join-Path $installRoot 'operation-audit.jsonl'
 $ipRulesPath = Join-Path $installRoot 'ip-rules.json'
 $deviceKeyPath = Join-Path $installRoot 'device-cookie.key'
 $logPath = Join-Path $installRoot 'panel.log'
@@ -118,6 +119,7 @@ try {
         accessFile        = $accessPath
         auditFile         = $auditPath
         configAuditFile   = $configAuditPath
+        operationAuditFile = $operationAuditPath
         ipRulesFile       = $ipRulesPath
         deviceKeyFile     = $deviceKeyPath
         trustedProxyCidrs = @('127.0.0.0/8', '::1/128')

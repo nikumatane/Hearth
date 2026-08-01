@@ -63,7 +63,7 @@ The installer:
 1. Verifies SteamCMD, PalServer, the active settings file, and the default settings file.
 2. Copies the panel to `C:\ProgramData\Hearth`.
 3. Creates a separate panel administrator-password file and restricts its ACL.
-4. Configures member-password digests, login audit, parameter audit, IP rules, and the device-cookie
+4. Configures member-password digests, login, security-operation, and parameter audit, IP rules, and the device-cookie
    signing key while retaining existing content during upgrade.
 5. Registers a startup scheduled task named `Hearth`.
 6. Listens only on `127.0.0.1:8080`.
@@ -119,15 +119,18 @@ A unique password or passphrase of 14 characters or more is recommended in pract
 - Gameplay settings contain only routine rules from the backend allowlist. Passwords, REST/RCON,
   cross-play, mods, performance and disk settings, unknown advanced settings, and
   `WorldOption.sav` remain administrator-only.
-- Task logs, member management, login-IP audit, parameter audit, and IP rules remain
+- Task logs, member management, login and attack, security-operation, parameter audit, and IP rules remain
   administrator-only.
 - Changing a member password or permissions logs out its existing sessions. Opening or refreshing
   the page still requires another login.
 - Login audit shows source IP, administrator/member credential ID, result, suspected-attack severity,
   and time without storing the submitted password.
-- The audit row menu can deny an exact IP for 24 hours or allow it for seven days; complete rules are
+- A login row menu can deny that login source IP for 24 hours or allow it for seven days; complete rules are
   managed on the IP rules page. Deny rules reject before password computation, while allow rules
   still require the correct password.
+- Successful member-credential and IP-rule changes go to a separate Security operation audit with
+  distinct actor-source and target fields. They never appear as login attempts and never store a
+  password or password digest.
 - A successful login stores a signed known-device cookie. It receives only a separate throttle lane
   and cannot sign in without a password or access authenticated APIs. Refreshing the page still logs
   out the old session and asks for the password.
@@ -139,6 +142,7 @@ Administrators:
 admin-password.txt
 member-credentials.json
 login-audit.jsonl
+operation-audit.jsonl
 config-audit.jsonl
 ip-rules.json
 device-cookie.key

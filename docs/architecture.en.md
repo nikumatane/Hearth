@@ -62,17 +62,23 @@ current small-server use case.
   and the complete `WorldOption.sav` remain administrator-only.
 - Legacy `palworld.settings` permission is narrowed to `palworld.settings.gameplay` when loaded so
   upgrades cannot retain an overly broad capability.
-- Member management, task logs, login audit, and parameter audit are always administrator-only and
+- Member management, task logs, login, security-operation, and parameter audit are always administrator-only and
   cannot be delegated through member permissions.
 - Login audit records source IP, credential ID, result, reason, attack severity, consecutive failure
-  count, and time, but never the submitted password. Adding and removing IP rules uses the same
-  audit stream.
+  count, and time, but never the submitted password. It contains only login, throttling, and deny-rule
+  blocking events.
+- Security-operation audit uses structured actor and target fields for member-credential create,
+  update, and delete operations and IP allow/deny rule changes. `actorIp` identifies the management
+  request source; `targetIp` or `targetId` identifies the changed object. Password changes store only
+  a boolean marker, never a password, digest, or previous value.
 - Parameter audit runs only after a successful `PalWorldSettings.ini` save and compares structured
   values before and after the write. It records actor, source IP, configuration revision, and actual
   changes. Sensitive values are marked as changed without recording their contents.
 - Parameter audit uses database-free JSONL with the most recent 1,000 entries in memory. Files
   rotate at 5 MiB and retain one previous generation. A write failure is logged but does not falsely
   report that a successfully replaced configuration file failed to save.
+- Security operations use a separate `operation-audit.jsonl`, also retaining the latest 1,000 entries
+  and one 5 MiB rotated generation so attack traffic cannot evict administrator-change evidence.
 - Login failures use exponential backoff per source: ordinary sources begin at the fifth consecutive
   failure with delays of 1, 2, 4, and 8 seconds up to five minutes. Known devices and allowlisted
   sources begin at the tenth failure and cap at 30 seconds. A successful password check clears only
@@ -142,9 +148,9 @@ current small-server use case.
 - SteamCMD self-update is not killed by a fixed total duration, while true lack of progress times out
   with a retryable error.
 - Administrators can add, edit, and remove member passwords, assign capabilities per password, and
-  view login-IP and parameter audit.
+  view login, security-operation, and parameter audit.
 - Members without the matching capability cannot call process or configuration APIs. No member can
-  access task logs, member management, or either audit API.
+  access task logs, member management, or any audit API.
 - A member with gameplay-setting permission can read and change only allowlisted INI settings, not
   raw INI, `WorldOption.sav`, or system/security settings.
 - Palworld configuration supports structured editing with a raw-configuration fallback.

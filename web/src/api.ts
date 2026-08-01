@@ -129,12 +129,30 @@ export type LoginAuditEntry = {
   role?: "admin" | "member";
   success: boolean;
   reason?: string;
-  event?: "login" | "attack_limited" | "attack_blocked" | "ip_rule_added" | "ip_rule_removed";
+  event?: "login" | "attack_limited" | "attack_blocked";
   severity?: "warning" | "critical";
   attemptCount?: number;
   knownDevice?: boolean;
   ruleId?: string;
   ruleKind?: "allow" | "deny";
+  createdAt: string;
+};
+
+export type OperationAuditEntry = {
+  id: string;
+  event: "member_created" | "member_updated" | "member_deleted" | "ip_rule_added" | "ip_rule_removed";
+  actorCredentialId: string;
+  actorRole: "admin" | "member";
+  actorIp: string;
+  targetType: "member" | "ip_rule";
+  targetId?: string;
+  targetIp?: string;
+  ruleKind?: "allow" | "deny";
+  expiresAt?: string;
+  passwordChanged?: boolean;
+  permissionsChanged?: boolean;
+  currentPermissions?: Permission[];
+  success: boolean;
   createdAt: string;
 };
 
@@ -270,6 +288,8 @@ export const api = {
     }),
   loginAudit: () =>
     request<{ entries: LoginAuditEntry[] }>("/api/v1/access/audit"),
+  operationAudit: () =>
+    request<{ entries: OperationAuditEntry[] }>("/api/v1/access/operation-audit"),
   configAudit: () =>
     request<{ entries: ConfigAuditEntry[] }>("/api/v1/access/config-audit"),
   ipRules: () =>

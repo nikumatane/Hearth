@@ -227,19 +227,19 @@ func (s *accessStore) updateMember(
 	id string,
 	password *string,
 	permissions *[]string,
-) (memberView, error) {
+) (memberView, bool, error) {
 	if password == nil && permissions == nil {
-		return memberView{}, errors.New("至少需要修改密码或权限")
+		return memberView{}, false, errors.New("至少需要修改密码或权限")
 	}
 	var digest passwordDigest
 	if password != nil {
 		if err := validateMemberPassword(*password); err != nil {
-			return memberView{}, err
+			return memberView{}, false, err
 		}
 		var err error
 		digest, err = newPasswordDigest(*password)
 		if err != nil {
-			return memberView{}, err
+			return memberView{}, false, err
 		}
 	}
 	var normalizedPermissions []string
@@ -247,19 +247,20 @@ func (s *accessStore) updateMember(
 		var err error
 		normalizedPermissions, err = normalizePermissions(*permissions)
 		if err != nil {
-			return memberView{}, err
+			return memberView{}, false, err
 		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	index := s.memberIndexLocked(id)
 	if index < 0 {
-		return memberView{}, errMemberNotFound
+		return memberView{}, false, errMemberNotFound
 	}
 	if password != nil && s.passwordExistsLocked(*password, id) {
-		return memberView{}, errCredentialExists
+		return memberView{}, false, errCredentialExists
 	}
 	previous := s.members[index]
+	permissionsChanged := permissions != nil && !slices.Equal(previous.Permissions, normalizedPermissions)
 	now := time.Now()
 	if password != nil {
 		s.members[index].Password = digest
@@ -270,14 +271,14 @@ func (s *accessStore) updateMember(
 	s.members[index].UpdatedAt = now
 	if err := s.persistMembersLocked(); err != nil {
 		s.members[index] = previous
-		return memberView{}, err
+		return memberView{}, false, err
 	}
 	member := s.members[index]
 	return memberView{
 		ID: member.ID, Permissions: slices.Clone(member.Permissions),
 		CreatedAt: member.CreatedAt, UpdatedAt: member.UpdatedAt,
 		LastUsedAt: member.LastUsedAt,
-	}, nil
+	}, permissionsChanged, nil
 }
 
 func (s *accessStore) deleteMember(id string) error {
@@ -359,7 +360,22 @@ func (s *accessStore) recordAudit(entry auditEntry) {
 func (s *accessStore) auditEntries() []auditEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return slices.Clone(s.audits)
+	entries := make([]auditEntry, 0, len(s.audits))
+	for _, entry := range s.audits {
+		if isLoginAuditEvent(entry.Event) {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+func isLoginAuditEvent(event string) bool {
+	switch event {
+	case "", "login", "attack_limited", "attack_blocked":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *accessStore) loadMembers() error {
@@ -439,7 +455,7 @@ func readLoginAuditFile(path string) ([]auditEntry, error) {
 	for scanner.Scan() {
 		var entry auditEntry
 		if json.Unmarshal(scanner.Bytes(), &entry) == nil &&
-			entry.ID != "" && !entry.CreatedAt.IsZero() {
+			entry.ID != "" && !entry.CreatedAt.IsZero() && isLoginAuditEvent(entry.Event) {
 			entries = append(entries, entry)
 		}
 	}

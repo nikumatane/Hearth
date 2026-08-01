@@ -2891,6 +2891,30 @@ textarea:focus-visible {
   font-size: 11px;
 }
 
+.operation-audit-table td {
+  height: auto;
+  min-height: 58px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  vertical-align: top;
+}
+
+.operation-audit-table td:nth-child(4) {
+  min-width: 240px;
+  white-space: normal;
+}
+
+.operation-audit-table td:nth-child(4) strong,
+.operation-audit-table td:nth-child(4) small {
+  display: block;
+}
+
+.operation-audit-table td:nth-child(4) small {
+  margin-top: 5px;
+  color: #657187;
+  line-height: 1.45;
+}
+
 .config-audit-changes {
   min-width: 320px;
   display: grid;

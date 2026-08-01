@@ -26,15 +26,16 @@ import (
 )
 
 type server struct {
-	config       config.Config
-	service      panel.Service
-	sessions     *sessionStore
-	logins       *loginGate
-	access       *accessStore
-	configAudits *configAuditStore
-	proxy        *proxyResolver
-	devices      *deviceCookieManager
-	ipRules      *ipRuleStore
+	config          config.Config
+	service         panel.Service
+	sessions        *sessionStore
+	logins          *loginGate
+	access          *accessStore
+	configAudits    *configAuditStore
+	operationAudits *operationAuditStore
+	proxy           *proxyResolver
+	devices         *deviceCookieManager
+	ipRules         *ipRuleStore
 }
 
 func New(cfg config.Config, service panel.Service) (http.Handler, error) {
@@ -43,6 +44,10 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 		return nil, err
 	}
 	configAudits, err := newConfigAuditStore(cfg.ConfigAuditFile)
+	if err != nil {
+		return nil, err
+	}
+	operationAudits, err := newOperationAuditStore(cfg.OperationAuditFile)
 	if err != nil {
 		return nil, err
 	}
@@ -59,15 +64,16 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 		return nil, err
 	}
 	s := &server{
-		config:       cfg,
-		service:      service,
-		sessions:     newSessionStore(),
-		logins:       newLoginGate(),
-		access:       access,
-		configAudits: configAudits,
-		proxy:        proxy,
-		devices:      devices,
-		ipRules:      ipRules,
+		config:          cfg,
+		service:         service,
+		sessions:        newSessionStore(),
+		logins:          newLoginGate(),
+		access:          access,
+		configAudits:    configAudits,
+		operationAudits: operationAudits,
+		proxy:           proxy,
+		devices:         devices,
+		ipRules:         ipRules,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
@@ -100,6 +106,7 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 	mux.HandleFunc("DELETE /api/v1/access/members/{id}", s.admin(s.deleteMember))
 	mux.HandleFunc("GET /api/v1/access/audit", s.admin(s.loginAudit))
 	mux.HandleFunc("GET /api/v1/access/config-audit", s.admin(s.configAudit))
+	mux.HandleFunc("GET /api/v1/access/operation-audit", s.admin(s.operationAudit))
 	mux.HandleFunc("GET /api/v1/access/ip-rules", s.admin(s.listIPRules))
 	mux.HandleFunc("POST /api/v1/access/ip-rules", s.admin(s.createIPRule))
 	mux.HandleFunc("DELETE /api/v1/access/ip-rules/{id}", s.admin(s.deleteIPRule))

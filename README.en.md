@@ -40,7 +40,7 @@ Hearth is intended for setups where:
 | Palworld configuration | Read and incrementally save `WorldOption.sav` / `PalWorldSettings.ini` as separate sources, with duplicate-source conflict indicators |
 | Monitoring | CPU, memory, disk, process, version, on-demand Steam public-branch checks, save ID, players, and uptime |
 | Access control | One administrator password, up to 20 username-free member passwords, permission presets, adaptive throttling, and IP allow/deny rules |
-| Audit | Administrator-only recent activity, task logs, login/attack audit, IP-rule changes, and parameter audit; passwords are never logged |
+| Audit | Administrator-only recent activity, task logs, login/attack, security-operation, and parameter audit; passwords are never logged |
 | Deployment | Single-file Windows application, startup scheduled task, and versioned package |
 
 ### Permission model
@@ -54,7 +54,7 @@ Hearth is intended for setups where:
 | Change routine Palworld gameplay settings | ✓ | Optional permission |
 | Change system/security settings or `WorldOption.sav` | ✓ | — |
 | Manage member passwords | ✓ | — |
-| View task logs, IP rules, and both audit views | ✓ | — |
+| View task logs, IP rules, and all three audit views | ✓ | — |
 
 New members are read-only by default. Administrators can start with the Read-only, Daily
 management, or Server owner preset and then adjust individual permissions. Member passwords
@@ -83,7 +83,9 @@ Sensitive settings are recorded only as “changed,” without their values. Rec
 `config-audit.jsonl`, rotated at 5 MiB with one previous generation retained, and the most recent
 1,000 entries are available under Access control → Parameter audit. `WorldOption.sav` remains
 administrator-only and currently does not receive per-parameter auditing. The login audit uses the
-same 5 MiB rotation policy.
+same 5 MiB rotation policy. Successful member-credential and IP-rule mutations use an independent
+`operation-audit.jsonl` with structured actor and target fields, no passwords or digests, the most
+recent 1,000 entries in memory, and the same 5 MiB one-generation rotation policy.
 
 Login protection uses adaptive backoff per source. Ordinary sources begin at a one-second delay
 after five consecutive failures and can reach five minutes. Signed known devices and allowlisted
@@ -94,10 +96,10 @@ access authenticated APIs. Concurrent password-digest verification is also bound
 CPU from PBKDF2 floods.
 
 At the attack threshold, the login audit explicitly labels suspected automated attempts or brute
-force. An administrator can use the row menu to deny an exact IP for 24 hours or allow it for seven
+force. An administrator can use a login row menu to deny that login source IP for 24 hours or allow it for seven
 days, or configure rules from one hour through 365 days—or permanently—on the IP rules page. Deny
-rules reject before password computation; allow rules still require the correct password. Rule
-changes are written to the same audit stream.
+rules reject before password computation; allow rules still require the correct password. Member
+and IP-rule changes appear only in Security operation audit and never masquerade as login attempts.
 
 Hearth accepts `X-Forwarded-For` and `X-Forwarded-Proto` only from proxies listed in
 `trustedProxyCidrs`, and resolves the real client from the right side of the proxy chain. By default,

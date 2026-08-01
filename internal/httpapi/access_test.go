@@ -75,7 +75,7 @@ func TestAccessStorePersistsOnlyPasswordDigests(t *testing.T) {
 	}
 	newPassword := "friend-secret-456"
 	newPermissions := []string{permissionGameBackup}
-	if _, err := reloaded.updateMember(member.ID, &newPassword, &newPermissions); err != nil {
+	if _, _, err := reloaded.updateMember(member.ID, &newPassword, &newPermissions); err != nil {
 		t.Fatalf("update member: %v", err)
 	}
 	if _, ok := reloaded.authenticate("friend-secret-123"); ok {
@@ -183,6 +183,7 @@ func TestAdminAndMemberPermissionsAndLoginAudit(t *testing.T) {
 		{path: "/api/v1/games/palworld/world-option", want: http.StatusForbidden},
 		{path: "/api/v1/access/members", want: http.StatusForbidden},
 		{path: "/api/v1/access/audit", want: http.StatusForbidden},
+		{path: "/api/v1/access/operation-audit", want: http.StatusForbidden},
 		{path: "/api/v1/access/config-audit", want: http.StatusForbidden},
 		{path: "/api/v1/access/ip-rules", want: http.StatusForbidden},
 	} {

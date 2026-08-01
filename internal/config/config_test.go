@@ -61,6 +61,9 @@ func TestLoadFileAndEnvironmentOverride(t *testing.T) {
 	if cfg.ConfigAuditFile != filepath.Join(directory, "config-audit.jsonl") {
 		t.Fatalf("ConfigAuditFile = %q", cfg.ConfigAuditFile)
 	}
+	if cfg.OperationAuditFile != filepath.Join(directory, "operation-audit.jsonl") {
+		t.Fatalf("OperationAuditFile = %q", cfg.OperationAuditFile)
+	}
 	if cfg.IPRulesFile != filepath.Join(directory, "ip-rules.json") {
 		t.Fatalf("IPRulesFile = %q", cfg.IPRulesFile)
 	}
