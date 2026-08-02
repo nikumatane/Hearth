@@ -38,7 +38,7 @@ Hearth is intended for setups where:
 | --- | --- |
 | Game lifecycle | Start, safe stop, restart, SteamCMD update, ZIP backup, and staged progress |
 | Palworld configuration | Read and incrementally save `WorldOption.sav` / `PalWorldSettings.ini` as separate sources, with duplicate-source conflict indicators |
-| Monitoring | CPU, memory, disk, process, version, on-demand Steam public-branch checks, save ID, players, and uptime |
+| Monitoring | CPU, memory, disk, process, version, low-frequency Palworld public-branch checks, save ID, players, and uptime |
 | Access control | One administrator password, up to 20 username-free member passwords, permission presets, adaptive throttling, and IP allow/deny rules |
 | Audit | Administrator-only recent activity, task logs, login/attack, security-operation, and parameter audit; passwords are never logged |
 | Deployment | Single-file Windows application, startup scheduled task, and versioned package |
@@ -156,6 +156,9 @@ Hearth always accesses the Palworld REST API through `127.0.0.1`. Starting remai
 REST is unavailable. Stop and restart first attempt a safe shutdown and, only after an explicit
 save-risk confirmation, can fall back to terminating the identified Palworld process. Update and
 backup while running still require REST and never silently degrade to forced termination.
+Before a safe shutdown, Hearth refreshes the online count. A confirmed empty server uses a five-second
+notice; online players or an unavailable count retain `shutdownWaitSeconds` (30 seconds by default),
+and task detail shows the shutdown countdown.
 
 After creating a ZIP successfully, Hearth cleans only backups it named itself: files older than 30
 days are removed first, followed by the oldest files until their total size is at most 20 GiB. The
@@ -166,15 +169,17 @@ See the [Windows Palworld deployment guide](docs/windows-palworld.en.md) for the
 
 ## Checking for a new Palworld version
 
-The Palworld detail page shows version-check state beside Current version. When Check for updates is
-clicked, Hearth runs the check as a normal serialized task. SteamCMD refreshes metadata only for App
-ID `2394010`; it does not modify server files. Hearth then compares the local manifest Build ID with
-the Steam public branch.
+The Palworld detail page shows server-version state beside Current version. Hearth attempts the first
+check 30 seconds after startup and evaluates again every 15 minutes, running another check only when
+the last successful result is at least six hours old. Failed automatic retries are at least one hour
+apart. Check for updates still triggers it immediately. Checks are serialized tasks and never preempt
+another Hearth or SteamCMD task.
 
-The check requires the Update server permission. It is rejected while another SteamCMD or Hearth
-task is running. Results are cached only in the current Hearth process and are reset after a panel
-restart or local Build ID change. This avoids starting SteamCMD in the background while idle and
-does not make a third-party version site a runtime dependency.
+The check has two internal phases: prepare SteamCMD first, then independently refresh public-branch
+metadata for App ID `2394010`. The SteamCMD version is neither displayed nor used for the server
+update result; the page reports only whether Palworld Dedicated Server has an update. Manual checks
+require Update server permission. Results stay in the current Hearth process and reset after a panel
+restart or local server Build ID change. No third-party version service is required.
 
 During a real update, SteamCMD checks and applies its own update first. Hearth treats continuous log
 growth as progress, so self-update, download, and verification do not cause a false timeout. By
@@ -211,7 +216,8 @@ HEARTH_DEMO=true HEARTH_ADMIN_PASSWORD='replace-me' ./bin/hearth
 - The current production adapter supports only Palworld 1.0 on Windows.
 - Frontend input is never executed as arbitrary shell text.
 - At most one mutating task runs for a game at a time.
-- SteamCMD is not launched in the background; version checks are explicitly user-triggered.
+- SteamCMD is launched in the background only for low-frequency Palworld server-version checks; a
+  busy task or existing SteamCMD process causes the automatic check to be skipped.
 - Monitoring time series and version-check results are not persisted long-term.
 - World settings can be viewed and edited while running, but writing requires a safe stop.
 - Hearth refuses to guess when it cannot identify the active save and never binds a fixed world ID.

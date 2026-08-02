@@ -129,9 +129,52 @@ export function encodeWorldOption(
 export function verifyWorldOptionData(document: WorldOptionDocument, expectedSemantic: string): void {
   const reparsed = parseWorldOption(document);
   const actualSemantic = LosslessJSON.stringify(reparsed.gvas) ?? "{}";
-  if (actualSemantic !== expectedSemantic) {
+  if (!worldOptionSemanticsEqual(expectedSemantic, actualSemantic)) {
     throw new Error("WorldOption.sav 往返校验失败，已拒绝保存");
   }
+}
+
+function worldOptionSemanticsEqual(expectedSemantic: string, actualSemantic: string): boolean {
+  if (expectedSemantic === actualSemantic) return true;
+  const expected = LosslessJSON.parse(expectedSemantic);
+  const actual = LosslessJSON.parse(actualSemantic);
+  return gvasValuesEqual(expected, actual, []);
+}
+
+function gvasValuesEqual(expected: any, actual: any, path: string[]): boolean {
+  if (isFloatValuePath(path)) {
+    const expectedNumber = Number(String(expected));
+    const actualNumber = Number(String(actual));
+    return Number.isFinite(expectedNumber) &&
+      Number.isFinite(actualNumber) &&
+      expectedNumber === actualNumber;
+  }
+  if (expected === null || actual === null ||
+      typeof expected !== "object" || typeof actual !== "object") {
+    return LosslessJSON.stringify(expected) === LosslessJSON.stringify(actual);
+  }
+  if (Array.isArray(expected) || Array.isArray(actual)) {
+    if (!Array.isArray(expected) || !Array.isArray(actual) || expected.length !== actual.length) {
+      return false;
+    }
+    return expected.every((item, index) => gvasValuesEqual(item, actual[index], [...path, String(index)]));
+  }
+  const expectedKeys = Object.keys(expected);
+  const actualKeys = Object.keys(actual);
+  if (expectedKeys.length !== actualKeys.length ||
+      expectedKeys.some((key, index) => key !== actualKeys[index])) {
+    return false;
+  }
+  return expectedKeys.every((key) =>
+    gvasValuesEqual(expected[key], actual[key], [...path, key])
+  );
+}
+
+function isFloatValuePath(path: string[]): boolean {
+  return path.length >= 3 &&
+    path[path.length - 3] === "Float" &&
+    path[path.length - 2] === "value" &&
+    path[path.length - 1] === "value";
 }
 
 export function verifyWorldOptionRoundTrip(

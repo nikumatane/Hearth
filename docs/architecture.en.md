@@ -22,9 +22,9 @@ Production is deployed as one Go binary:
 5. Hearth recognizes a currently running manually started Palworld process and takes over later
    lifecycle operations only after a user requests them.
 6. SteamCMD runs with a fixed App ID and absolute paths from server configuration.
-7. Version checking is an explicitly triggered, read-only SteamCMD task. It compares the local
-   manifest with the public-branch Build ID, never runs SteamCMD while idle, and does not depend on
-   a third-party version service.
+7. Version checking is a low-frequency automatic or manually triggered read-only SteamCMD task. It
+   prepares SteamCMD first, then independently compares the local manifest with App `2394010`'s
+   public-branch Build ID, without a third-party version service.
 8. Successful backups trigger centralized age and total-capacity cleanup of Hearth ZIP files. Real
    SteamCMD updates use log-progress timeouts and verify the target app's completion marker.
 
@@ -112,6 +112,8 @@ current small-server use case.
 - Stop and restart always try a REST shutdown first. When REST is unavailable and the user explicitly
   accepts the save risk, Hearth may terminate only the Palworld process whose PID and start time were
   captured when the task began.
+- A REST-confirmed empty server uses at most a five-second shutdown notice. Online players or a failed
+  count retain `shutdownWaitSeconds`, preventing monitoring failures from unexpectedly kicking users.
 - Update performs save, graceful stop, and a critical-file ZIP backup first.
 - A newly created ZIP is always retained. Older Hearth ZIPs default to 30 days and 20 GiB total.
   Cleanup failures become warnings rather than turning a successful backup into a false failure, and
@@ -121,13 +123,19 @@ current small-server use case.
 - SteamCMD self-update, server download, and verification share log-progress monitoring. The process
   tree is stopped only after 30 minutes without log growth. A clean exit without the App ID `2394010`
   success marker retries once so self-update cannot be mistaken for a completed server update.
-- Version checks share the serialized game-task lock and require Update server permission. They query
-  only Steam public-branch metadata and do not persist the result.
+- Version checks share the serialized game-task lock; manual checks require Update server permission.
+  The first automatic attempt starts after 30 seconds, a 15-minute poll evaluates staleness, and a
+  successful result remains fresh for six hours. Failed retries are at least one hour apart. Busy or
+  externally running SteamCMD skips the check. SteamCMD's own version is neither displayed nor used
+  for the result, which is not persisted.
+  Preparation reuses the SteamCMD no-log-progress timeout, so active self-update output is never
+  interrupted by a fixed total-duration deadline.
 - `WorldOption.sav` and `PalWorldSettings.ini` are read and saved as separate sources without automatic
   merge or cross-file synchronization.
 - Duplicate settings show a source conflict. Save requests contain only fields explicitly changed by
   the user and include a source-file revision check.
-- `WorldOption.sav` writes require a complete semantic round-trip verification.
+- `WorldOption.sav` writes require complete semantic round-trip verification. Float leaves compare by
+  numeric value so equivalent forms such as `5` and `5.0` do not produce a false failure.
 - Configuration writes use temporary file, validation, and atomic replacement.
 - Structured `PalWorldSettings.ini` responses mask passwords. Member responses also remove raw INI
   and every non-allowlisted setting. The raw `WorldOption.sav` document is administrator-only, and
@@ -137,9 +145,10 @@ current small-server use case.
 
 ## Current acceptance criteria
 
-- SteamCMD is not polled continuously while idle.
-- Version checks are user-triggered, distinguish unchecked/checking/current/update available/
-  unavailable, and do not modify server files.
+- SteamCMD is not polled continuously while idle; server-version checks run only when the six-hour
+  successful-result lifetime expires.
+- Version checks distinguish unchecked/checking/current/update available/unavailable, do not modify
+  server files, and cannot treat a SteamCMD self-update as a Palworld update.
 - Authenticated users can see real Palworld and host status.
 - Update, restart, and similar actions require confirmation and create traceable task records.
 - Long tasks show stage, latest detail, and 0–100% progress.

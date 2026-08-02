@@ -22,14 +22,19 @@ import (
 )
 
 const (
-	palworldID                          = "palworld"
-	palworldAppID                       = "2394010"
-	defaultBackupRetentionDays          = 30
-	defaultBackupMaxTotalGB       int64 = 20
-	defaultSteamNoProgressMinutes       = 30
-	maxBackupRetentionDays              = 36_500
-	maxSafeBackupTotalGB          int64 = (1<<63 - 1) / (1 << 30)
-	maxSteamNoProgressMinutes           = 7 * 24 * 60
+	palworldID                              = "palworld"
+	palworldAppID                           = "2394010"
+	defaultBackupRetentionDays              = 30
+	defaultBackupMaxTotalGB           int64 = 20
+	defaultSteamNoProgressMinutes           = 30
+	automaticVersionCheckInterval           = 6 * time.Hour
+	automaticVersionCheckFailureRetry       = time.Hour
+	automaticVersionCheckPollInterval       = 15 * time.Minute
+	automaticVersionCheckInitialDelay       = 30 * time.Second
+	emptyServerShutdownWaitSeconds          = 5
+	maxBackupRetentionDays                  = 36_500
+	maxSafeBackupTotalGB              int64 = (1<<63 - 1) / (1 << 30)
+	maxSteamNoProgressMinutes               = 7 * 24 * 60
 )
 
 var errSteamProcessTreeUncertain = errors.New("SteamCMD process-tree termination was incomplete")
@@ -58,9 +63,11 @@ type Service struct {
 	apiRefreshing bool
 	apiGeneration uint64
 
-	versionMu      sync.Mutex
-	versionStatus  steamVersionStatus
-	versionBuildID string
+	versionMu          sync.Mutex
+	versionStatus      steamVersionStatus
+	versionBuildID     string
+	versionCheckedAt   time.Time
+	versionAttemptedAt time.Time
 }
 
 type apiStatus struct {
@@ -90,6 +97,7 @@ func NewService(gameConfig config.GameConfig) (*Service, error) {
 	service.rest = client
 	service.apiRefreshing = true
 	go service.refreshAPIStatus(service.apiGeneration)
+	go service.runAutomaticVersionChecks()
 	return service, nil
 }
 
@@ -565,6 +573,8 @@ func (s *Service) versionStatusForBuild(buildID string) steamVersionStatus {
 	if buildID != s.versionBuildID {
 		s.versionBuildID = buildID
 		s.versionStatus = steamVersionStatus{State: versionCheckUnchecked}
+		s.versionCheckedAt = time.Time{}
+		s.versionAttemptedAt = time.Time{}
 	}
 	return s.versionStatus
 }
@@ -573,6 +583,13 @@ func (s *Service) setVersionStatus(buildID string, status steamVersionStatus) {
 	s.versionMu.Lock()
 	s.versionBuildID = buildID
 	s.versionStatus = status
+	if status.State == versionCheckChecking {
+		s.versionAttemptedAt = time.Now()
+		s.versionCheckedAt = time.Time{}
+	}
+	if status.State == versionCheckCurrent || status.State == versionCheckAvailable {
+		s.versionCheckedAt = time.Now()
+	}
 	s.versionMu.Unlock()
 }
 
@@ -668,16 +685,17 @@ func (s *Service) gracefulStop(report taskReporter) error {
 	}
 	cancel()
 
-	report("请求安全关闭", 30, "世界已保存，正在通知玩家并请求 Palworld 自行退出")
+	shutdownWaitSeconds, playerDetail := s.shutdownWaitSeconds()
+	report("请求安全关闭", 30, fmt.Sprintf("世界已保存，%s；将在 %d 秒后关闭", playerDetail, shutdownWaitSeconds))
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-	err := s.rest.shutdown(ctx, s.config.ShutdownWaitSeconds, "服务器维护中，请稍后重新连接。")
+	err := s.rest.shutdown(ctx, shutdownWaitSeconds, "服务器维护中，请稍后重新连接。")
 	cancel()
 	if err != nil {
 		return fmt.Errorf("request graceful shutdown: %w", err)
 	}
 
 	waitStarted := time.Now()
-	waitDuration := time.Duration(s.config.ShutdownWaitSeconds+45) * time.Second
+	waitDuration := time.Duration(shutdownWaitSeconds+45) * time.Second
 	deadline := waitStarted.Add(waitDuration)
 	for time.Now().Before(deadline) {
 		process, _, sampleErr := s.platform.sample(s.config.ProcessName, s.config.InstallDir)
@@ -689,10 +707,29 @@ func (s *Service) gracefulStop(report taskReporter) error {
 			return nil
 		}
 		waitProgress := int(time.Since(waitStarted) * 45 / waitDuration)
-		report("等待进程退出", min(95, 50+waitProgress), "安全关闭请求已发送，正在等待游戏进程退出")
+		remainingNotice := max(0, shutdownWaitSeconds-int(time.Since(waitStarted).Seconds()))
+		detail := "关闭倒计时结束，正在等待游戏进程完成退出"
+		if remainingNotice > 0 {
+			detail = fmt.Sprintf("安全关闭请求已发送，约 %d 秒后关闭游戏进程", remainingNotice)
+		}
+		report("等待进程退出", min(95, 50+waitProgress), detail)
 		time.Sleep(time.Second)
 	}
 	return errors.New("Palworld did not exit after the graceful shutdown deadline; process was left untouched")
+}
+
+func (s *Service) shutdownWaitSeconds() (int, string) {
+	waitSeconds := s.config.ShutdownWaitSeconds
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	players, err := s.rest.players(ctx)
+	cancel()
+	if err != nil || players.Players == nil {
+		return waitSeconds, "暂时无法确认在线人数，按完整通知时间处理"
+	}
+	if len(players.Players) > 0 {
+		return waitSeconds, fmt.Sprintf("当前有 %d 名玩家在线，按完整通知时间处理", len(players.Players))
+	}
+	return min(waitSeconds, emptyServerShutdownWaitSeconds), "当前没有玩家在线，使用快速安全关闭"
 }
 
 func (s *Service) forceStop(expected processSample, report taskReporter) error {
@@ -838,10 +875,7 @@ func (s *Service) runSteamCMD(logPath string, report taskReporter) error {
 	}
 	defer logFile.Close()
 
-	noProgressTimeout := time.Duration(s.config.SteamCmdNoProgressMinutes) * time.Minute
-	if noProgressTimeout <= 0 {
-		noProgressTimeout = defaultSteamNoProgressMinutes * time.Minute
-	}
+	noProgressTimeout := s.steamNoProgressTimeout()
 	for attempt := 1; attempt <= 2; attempt++ {
 		if attempt > 1 {
 			if _, err := fmt.Fprintln(logFile, "\n[Hearth] SteamCMD exited cleanly without an app completion marker; retrying once after a possible self-update."); err != nil {
@@ -858,6 +892,14 @@ func (s *Service) runSteamCMD(logPath string, report taskReporter) error {
 		}
 	}
 	return errors.New("SteamCMD exited successfully twice without confirming the Palworld app update")
+}
+
+func (s *Service) steamNoProgressTimeout() time.Duration {
+	timeout := time.Duration(s.config.SteamCmdNoProgressMinutes) * time.Minute
+	if timeout <= 0 {
+		return defaultSteamNoProgressMinutes * time.Minute
+	}
+	return timeout
 }
 
 func (s *Service) runSteamCMDAttempt(

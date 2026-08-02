@@ -217,7 +217,8 @@ checks for system or high-risk settings. Supported `WorldOption.sav` settings ar
 Duplicate settings show a source conflict, but Hearth does not automatically choose precedence or
 synchronize between files. Both sources submit only settings explicitly changed by the user, and a
 password is never written back unless re-entered. `WorldOption.sav` also receives a complete semantic
-round-trip verification before writing. Hearth creates a full ZIP backup before a write. Settings can
+round-trip verification before writing; float leaves compare numerically, so `5` and `5.0` are
+equivalent. Hearth creates a full ZIP backup before a write. Settings can
 be viewed and edited while running, but saving requires a safe stop.
 
 Start waits only for the game process and does not require REST. For complete management, verify REST
@@ -232,6 +233,9 @@ After a successful check, use Hearth for future stop, restart, backup, and updat
 If you keep an old process running, Hearth can still display read-only status. Until REST is verified,
 update and backup while running are rejected. Stop and restart still try safe shutdown first and can
 terminate only the originally identified process after the user explicitly accepts the save risk.
+Normal safe shutdown refreshes the online count: a confirmed empty server uses a five-second notice,
+while online players or a failed count retain `shutdownWaitSeconds` (30 seconds by default). Task
+progress shows the remaining notice time.
 
 ## Checking for a new version
 
@@ -239,18 +243,27 @@ Current version on the detail page prefers the game version returned by the Palw
 REST is unavailable, it shows the Build ID from local `appmanifest_2394010.acf`. These formats differ,
 so Hearth does not compare a game-version string directly with a Steam Build ID.
 
-A user with Update server permission can click Check for updates. The task:
+Hearth attempts its first check 30 seconds after startup, keeps a successful result for six hours,
+and only evaluates staleness every 15 minutes rather than continuously invoking SteamCMD. Failed
+automatic retries are at least one hour apart. A user with Update server permission can also click
+Check for updates. The task:
 
 1. Reads `buildid` from the local Steam manifest.
 2. Confirms no other SteamCMD or Hearth task is active.
-3. Runs SteamCMD `app_info_print 2394010` to refresh metadata without downloading or modifying the
+3. Starts SteamCMD separately to finish its own preparation. Its version is neither displayed nor
+   used for the server-version decision.
+4. Runs SteamCMD `app_info_print 2394010` to refresh metadata without downloading or modifying the
    Palworld server.
-4. Reads public-branch `buildid` and compares it with the local value.
-5. Displays Current, Update available, or Version check unavailable beside the current version.
+5. Reads public-branch `buildid` and compares it with the local value.
+6. Displays only Server current, Palworld server update available, or Server version check unavailable,
+   without placing differently formatted Build IDs beside the game version.
 
-The task shows stage and progress and waits at most two minutes. Results live only in the current
-Hearth process and return to Unchecked after panel restart or a local Build ID change. A SteamCMD
-query failure on the current network does not affect start, stop, backup, or a formal update.
+The task shows stage and progress. SteamCMD preparation reuses the
+`steamCmdNoProgressMinutes` timeout (30 minutes by default), so continuing self-update log output is
+not interrupted; the Palworld metadata query uses a two-minute no-progress timeout. Results live
+only in the current Hearth process and return to Unchecked after panel restart or a local Build ID
+change. A SteamCMD query failure on the current network does not affect start, stop, backup, or a
+formal update.
 
 Valve documents [`app_info_print`](https://partner.steamgames.com/doc/sdk/uploading?l=english#DebuggingBuildIssues)
 as a debugging command that displays the current Steamworks app configuration. Hearth reads only the

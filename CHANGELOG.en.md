@@ -11,6 +11,15 @@ Unreleased and moves to a version section when a formal package is built.
 
 None.
 
+## 1.0.2 - 2026-08-02
+
+- Fixed false `WorldOption.sav` round-trip failures when a float such as `5` is serialized as `5.0`,
+  while retaining strict full checks for unknown fields, structure, and non-float values.
+- Split server-version checks into SteamCMD preparation and a separate Palworld App `2394010` query,
+  removed the mixed game-version/Build-ID presentation, and added a six-hour low-frequency check.
+- Safe shutdown now refreshes the online count: empty servers use a five-second notice, while online
+  or unavailable counts retain the configured delay, with remaining time shown in task progress.
+
 ## 1.0.1 - 2026-08-01
 
 - Login and attack audit no longer mixes in IP-rule mutations. Legacy mixed records remain on disk,

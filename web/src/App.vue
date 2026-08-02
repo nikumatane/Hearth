@@ -806,15 +806,13 @@ function stateLabel(state: Game["state"]) {
 }
 
 function versionCheckLabel(game: Game) {
-  if (game.versionCheck === "unchecked") return "尚未检查 Steam public 分支";
-  if (game.versionCheck === "checking") return "正在检查 Steam 版本";
-  if (game.versionCheck === "current") return "已是最新版本";
+  if (game.versionCheck === "unchecked") return "等待自动检查服务端版本";
+  if (game.versionCheck === "checking") return "正在检查 Palworld 服务端版本";
+  if (game.versionCheck === "current") return "服务端已是最新版";
   if (game.versionCheck === "update_available") {
-    return game.availableVersion
-      ? `有新版本 · Steam Build ${game.availableVersion}`
-      : "Steam 提示有新版本";
+    return "Palworld 服务端有可用更新";
   }
-  if (game.versionCheck === "unavailable") return "版本检查暂不可用";
+  if (game.versionCheck === "unavailable") return "服务端版本检查暂不可用";
   return "";
 }
 
@@ -1291,8 +1289,8 @@ function gameAccent(id: string) {
                     <div>
                       <RefreshCw :size="16" />
                       <span>
-                        <strong>有新版本</strong>
-                        {{ game.availableVersion ? `Steam Build ${game.availableVersion}` : "Steam 提示需更新" }}
+                        <strong>服务端有更新</strong>
+                        Palworld Dedicated Server
                       </span>
                     </div>
                     <button
@@ -1482,8 +1480,7 @@ function gameAccent(id: string) {
             <div>
               <strong>发现新的服务端版本</strong>
               <span>
-                当前 {{ selectedGame.version }} ·
-                {{ selectedGame.availableVersion ? `可更新至 Steam Build ${selectedGame.availableVersion}` : "Steam 提示需更新" }}
+                当前 {{ selectedGame.version }} · Palworld public 分支有可用更新
               </span>
             </div>
             <button

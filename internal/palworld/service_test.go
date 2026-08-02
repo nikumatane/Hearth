@@ -238,6 +238,75 @@ func TestConfirmedFallbackStillPrefersRESTSafeStop(t *testing.T) {
 	}
 }
 
+func TestShutdownWaitUsesFastDelayWhenNoPlayersAreOnline(t *testing.T) {
+	client, err := newRESTClient("http://127.0.0.1:8212", "admin", func() (string, error) {
+		return "test-password", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(request.URL.Path, "/players") {
+			t.Fatalf("unexpected request path %s", request.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"players":[]}`)),
+		}, nil
+	})
+	service := &Service{config: config.GameConfig{ShutdownWaitSeconds: 30}, rest: client}
+	waitSeconds, detail := service.shutdownWaitSeconds()
+	if waitSeconds != emptyServerShutdownWaitSeconds || !strings.Contains(detail, "没有玩家") {
+		t.Fatalf("shutdown wait = %d, detail = %q", waitSeconds, detail)
+	}
+}
+
+func TestShutdownWaitKeepsConfiguredDelayWhenPlayersAreOnline(t *testing.T) {
+	client, err := newRESTClient("http://127.0.0.1:8212", "admin", func() (string, error) {
+		return "test-password", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.client.Transport = roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"players":[{"name":"one"},{"name":"two"}]}`)),
+		}, nil
+	})
+	service := &Service{config: config.GameConfig{ShutdownWaitSeconds: 30}, rest: client}
+	waitSeconds, detail := service.shutdownWaitSeconds()
+	if waitSeconds != 30 || !strings.Contains(detail, "2 名玩家") {
+		t.Fatalf("shutdown wait = %d, detail = %q", waitSeconds, detail)
+	}
+}
+
+func TestShutdownWaitKeepsConfiguredDelayWhenPlayerListIsMissing(t *testing.T) {
+	client, err := newRESTClient("http://127.0.0.1:8212", "admin", func() (string, error) {
+		return "test-password", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.client.Transport = roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+		}, nil
+	})
+	service := &Service{config: config.GameConfig{ShutdownWaitSeconds: 30}, rest: client}
+	waitSeconds, detail := service.shutdownWaitSeconds()
+	if waitSeconds != 30 || !strings.Contains(detail, "无法确认") {
+		t.Fatalf("shutdown wait = %d, detail = %q", waitSeconds, detail)
+	}
+}
+
 func TestUnsafeRestartSkipsUnavailableRESTHealthCheck(t *testing.T) {
 	service, platform := newUnavailableRESTService(t)
 	activity, err := service.RunAction("palworld", panel.ActionRequest{
