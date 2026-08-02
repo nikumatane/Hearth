@@ -23,10 +23,14 @@ Production is deployed as one Go binary:
    lifecycle operations only after a user requests them.
 6. SteamCMD runs with a fixed App ID and absolute paths from server configuration.
 7. Version checking is a low-frequency automatic or manually triggered read-only SteamCMD task. It
-   prepares SteamCMD first, then independently compares the local manifest with App `2394010`'s
-   public-branch Build ID, without a third-party version service.
+   prepares SteamCMD first, then independently compares installed depot manifests with the matching
+   public manifests for App `2394010`. It does not use the App-level Build ID as the update decision
+   and requires no third-party version service.
 8. Successful backups trigger centralized age and total-capacity cleanup of Hearth ZIP files. Real
    SteamCMD updates use log-progress timeouts and verify the target app's completion marker.
+9. The panel log is read on demand and pinned on the log page. Start, update, and version-check logs
+   use opaque file IDs linked to exact operations; the API reads only files referenced by current
+   activity, while output-free operations such as configuration saves create no log reference.
 
 Frontend and backend remain separate in source code but merge for deployment. This is a better fit
 for one small ECS than Node SSR, Redis, and a standalone database.

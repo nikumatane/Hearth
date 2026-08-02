@@ -886,31 +886,81 @@ textarea:focus-visible {
   border-bottom: 1px solid var(--border-soft);
 }
 
-.log-tabs button {
+.log-tab {
   max-width: 230px;
   min-height: 34px;
-  padding: 0 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   display: flex;
   align-items: center;
-  gap: 7px;
   color: #727e90;
   background: #11161e;
-  cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
 }
 
-.log-tabs button span {
+.log-tab-select,
+.log-tab-close {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.log-tab-select {
+  min-width: 0;
+  padding: 0 8px 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.log-tab-select span {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.log-tabs button.active {
+.log-tab-close {
+  align-self: stretch;
+  padding: 0 8px 0 4px;
+  display: grid;
+  place-items: center;
+  opacity: .65;
+}
+
+.log-tab-close:hover {
+  opacity: 1;
+}
+
+.log-tab.active {
   border-color: rgba(120, 152, 255, .3);
   color: #c4d0f5;
   background: rgba(120, 152, 255, .09);
+}
+
+.activity-tail {
+  flex: 0 0 auto;
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+}
+
+.activity-log-button {
+  padding: 5px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #8ea3c6;
+  background: rgba(120, 152, 255, .05);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.activity-log-button:hover {
+  border-color: rgba(120, 152, 255, .3);
+  color: #c4d0f5;
 }
 
 .log-viewer {

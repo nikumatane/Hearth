@@ -23,7 +23,14 @@ func TestCheckVersionPreparesSteamCMDBeforeQueryingPalworld(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifestPath := filepath.Join(root, "steamapps", "appmanifest_"+palworldAppID+".acf")
-	if err := os.WriteFile(manifestPath, []byte(`"buildid" "100"`), 0o600); err != nil {
+	if err := os.WriteFile(manifestPath, []byte(`"AppState"
+{
+	"buildid" "100"
+	"MountedDepots"
+	{
+		"2394011" "999"
+	}
+}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	counterPath := filepath.Join(root, "attempts")
@@ -35,7 +42,7 @@ count=$((count + 1))
 printf "%%s" "$count" > %q
 case "$*" in
   *app_info_print*)
-    printf '"2394010"\n{\n"depots"\n{\n"branches"\n{\n"public"\n{\n"buildid" "101"\n}\n}\n}\n}\n'
+    printf '"2394010"\n{\n"depots"\n{\n"2394011"\n{\n"manifests"\n{\n"public"\n{\n"gid" "1000"\n}\n}\n}\n"branches"\n{\n"public"\n{\n"buildid" "101"\n}\n}\n}\n}\n'
     ;;
 esac
 `, counterPath, counterPath, counterPath)
@@ -43,7 +50,7 @@ esac
 		t.Fatal(err)
 	}
 	service := &Service{config: config.GameConfig{InstallDir: installDir, SteamCmd: steamCmd}}
-	if err := service.checkVersion(func(string, int, string) {}); err != nil {
+	if err := service.checkVersion(func(string, int, string) {}, func(string, string) {}); err != nil {
 		t.Fatalf("checkVersion() error = %v", err)
 	}
 	attempts, err := os.ReadFile(counterPath)
@@ -54,7 +61,7 @@ esac
 		t.Fatalf("SteamCMD attempts = %q; want preparation plus query", attempts)
 	}
 	status := service.versionStatusForBuild("100")
-	if !status.UpdateAvailable || status.AvailableVersion != "101" {
+	if !status.UpdateAvailable {
 		t.Fatalf("version status = %#v", status)
 	}
 }
@@ -89,7 +96,7 @@ func TestVersionCheckDueHonorsSuccessfulCheckInterval(t *testing.T) {
 
 func TestInvalidInstalledBuildRecordsVersionAttempt(t *testing.T) {
 	service := &Service{}
-	err := service.checkVersion(func(string, int, string) {})
+	err := service.checkVersion(func(string, int, string) {}, func(string, string) {})
 	if err == nil || !strings.Contains(err.Error(), "installed Steam build ID") {
 		t.Fatalf("checkVersion() error = %v", err)
 	}
@@ -150,7 +157,7 @@ func TestSteamVersionCommandAllowsLongRunningLogProgress(t *testing.T) {
 	}
 }
 
-func TestParsePublicBuildID(t *testing.T) {
+func TestParsePublicDepotManifests(t *testing.T) {
 	output := `Redirecting stderr to 'C:\steamcmd\logs\stderr.txt'
 AppInfo update complete
 "2394010"
@@ -181,73 +188,54 @@ AppInfo update complete
 		}
 	}
 }`
-	buildID, err := parsePublicBuildID(bufio.NewScanner(strings.NewReader(output)), palworldAppID)
+	manifests, err := parsePublicDepotManifests(bufio.NewScanner(strings.NewReader(output)), palworldAppID)
 	if err != nil {
-		t.Fatalf("parsePublicBuildID() error = %v", err)
+		t.Fatalf("parsePublicDepotManifests() error = %v", err)
 	}
-	if buildID != "24681357" {
-		t.Fatalf("buildID = %q; want 24681357", buildID)
+	if manifests["2394011"] != "999999999999999999" {
+		t.Fatalf("manifests = %#v", manifests)
 	}
 }
 
-func TestParsePublicBuildIDIgnoresOtherAppsAndDepots(t *testing.T) {
-	output := `"100"
+func TestParseInstalledDepotManifests(t *testing.T) {
+	manifest := `"AppState"
 {
-	"depots"
-	{
-		"branches"
-		{
-			"public"
-			{
-				"buildid" "111"
-			}
-		}
-	}
-}
-"2394010"
-{
-	"depots"
+	"buildid" "333"
+	"InstalledDepots"
 	{
 		"2394011"
 		{
-			"buildid" "222"
-		}
-		"branches"
-		{
-			"public"
-			{
-				"buildid" "333"
-			}
+			"manifest" "777"
 		}
 	}
 }`
-	buildID, err := parsePublicBuildID(bufio.NewScanner(strings.NewReader(output)), palworldAppID)
+	manifests, err := parseInstalledDepotManifests(bufio.NewScanner(strings.NewReader(manifest)))
 	if err != nil {
-		t.Fatalf("parsePublicBuildID() error = %v", err)
+		t.Fatalf("parseInstalledDepotManifests() error = %v", err)
 	}
-	if buildID != "333" {
-		t.Fatalf("buildID = %q; want 333", buildID)
+	if manifests["2394011"] != "777" {
+		t.Fatalf("manifests = %#v", manifests)
 	}
 }
 
-func TestCompareSteamBuilds(t *testing.T) {
-	current, err := compareSteamBuilds("24681357", "24681357")
+func TestCompareSteamDepotManifestsIgnoresUnrelatedAppBuildChange(t *testing.T) {
+	current, err := compareSteamDepotManifests(
+		map[string]string{"2394011": "777"},
+		map[string]string{"2394011": "777", "100": "999"},
+	)
 	if err != nil || current.State != versionCheckCurrent || current.UpdateAvailable {
 		t.Fatalf("current status = %#v, error = %v", current, err)
 	}
 
-	available, err := compareSteamBuilds("24681357", "24681358")
+	available, err := compareSteamDepotManifests(
+		map[string]string{"2394011": "777"},
+		map[string]string{"2394011": "778"},
+	)
 	if err != nil {
 		t.Fatalf("available comparison error = %v", err)
 	}
-	if available.State != versionCheckAvailable ||
-		!available.UpdateAvailable ||
-		available.AvailableVersion != "24681358" {
+	if available.State != versionCheckAvailable || !available.UpdateAvailable {
 		t.Fatalf("available status = %#v", available)
-	}
-
-	if _, err := compareSteamBuilds("24681358", "24681357"); err == nil {
-		t.Fatal("older public build was accepted as a valid current status")
 	}
 }
 

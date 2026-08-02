@@ -225,12 +225,13 @@ Hearth 启动 30 秒后尝试首次检查，成功结果保留 6 小时；每 15
 自动重试至少间隔 1 小时，不会持续调用 SteamCMD。拥有“更新服务端”权限的用户也可以
 点击“检查新版本”。过程：
 
-1. 读取本机 Steam manifest 的 `buildid`。
+1. 读取本机 Steam manifest 的 `buildid` 作为结果缓存键，并读取已安装 depot 的 manifest ID。
 2. 确认没有其他 SteamCMD 或 Hearth 任务正在执行。
 3. 单独启动 SteamCMD 完成自身准备；其版本不会显示，也不参与服务端版本判断。
 4. 再运行 SteamCMD 的 `app_info_print 2394010`，只刷新应用元数据，不下载或修改
    Palworld 服务端文件。
-5. 读取 public 分支的 `buildid` 并与本机值比较。
+5. 读取 public 分支各 depot 的 manifest ID，只比较本机实际安装的 depot；App 顶层
+   `buildid` 不直接参与更新结论。
 6. 在当前版本旁只显示“服务端已是最新版”“Palworld 服务端有可用更新”或“服务端版本
    检查暂不可用”，不并排展示不同格式的 Build ID。
 
@@ -242,7 +243,17 @@ Hearth 启动 30 秒后尝试首次检查，成功结果保留 6 小时；每 15
 
 Valve 将 [`app_info_print`](https://partner.steamgames.com/doc/sdk/uploading?l=english#DebuggingBuildIssues)
 定义为显示当前 Steamworks 应用配置的调试命令；Hearth 只从其输出读取 public 分支
-`buildid`。
+depot manifest。若 SteamCMD 正式更新明确输出 App `2394010` `already up to date`，Hearth
+会显示“服务器已是最新版”并清除旧更新提示；其后的 SteamCMD 自身校验输出不作为
+Palworld 下载进度。
+
+## 任务日志
+
+任务日志页不会在打开时扫描并读取多份历史文件。面板运行日志固定显示；进入页面时若有
+运行中的启动、更新或版本检查任务，其关联日志自动成为可关闭标签。已完成任务的日志从
+左侧对应操作记录打开，单次更新恢复服务器时产生的 SteamCMD 与帕鲁启动日志会归在同一
+操作下。停止、备份和配置保存等没有独立控制台输出的操作不显示“查看日志”。日志正文每次
+最多读取末尾 128 KiB，且接口只接受当前操作记录明确引用的日志文件。
 
 ## 安全更新流程
 

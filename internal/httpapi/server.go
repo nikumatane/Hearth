@@ -100,6 +100,7 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 		s.admin(s.updateWorldOption),
 	)
 	mux.HandleFunc("GET /api/v1/logs", s.admin(s.logs))
+	mux.HandleFunc("GET /api/v1/logs/{id}", s.admin(s.logFile))
 	mux.HandleFunc("GET /api/v1/access/members", s.admin(s.members))
 	mux.HandleFunc("POST /api/v1/access/members", s.admin(s.createMember))
 	mux.HandleFunc("PATCH /api/v1/access/members/{id}", s.admin(s.updateMember))
@@ -273,6 +274,7 @@ func permittedActivities(identity principal, activities []panel.Activity) []pane
 	for _, activity := range activities {
 		permission, ok := permissionForAction(activity.Action)
 		if activity.Status == "running" && ok && hasPermission(identity, permission) {
+			activity.Logs = nil
 			visible = append(visible, activity)
 		}
 	}
@@ -458,41 +460,9 @@ func (s *server) updateWorldOption(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) logs(w http.ResponseWriter, _ *http.Request) {
-	files := make([]panel.LogFile, 0, 10)
+	files := make([]panel.LogFile, 0, 1)
 	if s.config.LogFile != "" {
-		if log, err := readLogTail("panel", "面板运行日志", s.config.LogFile); err == nil {
-			files = append(files, log)
-		}
-	}
-	logDirectory := filepath.Join(s.config.Games.Palworld.InstallDir, "panel-logs")
-	entries, _ := os.ReadDir(logDirectory)
-	type candidate struct {
-		name string
-		info fs.FileInfo
-	}
-	candidates := make([]candidate, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".log" {
-			continue
-		}
-		info, err := entry.Info()
-		if err == nil {
-			candidates = append(candidates, candidate{name: entry.Name(), info: info})
-		}
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].info.ModTime().After(candidates[j].info.ModTime())
-	})
-	if len(candidates) > 8 {
-		candidates = candidates[:8]
-	}
-	for _, item := range candidates {
-		label := "帕鲁启动日志"
-		if strings.HasPrefix(item.name, "steamcmd-") {
-			label = "SteamCMD 更新日志"
-		}
-		log, err := readLogTail(item.name, label+" · "+item.name, filepath.Join(logDirectory, item.name))
-		if err == nil {
+		if log, err := readLogMetadata("panel", "面板运行日志", s.config.LogFile); err == nil {
 			files = append(files, log)
 		}
 	}
@@ -500,6 +470,59 @@ func (s *server) logs(w http.ResponseWriter, _ *http.Request) {
 		Activities: s.service.Overview().Activities,
 		Files:      files,
 	})
+}
+
+func (s *server) logFile(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "panel" {
+		if s.config.LogFile == "" {
+			writeError(w, http.StatusNotFound, "日志不存在")
+			return
+		}
+		log, err := readLogTail(id, "面板运行日志", s.config.LogFile)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "日志不存在")
+			return
+		}
+		writeJSON(w, http.StatusOK, log)
+		return
+	}
+
+	if id == "" || filepath.Base(id) != id || filepath.Ext(id) != ".log" || strings.ContainsAny(id, `/\\`) {
+		writeError(w, http.StatusBadRequest, "日志标识无效")
+		return
+	}
+	label := ""
+	for _, activity := range s.service.Overview().Activities {
+		for _, ref := range activity.Logs {
+			if ref.ID == id {
+				label = ref.Label
+				break
+			}
+		}
+		if label != "" {
+			break
+		}
+	}
+	if label == "" {
+		writeError(w, http.StatusNotFound, "该日志不属于当前操作记录")
+		return
+	}
+	path := filepath.Join(s.config.Games.Palworld.InstallDir, "panel-logs", id)
+	log, err := readLogTail(id, label, path)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "日志不存在")
+		return
+	}
+	writeJSON(w, http.StatusOK, log)
+}
+
+func readLogMetadata(id, label, path string) (panel.LogFile, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return panel.LogFile{}, err
+	}
+	return panel.LogFile{ID: id, Label: label, UpdatedAt: info.ModTime()}, nil
 }
 
 func readLogTail(id, label, path string) (panel.LogFile, error) {

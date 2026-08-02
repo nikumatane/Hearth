@@ -182,6 +182,9 @@ func (s *Service) activitySnapshot() []panel.Activity {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	activities := append([]panel.Activity{}, s.activities...)
+	for index := range activities {
+		activities[index].Logs = append([]panel.LogRef{}, activities[index].Logs...)
+	}
 	return activities
 }
 
@@ -542,7 +545,7 @@ func (s *Service) invalidateAPIStatus() {
 }
 
 func (s *Service) installedBuildID() string {
-	path := filepath.Clean(filepath.Join(s.config.InstallDir, "..", "..", "appmanifest_"+palworldAppID+".acf"))
+	path := s.appManifestPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "未知"
@@ -555,6 +558,10 @@ func (s *Service) installedBuildID() string {
 		}
 	}
 	return "未知"
+}
+
+func (s *Service) appManifestPath() string {
+	return filepath.Clean(filepath.Join(s.config.InstallDir, "..", "..", "appmanifest_"+palworldAppID+".acf"))
 }
 
 func applyVersionStatus(game *panel.Game, status steamVersionStatus) {
@@ -594,6 +601,14 @@ func (s *Service) setVersionStatus(buildID string, status steamVersionStatus) {
 }
 
 type taskReporter func(stage string, progress int, detail string)
+type taskLogReporter func(id, label string)
+
+type steamUpdateOutcome string
+
+const (
+	steamUpdateApplied        steamUpdateOutcome = "applied"
+	steamUpdateAlreadyCurrent steamUpdateOutcome = "already_current"
+)
 
 var steamProgressPattern = regexp.MustCompile(`(?i)progress:\s*([0-9]+(?:\.[0-9]+)?)`)
 
@@ -606,19 +621,23 @@ func (s *Service) performAction(
 	report := func(stage string, progress int, detail string) {
 		s.updateActivity(activityID, stage, progress, detail)
 	}
+	registerLog := func(id, label string) {
+		s.addActivityLog(activityID, panel.LogRef{ID: id, Label: label})
+	}
 	var (
-		err    error
-		forced bool
+		err           error
+		forced        bool
+		updateOutcome steamUpdateOutcome
 	)
 	switch action {
 	case "start":
-		err = s.start(scaleReporter(report, 5, 95))
+		err = s.start(scaleReporter(report, 5, 95), registerLog)
 	case "stop":
 		forced, err = s.stop(process, allowUnsafe, scaleReporter(report, 5, 95))
 	case "restart":
 		forced, err = s.stop(process, allowUnsafe, scaleReporter(report, 5, 50))
 		if err == nil {
-			err = s.start(scaleReporter(report, 50, 85))
+			err = s.start(scaleReporter(report, 50, 85), registerLog)
 		}
 		if err == nil {
 			if forced {
@@ -628,13 +647,13 @@ func (s *Service) performAction(
 			}
 		}
 	case "update":
-		err = s.update(process.Running, report)
+		updateOutcome, err = s.update(process.Running, report, registerLog)
 	case "backup":
 		err = s.backup(process.Running, report)
 	case "check-update":
-		err = s.checkVersion(report)
+		err = s.checkVersion(report, registerLog)
 	}
-	s.finishActivity(activityID, action, forced, err)
+	s.finishActivity(activityID, action, forced, updateOutcome, err)
 }
 
 func scaleReporter(report taskReporter, start, end int) taskReporter {
@@ -786,13 +805,15 @@ func (s *Service) forceStop(expected processSample, report taskReporter) error {
 	return fmt.Errorf("Palworld PID %d did not exit after force termination", expected.PID)
 }
 
-func (s *Service) start(report taskReporter) error {
+func (s *Service) start(report taskReporter, registerLog taskLogReporter) error {
 	report("准备启动", 5, "正在准备 Palworld 启动日志")
 	logDirectory := filepath.Join(s.config.InstallDir, "panel-logs")
 	if err := os.MkdirAll(logDirectory, 0o700); err != nil {
 		return err
 	}
-	logPath := filepath.Join(logDirectory, "palworld-"+time.Now().Format("20060102")+".log")
+	logName := taskLogName("palworld")
+	logPath := filepath.Join(logDirectory, logName)
+	registerLog(logName, "帕鲁启动日志")
 	report("启动进程", 25, "正在启动 PalServer.exe")
 	if err := s.platform.startDetached(s.config.Executable, s.config.InstallDir, s.config.StartArgs, logPath); err != nil {
 		return fmt.Errorf("start Palworld: %w", err)
@@ -817,10 +838,14 @@ func (s *Service) start(report taskReporter) error {
 	return errors.New("Palworld process did not appear within 90 seconds")
 }
 
-func (s *Service) update(wasRunning bool, report taskReporter) error {
+func (s *Service) update(
+	wasRunning bool,
+	report taskReporter,
+	registerLog taskLogReporter,
+) (steamUpdateOutcome, error) {
 	if wasRunning {
 		if err := s.gracefulStop(scaleReporter(report, 0, 25)); err != nil {
-			return err
+			return "", err
 		}
 	} else {
 		report("确认停服状态", 25, "Palworld 当前未运行，可以直接备份并更新")
@@ -829,49 +854,57 @@ func (s *Service) update(wasRunning bool, report taskReporter) error {
 	report("更新前备份", 30, "正在创建更新前的完整 ZIP 备份")
 	if _, err := s.createBackup(); err != nil {
 		if wasRunning {
-			_ = s.start(scaleReporter(report, 75, 90))
+			_ = s.start(scaleReporter(report, 75, 90), registerLog)
 		}
-		return fmt.Errorf("backup before update: %w", err)
+		return "", fmt.Errorf("backup before update: %w", err)
 	}
 	report("更新前备份", 40, "更新前备份已完成")
 
 	logDirectory := filepath.Join(s.config.InstallDir, "panel-logs")
 	if err := os.MkdirAll(logDirectory, 0o700); err != nil {
-		return err
+		return "", err
 	}
-	logPath := filepath.Join(logDirectory, "steamcmd-"+time.Now().Format("20060102-150405")+".log")
-	updateErr := s.runSteamCMD(logPath, scaleReporter(report, 40, 75))
+	logName := taskLogName("steamcmd-update")
+	logPath := filepath.Join(logDirectory, logName)
+	registerLog(logName, "SteamCMD 更新日志")
+	updateOutcome, updateErr := s.runSteamCMD(logPath, scaleReporter(report, 40, 75))
 	if updateErr != nil {
 		if wasRunning && errors.Is(updateErr, errSteamProcessTreeUncertain) {
 			report("更新失败", 76, "无法确认 SteamCMD 子进程已全部退出；为避免文件冲突，Palworld 保持停止")
-			return fmt.Errorf("SteamCMD update failed and the server was left stopped for safety: %w", updateErr)
+			return "", fmt.Errorf("SteamCMD update failed and the server was left stopped for safety: %w", updateErr)
 		}
 		if wasRunning {
 			report("更新失败回退", 76, "SteamCMD 更新失败，正在尝试恢复原服务器进程")
-			restartErr := s.start(scaleReporter(report, 76, 90))
+			restartErr := s.start(scaleReporter(report, 76, 90), registerLog)
 			if restartErr == nil {
 				restartErr = s.waitForREST(scaleReporter(report, 90, 98))
 			}
 			if restartErr != nil {
-				return fmt.Errorf("SteamCMD update failed: %v; rollback restart also failed: %w", updateErr, restartErr)
+				return "", fmt.Errorf("SteamCMD update failed: %v; rollback restart also failed: %w", updateErr, restartErr)
 			}
 		}
-		return fmt.Errorf("SteamCMD update failed: %w", updateErr)
+		return "", fmt.Errorf("SteamCMD update failed: %w", updateErr)
 	}
+	installedBuildID := s.installedBuildID()
+	s.setVersionStatus(installedBuildID, steamVersionStatus{State: versionCheckCurrent})
 	if wasRunning {
-		if err := s.start(scaleReporter(report, 75, 90)); err != nil {
-			return err
+		if err := s.start(scaleReporter(report, 75, 90), registerLog); err != nil {
+			return updateOutcome, err
 		}
-		return s.waitForREST(scaleReporter(report, 90, 98))
+		return updateOutcome, s.waitForREST(scaleReporter(report, 90, 98))
 	}
-	report("确认更新结果", 98, "SteamCMD 更新完成；服务器保持停止状态")
-	return nil
+	if updateOutcome == steamUpdateAlreadyCurrent {
+		report("确认更新结果", 98, "Palworld Dedicated Server 已是最新版；服务器保持停止状态")
+	} else {
+		report("确认更新结果", 98, "SteamCMD 更新完成；服务器保持停止状态")
+	}
+	return updateOutcome, nil
 }
 
-func (s *Service) runSteamCMD(logPath string, report taskReporter) error {
+func (s *Service) runSteamCMD(logPath string, report taskReporter) (steamUpdateOutcome, error) {
 	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_APPEND, 0o600)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer logFile.Close()
 
@@ -879,19 +912,23 @@ func (s *Service) runSteamCMD(logPath string, report taskReporter) error {
 	for attempt := 1; attempt <= 2; attempt++ {
 		if attempt > 1 {
 			if _, err := fmt.Fprintln(logFile, "\n[Hearth] SteamCMD exited cleanly without an app completion marker; retrying once after a possible self-update."); err != nil {
-				return err
+				return "", err
 			}
 			report("SteamCMD 自更新", 15, "首次运行可能完成了 SteamCMD 自身更新，正在自动重试一次")
 		}
 		if err := s.runSteamCMDAttempt(logFile, logPath, noProgressTimeout, report); err != nil {
-			return err
+			return "", err
 		}
-		if steamUpdateCompleted(logPath) {
-			report("SteamCMD 更新", 100, "SteamCMD 已完成下载和文件校验")
-			return nil
+		if outcome, completed := steamUpdateResult(logPath); completed {
+			if outcome == steamUpdateAlreadyCurrent {
+				report("SteamCMD 更新", 100, "Palworld Dedicated Server 已是最新版，无需下载")
+			} else {
+				report("SteamCMD 更新", 100, "SteamCMD 已完成下载和文件校验")
+			}
+			return outcome, nil
 		}
 	}
-	return errors.New("SteamCMD exited successfully twice without confirming the Palworld app update")
+	return "", errors.New("SteamCMD exited successfully twice without confirming the Palworld app update")
 }
 
 func (s *Service) steamNoProgressTimeout() time.Duration {
@@ -988,33 +1025,42 @@ func logFileSize(path string) int64 {
 	return info.Size()
 }
 
-func steamUpdateCompleted(path string) bool {
+func steamUpdateResult(path string) (steamUpdateOutcome, bool) {
 	const maxCompletionTailBytes int64 = 256 << 10
 	file, err := os.Open(path)
 	if err != nil {
-		return false
+		return "", false
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
-		return false
+		return "", false
 	}
 	start := max(int64(0), info.Size()-maxCompletionTailBytes)
 	data := make([]byte, info.Size()-start)
 	read, err := file.ReadAt(data, start)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return false
+		return "", false
 	}
 	data = data[:read]
 	text := strings.ToLower(string(data))
 	appMarker := "success! app '" + palworldAppID + "'"
 	for _, line := range strings.Split(text, "\n") {
-		if strings.Contains(line, appMarker) &&
-			(strings.Contains(line, "fully installed") || strings.Contains(line, "already up to date")) {
-			return true
+		if !strings.Contains(line, appMarker) {
+			continue
+		}
+		if strings.Contains(line, "already up to date") {
+			return steamUpdateAlreadyCurrent, true
+		}
+		if strings.Contains(line, "fully installed") {
+			return steamUpdateApplied, true
 		}
 	}
-	return false
+	return "", false
+}
+
+func taskLogName(prefix string) string {
+	return prefix + "-" + time.Now().Format("20060102-150405.000000000") + ".log"
 }
 
 func latestLogLine(path string) string {
@@ -1131,7 +1177,25 @@ func (s *Service) updateActivity(id, stage string, progress int, detail string) 
 	}
 }
 
-func (s *Service) finishActivity(id, action string, forced bool, taskErr error) {
+func (s *Service) addActivityLog(id string, ref panel.LogRef) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.activities {
+		if s.activities[index].ID != id {
+			continue
+		}
+		s.activities[index].Logs = append(s.activities[index].Logs, ref)
+		s.activities[index].UpdatedAt = time.Now()
+		break
+	}
+}
+
+func (s *Service) finishActivity(
+	id, action string,
+	forced bool,
+	updateOutcome steamUpdateOutcome,
+	taskErr error,
+) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.busy = false
@@ -1148,7 +1212,7 @@ func (s *Service) finishActivity(id, action string, forced bool, taskErr error) 
 			slog.Error("palworld task failed", "activity", id, "error", taskErr)
 		} else {
 			s.activities[index].Status = "success"
-			s.activities[index].Title, s.activities[index].Detail = completedActionResult(action, forced)
+			s.activities[index].Title, s.activities[index].Detail = completedActionResult(action, forced, updateOutcome)
 			s.activities[index].Stage = "完成"
 			s.activities[index].Progress = 100
 			slog.Info("palworld task completed", "activity", id, "title", s.activities[index].Title)
@@ -1188,7 +1252,7 @@ func failedActionTitle(action string) string {
 	}[action]
 }
 
-func completedActionResult(action string, forced bool) (string, string) {
+func completedActionResult(action string, forced bool, updateOutcome steamUpdateOutcome) (string, string) {
 	if forced {
 		switch action {
 		case "stop":
@@ -1197,13 +1261,16 @@ func completedActionResult(action string, forced bool) (string, string) {
 			return "服务器已强制重启", "REST 安全关闭不可用，原进程已终止并重新启动；健康状态按进程确认"
 		}
 	}
+	if action == "update" && updateOutcome == steamUpdateAlreadyCurrent {
+		return "服务器已是最新版", "SteamCMD 已确认 App 2394010 无需下载；备份与运行状态恢复检查已完成"
+	}
 	results := map[string][2]string{
 		"start":        {"服务器已启动", "Palworld 游戏进程已启动"},
 		"stop":         {"服务器已安全停止", "世界已保存，Palworld 进程已安全退出"},
 		"restart":      {"服务器已安全重启", "世界已保存，游戏进程与 REST API 均已恢复"},
 		"update":       {"服务器更新完成", "备份、SteamCMD 更新和恢复检查已完成"},
 		"backup":       {"服务器备份完成", "完整 ZIP 备份已创建"},
-		"check-update": {"版本检查完成", "已通过 SteamCMD 对比本机与 public 分支 Build ID"},
+		"check-update": {"版本检查完成", "已通过 SteamCMD 对比本机与 public 分支 depot manifest"},
 	}
 	result := results[action]
 	return result[0], result[1]

@@ -179,6 +179,7 @@ func TestAdminAndMemberPermissionsAndLoginAudit(t *testing.T) {
 	}{
 		{path: "/api/v1/overview", want: http.StatusOK},
 		{path: "/api/v1/logs", want: http.StatusForbidden},
+		{path: "/api/v1/logs/panel", want: http.StatusForbidden},
 		{path: "/api/v1/games/palworld/settings", want: http.StatusOK},
 		{path: "/api/v1/games/palworld/world-option", want: http.StatusForbidden},
 		{path: "/api/v1/access/members", want: http.StatusForbidden},

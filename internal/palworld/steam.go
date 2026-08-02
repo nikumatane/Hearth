@@ -29,12 +29,17 @@ type steamVersionStatus struct {
 	UpdateAvailable  bool
 }
 
-func (s *Service) checkVersion(report taskReporter) error {
+func (s *Service) checkVersion(report taskReporter, registerLog taskLogReporter) error {
 	installedBuildID := s.installedBuildID()
 	s.setVersionStatus(installedBuildID, steamVersionStatus{State: versionCheckChecking})
 	if _, err := strconv.ParseUint(installedBuildID, 10, 32); err != nil {
 		s.setVersionStatus(installedBuildID, steamVersionStatus{State: versionCheckUnavailable})
 		return fmt.Errorf("read installed Steam build ID: %w", err)
+	}
+	installedDepots, err := depotManifestsFromAppManifest(s.appManifestPath())
+	if err != nil {
+		s.setVersionStatus(installedBuildID, steamVersionStatus{State: versionCheckUnavailable})
+		return fmt.Errorf("read installed Steam depot manifests: %w", err)
 	}
 
 	logDirectory := filepath.Join(s.config.InstallDir, "panel-logs")
@@ -42,11 +47,15 @@ func (s *Service) checkVersion(report taskReporter) error {
 		s.setVersionStatus(installedBuildID, steamVersionStatus{State: versionCheckUnavailable})
 		return err
 	}
-	logPath := filepath.Join(logDirectory, "steamcmd-version-check.log")
+	logName := taskLogName("steamcmd-version-check")
+	logPath := filepath.Join(logDirectory, logName)
 	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|os.O_APPEND, 0o600)
 	if err != nil {
 		s.setVersionStatus(installedBuildID, steamVersionStatus{State: versionCheckUnavailable})
 		return err
+	}
+	if registerLog != nil {
+		registerLog(logName, "SteamCMD 版本检查日志")
 	}
 
 	report("准备 SteamCMD", 10, "正在完成 SteamCMD 自身检查；其版本不参与 Palworld 更新判断")
@@ -80,12 +89,12 @@ func (s *Service) checkVersion(report taskReporter) error {
 	}
 
 	report("解析服务端版本", 85, "正在比较本机服务端 manifest 与 Palworld public 分支")
-	availableBuildID, err := publicBuildIDFromLog(logPath, palworldAppID)
+	availableDepots, err := publicDepotManifestsFromLog(logPath, palworldAppID)
 	if err != nil {
 		s.setVersionStatus(installedBuildID, steamVersionStatus{State: versionCheckUnavailable})
 		return err
 	}
-	status, err := compareSteamBuilds(installedBuildID, availableBuildID)
+	status, err := compareSteamDepotManifests(installedDepots, availableDepots)
 	if err != nil {
 		s.setVersionStatus(installedBuildID, steamVersionStatus{State: versionCheckUnavailable})
 		return err
@@ -97,6 +106,149 @@ func (s *Service) checkVersion(report taskReporter) error {
 		report("检查完成", 100, "Palworld Dedicated Server 当前已是 public 分支最新版")
 	}
 	return nil
+}
+
+func depotManifestsFromAppManifest(path string) (map[string]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	manifests, err := parseInstalledDepotManifests(bufio.NewScanner(file))
+	if err != nil {
+		return nil, fmt.Errorf("parse installed depot manifests: %w", err)
+	}
+	return manifests, nil
+}
+
+func publicDepotManifestsFromLog(path, appID string) (map[string]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	manifests, err := parsePublicDepotManifests(bufio.NewScanner(file), appID)
+	if err != nil {
+		return nil, fmt.Errorf("parse SteamCMD public depot manifests: %w", err)
+	}
+	return manifests, nil
+}
+
+func parseInstalledDepotManifests(scanner *bufio.Scanner) (map[string]string, error) {
+	manifests := make(map[string]string)
+	stack := make([]string, 0, 8)
+	pendingKey := ""
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		switch line {
+		case "", "{":
+			if line == "{" && pendingKey != "" {
+				stack = append(stack, pendingKey)
+				pendingKey = ""
+			}
+			continue
+		case "}":
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+			pendingKey = ""
+			continue
+		}
+		fields := quotedVDFFields(line)
+		switch len(fields) {
+		case 1:
+			pendingKey = fields[0]
+		case 2:
+			pendingKey = ""
+			if pathEndsWith(stack, "MountedDepots") && validDepotManifest(fields[0], fields[1]) {
+				manifests[fields[0]] = fields[1]
+				continue
+			}
+			if fields[0] == "manifest" && len(stack) >= 2 && stack[len(stack)-2] == "InstalledDepots" &&
+				validDepotManifest(stack[len(stack)-1], fields[1]) {
+				manifests[stack[len(stack)-1]] = fields[1]
+			}
+		default:
+			pendingKey = ""
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(manifests) == 0 {
+		return nil, errors.New("installed depot manifests were not present in app manifest")
+	}
+	return manifests, nil
+}
+
+func parsePublicDepotManifests(scanner *bufio.Scanner, appID string) (map[string]string, error) {
+	manifests := make(map[string]string)
+	stack := make([]string, 0, 10)
+	pendingKey := ""
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		switch line {
+		case "", "{":
+			if line == "{" && pendingKey != "" {
+				stack = append(stack, pendingKey)
+				pendingKey = ""
+			}
+			continue
+		case "}":
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+			pendingKey = ""
+			continue
+		}
+		fields := quotedVDFFields(line)
+		switch len(fields) {
+		case 1:
+			pendingKey = fields[0]
+		case 2:
+			pendingKey = ""
+			if fields[0] != "gid" || len(stack) < 5 || !pathEndsWith(stack, "manifests", "public") {
+				continue
+			}
+			depotID := stack[len(stack)-3]
+			if stack[len(stack)-5] == appID && stack[len(stack)-4] == "depots" && validDepotManifest(depotID, fields[1]) {
+				manifests[depotID] = fields[1]
+			}
+		default:
+			pendingKey = ""
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(manifests) == 0 {
+		return nil, errors.New("public depot manifests were not present in SteamCMD output")
+	}
+	return manifests, nil
+}
+
+func validDepotManifest(depotID, manifestID string) bool {
+	if _, err := strconv.ParseUint(depotID, 10, 32); err != nil {
+		return false
+	}
+	_, err := strconv.ParseUint(manifestID, 10, 64)
+	return err == nil
+}
+
+func compareSteamDepotManifests(installed, available map[string]string) (steamVersionStatus, error) {
+	if len(installed) == 0 {
+		return steamVersionStatus{}, errors.New("no installed depot manifests to compare")
+	}
+	for depotID, installedManifest := range installed {
+		availableManifest, ok := available[depotID]
+		if !ok {
+			return steamVersionStatus{}, fmt.Errorf("public manifest for installed depot %s is missing", depotID)
+		}
+		if availableManifest != installedManifest {
+			return steamVersionStatus{State: versionCheckAvailable, UpdateAvailable: true}, nil
+		}
+	}
+	return steamVersionStatus{State: versionCheckCurrent}, nil
 }
 
 func (s *Service) runSteamVersionCommand(logFile *os.File, noProgressTimeout time.Duration, arguments ...string) error {
@@ -174,63 +326,6 @@ func (s *Service) versionCheckDue() bool {
 		time.Since(s.versionAttemptedAt) >= automaticVersionCheckFailureRetry
 }
 
-func publicBuildIDFromLog(path, appID string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	buildID, err := parsePublicBuildID(bufio.NewScanner(file), appID)
-	if err != nil {
-		return "", fmt.Errorf("parse SteamCMD public build ID: %w", err)
-	}
-	return buildID, nil
-}
-
-func parsePublicBuildID(scanner *bufio.Scanner, appID string) (string, error) {
-	stack := make([]string, 0, 8)
-	pendingKey := ""
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		switch line {
-		case "", "{":
-			if line == "{" && pendingKey != "" {
-				stack = append(stack, pendingKey)
-				pendingKey = ""
-			}
-			continue
-		case "}":
-			if len(stack) > 0 {
-				stack = stack[:len(stack)-1]
-			}
-			pendingKey = ""
-			continue
-		}
-
-		fields := quotedVDFFields(line)
-		switch len(fields) {
-		case 1:
-			pendingKey = fields[0]
-		case 2:
-			pendingKey = ""
-			if fields[0] == "buildid" &&
-				pathEndsWith(stack, appID, "depots", "branches", "public") {
-				if _, err := strconv.ParseUint(fields[1], 10, 32); err != nil {
-					return "", fmt.Errorf("invalid public build ID %q", fields[1])
-				}
-				return fields[1], nil
-			}
-		default:
-			pendingKey = ""
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return "", err
-	}
-	return "", errors.New("public branch build ID was not present in SteamCMD output")
-}
-
 func quotedVDFFields(line string) []string {
 	fields := make([]string, 0, 2)
 	for {
@@ -260,30 +355,4 @@ func pathEndsWith(stack []string, suffix ...string) bool {
 		}
 	}
 	return true
-}
-
-func compareSteamBuilds(installedBuildID, availableBuildID string) (steamVersionStatus, error) {
-	installed, err := strconv.ParseUint(installedBuildID, 10, 32)
-	if err != nil {
-		return steamVersionStatus{}, fmt.Errorf("invalid installed build ID %q", installedBuildID)
-	}
-	available, err := strconv.ParseUint(availableBuildID, 10, 32)
-	if err != nil {
-		return steamVersionStatus{}, fmt.Errorf("invalid available build ID %q", availableBuildID)
-	}
-	if available < installed {
-		return steamVersionStatus{}, fmt.Errorf(
-			"Steam public build %d is older than installed build %d; refusing to guess update status",
-			available,
-			installed,
-		)
-	}
-	if available == installed {
-		return steamVersionStatus{State: versionCheckCurrent}, nil
-	}
-	return steamVersionStatus{
-		State:            versionCheckAvailable,
-		AvailableVersion: availableBuildID,
-		UpdateAvailable:  true,
-	}, nil
 }

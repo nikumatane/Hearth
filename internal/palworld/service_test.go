@@ -127,8 +127,12 @@ echo "Success! App '2394010' fully installed."
 		SteamCmdNoProgressMinutes: 1,
 	}}
 
-	if err := service.runSteamCMD(logPath, func(string, int, string) {}); err != nil {
+	outcome, err := service.runSteamCMD(logPath, func(string, int, string) {})
+	if err != nil {
 		t.Fatalf("runSteamCMD() error = %v", err)
+	}
+	if outcome != steamUpdateApplied {
+		t.Fatalf("runSteamCMD() outcome = %q; want %q", outcome, steamUpdateApplied)
 	}
 	attempts, err := os.ReadFile(counterPath)
 	if err != nil {
@@ -136,6 +140,17 @@ echo "Success! App '2394010' fully installed."
 	}
 	if string(attempts) != "2" {
 		t.Fatalf("attempts = %q", attempts)
+	}
+}
+
+func TestSteamUpdateResultDistinguishesNoOpUpdate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "steamcmd.log")
+	if err := os.WriteFile(path, []byte("Success! App '2394010' already up to date.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outcome, completed := steamUpdateResult(path)
+	if !completed || outcome != steamUpdateAlreadyCurrent {
+		t.Fatalf("steamUpdateResult() = %q, %v", outcome, completed)
 	}
 }
 

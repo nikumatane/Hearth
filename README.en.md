@@ -75,7 +75,9 @@ settings, and the complete `WorldOption.sav` remain administrator-only. Legacy
 Recent activity on the home page and complete task logs remain administrator-only. Members do not
 see historical activity, but they can see the current stage and progress of tasks they are allowed
 to start. Recent activity is held only in the current Hearth process and is cleared after a panel
-restart; use the task log files on disk for long-term troubleshooting.
+restart. The panel log stays pinned on the Task logs page. Each start, update, or version-check log
+is linked to its exact operation and read only when opened; running-task logs appear automatically
+and task tabs are closable. Use the log files on disk for troubleshooting across panel restarts.
 
 After a successful `PalWorldSettings.ini` save, the backend compares structured values before and
 after the write and records the time, actor, source IP, configuration revision, and actual changes.
@@ -179,13 +181,16 @@ The check has two internal phases: prepare SteamCMD first, then independently re
 metadata for App ID `2394010`. The SteamCMD version is neither displayed nor used for the server
 update result; the page reports only whether Palworld Dedicated Server has an update. Manual checks
 require Update server permission. Results stay in the current Hearth process and reset after a panel
-restart or local server Build ID change. No third-party version service is required.
+restart or local server Build ID change. The decision compares installed depot manifests with their
+public-branch counterparts instead of the App-level Build ID, so metadata or unrelated-depot changes
+do not become false Palworld server updates. No third-party version service is required.
 
 During a real update, SteamCMD checks and applies its own update first. Hearth treats continuous log
 growth as progress, so self-update, download, and verification do not cause a false timeout. By
 default, the SteamCMD process tree is stopped only after 30 minutes with no log progress. If
 SteamCMD exits normally after self-update without confirming the Palworld update, Hearth retries
 once and announces completion only after seeing the success marker for App ID `2394010`.
+An `already up to date` marker is reported as Server already current and clears stale update state.
 
 ## Local development
 

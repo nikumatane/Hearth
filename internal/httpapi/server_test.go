@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -245,6 +247,81 @@ func newTestHandler(t *testing.T, cfg config.Config) http.Handler {
 		t.Fatalf("create HTTP handler: %v", err)
 	}
 	return handler
+}
+
+type logTestService struct {
+	*panel.DemoService
+	overview panel.Overview
+}
+
+func (s *logTestService) Overview() panel.Overview {
+	return s.overview
+}
+
+func TestLogsAreLinkedAndLoadedOnDemand(t *testing.T) {
+	directory := t.TempDir()
+	panelLog := filepath.Join(directory, "hearth.log")
+	if err := os.WriteFile(panelLog, []byte("panel-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logDirectory := filepath.Join(directory, "panel-logs")
+	if err := os.MkdirAll(logDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const taskLogID = "steamcmd-update-20260802-120000.000000001.log"
+	if err := os.WriteFile(filepath.Join(logDirectory, taskLogID), []byte("task-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(logDirectory, "unreferenced.log"), []byte("hidden\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	service := &logTestService{
+		DemoService: panel.NewDemoService(),
+		overview: panel.Overview{Activities: []panel.Activity{{
+			ID: "activity-1", GameID: "palworld", Action: "update",
+			Title: "服务器已是最新版", Status: "success", CreatedAt: now, UpdatedAt: now,
+			Logs: []panel.LogRef{{ID: taskLogID, Label: "SteamCMD 更新日志"}},
+		}}},
+	}
+	handler, err := New(config.Config{
+		AdminPassword: "correct", LogFile: panelLog,
+		Games: config.GamesConfig{Palworld: config.GameConfig{InstallDir: directory}},
+	}, service)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	cookie := loginTestHandler(t, handler)
+
+	metadataRequest := httptest.NewRequest(http.MethodGet, "/api/v1/logs", nil)
+	metadataRequest.AddCookie(cookie)
+	metadata := httptest.NewRecorder()
+	handler.ServeHTTP(metadata, metadataRequest)
+	if metadata.Code != http.StatusOK {
+		t.Fatalf("metadata status = %d body = %s", metadata.Code, metadata.Body.String())
+	}
+	if strings.Contains(metadata.Body.String(), "panel-secret") || strings.Contains(metadata.Body.String(), "task-secret") {
+		t.Fatalf("metadata eagerly included log content: %s", metadata.Body.String())
+	}
+	if !strings.Contains(metadata.Body.String(), taskLogID) {
+		t.Fatalf("metadata omitted activity log reference: %s", metadata.Body.String())
+	}
+
+	logRequest := httptest.NewRequest(http.MethodGet, "/api/v1/logs/"+taskLogID, nil)
+	logRequest.AddCookie(cookie)
+	logResponse := httptest.NewRecorder()
+	handler.ServeHTTP(logResponse, logRequest)
+	if logResponse.Code != http.StatusOK || !strings.Contains(logResponse.Body.String(), "task-secret") {
+		t.Fatalf("task log status = %d body = %s", logResponse.Code, logResponse.Body.String())
+	}
+
+	unreferencedRequest := httptest.NewRequest(http.MethodGet, "/api/v1/logs/unreferenced.log", nil)
+	unreferencedRequest.AddCookie(cookie)
+	unreferencedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(unreferencedResponse, unreferencedRequest)
+	if unreferencedResponse.Code != http.StatusNotFound {
+		t.Fatalf("unreferenced log status = %d body = %s", unreferencedResponse.Code, unreferencedResponse.Body.String())
+	}
 }
 
 func TestSecurityHeadersAllowOnlyWasmEvaluation(t *testing.T) {

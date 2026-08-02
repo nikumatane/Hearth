@@ -58,6 +58,15 @@ type Activity struct {
 	Progress  int       `json:"progress"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	Logs      []LogRef  `json:"logs,omitempty"`
+}
+
+// LogRef links a task record to a log created by that exact execution. Keeping
+// only the opaque file ID here lets the log contents remain an on-demand admin
+// concern instead of inflating every overview response.
+type LogRef struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
 }
 
 type Overview struct {
@@ -152,7 +161,7 @@ type LogFile struct {
 	ID        string    `json:"id"`
 	Label     string    `json:"label"`
 	UpdatedAt time.Time `json:"updatedAt"`
-	Content   string    `json:"content"`
+	Content   string    `json:"content,omitempty"`
 	Truncated bool      `json:"truncated"`
 }
 

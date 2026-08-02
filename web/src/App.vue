@@ -47,6 +47,7 @@ import {
   type Game,
   type IPRule,
   type LoginAuditEntry,
+  type LogRef,
   type Logs,
   type MemberCredential,
   type OperationAuditEntry,
@@ -166,6 +167,7 @@ let pollTimer: number | undefined;
 let toastTimer: number | undefined;
 let clockTimer: number | undefined;
 let refreshInFlight = false;
+let dismissedLogIds = new Set<string>();
 
 const selectedGame = computed(() =>
   overview.value?.games.find((game) => game.id === selectedGameId.value)
@@ -276,8 +278,14 @@ const pageTitle = computed(() => {
 });
 
 const selectedLog = computed(() =>
-  logs.value?.files.find((file) => file.id === selectedLogId.value) ?? logs.value?.files[0]
+  logs.value?.files.find((file) => file.id === selectedLogId.value)
 );
+
+function updateTaskRunning(gameId: string) {
+  return (overview.value?.activities ?? []).some(
+    (item) => item.status === "running" && item.action === "update" && (!item.gameId || item.gameId === gameId)
+  );
+}
 
 const isAdmin = computed(() => currentRole.value === "admin");
 const canManageSettings = computed(() => hasPermission("palworld.settings.gameplay"));
@@ -376,6 +384,14 @@ async function refresh(silent = false) {
     };
     if (logs.value) {
       logs.value = { ...logs.value, activities: nextOverview.activities ?? [] };
+      syncRunningTaskLogs(nextOverview.activities ?? []);
+      const selectedIsRunning = (nextOverview.activities ?? []).some(
+        (item) => item.status === "running" && item.logs?.some((ref) => ref.id === selectedLogId.value)
+      );
+      if (page.value === "logs" && selectedLogId.value &&
+        (selectedLogId.value === "panel" || selectedIsRunning)) {
+        void loadLogContent(selectedLogId.value, true);
+      }
     }
     loadError.value = "";
   } catch (error) {
@@ -401,6 +417,7 @@ function navigate(next: Page, gameId?: string) {
     showToast("error", "仅管理员可以访问该页面");
     return;
   }
+  const enteringLogs = next === "logs" && page.value !== "logs";
   if (gameId) selectedGameId.value = gameId;
   page.value = next;
   mobileNavOpen.value = false;
@@ -408,21 +425,102 @@ function navigate(next: Page, gameId?: string) {
   gameMenuOpen.value = false;
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (next === "settings" && !settings.value) void loadSettings();
-  if (next === "logs") void loadLogs();
+  if (next === "logs") void loadLogs(enteringLogs);
   if (next === "access") void loadAccess();
 }
 
-async function loadLogs() {
+async function loadLogs(resetTabs = false) {
   logsLoading.value = true;
   try {
-    logs.value = await api.logs();
-    if (!logs.value.files.some((file) => file.id === selectedLogId.value)) {
+    const metadata = await api.logs();
+    if (resetTabs || !logs.value) {
+      dismissedLogIds = new Set<string>();
+      logs.value = metadata;
+      selectedLogId.value = metadata.files.find((file) => file.id === "panel")?.id ?? "";
+    } else {
+      const existing = new Map(logs.value.files.map((file) => [file.id, file]));
+      for (const file of metadata.files) {
+        existing.set(file.id, { ...existing.get(file.id), ...file });
+      }
+      logs.value = { activities: metadata.activities, files: [...existing.values()] };
+    }
+    syncRunningTaskLogs(metadata.activities);
+    if (!selectedLogId.value || !logs.value.files.some((file) => file.id === selectedLogId.value)) {
       selectedLogId.value = logs.value.files[0]?.id ?? "";
     }
+    if (selectedLogId.value) await loadLogContent(selectedLogId.value, true);
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "日志加载失败");
   } finally {
     logsLoading.value = false;
+  }
+}
+
+function addLogTabs(refs: LogRef[], updatedAt?: string) {
+  if (!logs.value) return;
+  const files = [...logs.value.files];
+  const known = new Set(files.map((file) => file.id));
+  for (const ref of refs) {
+    if (known.has(ref.id) || dismissedLogIds.has(ref.id)) continue;
+    files.push({ id: ref.id, label: ref.label, updatedAt: updatedAt ?? new Date().toISOString(), truncated: false });
+    known.add(ref.id);
+  }
+  logs.value = { ...logs.value, files };
+}
+
+function syncRunningTaskLogs(activities: Logs["activities"]) {
+  for (const activity of activities) {
+    if (activity.status === "running" && activity.logs?.length) {
+      addLogTabs(activity.logs, activity.updatedAt ?? activity.createdAt);
+    }
+  }
+}
+
+async function loadLogContent(id: string, silent = false) {
+  if (!logs.value || !id) return;
+  try {
+    const file = await api.log(id);
+    if (!logs.value.files.some((item) => item.id === id)) return;
+    logs.value = {
+      ...logs.value,
+      files: logs.value.files.map((item) => item.id === id ? file : item)
+    };
+  } catch (error) {
+    if (!silent) showToast("error", error instanceof Error ? error.message : "日志读取失败");
+  }
+}
+
+function selectLog(id: string) {
+  selectedLogId.value = id;
+  void loadLogContent(id);
+}
+
+async function openActivityLogs(item: Logs["activities"][number]) {
+  const refs = item.logs ?? [];
+  if (!refs.length) return;
+  if (page.value !== "logs") {
+    page.value = "logs";
+    mobileNavOpen.value = false;
+    nodeMenuOpen.value = false;
+    gameMenuOpen.value = false;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    await loadLogs(true);
+  }
+  for (const ref of refs) dismissedLogIds.delete(ref.id);
+  addLogTabs(refs, item.updatedAt ?? item.createdAt);
+  selectLog(refs[0].id);
+}
+
+function closeLog(id: string) {
+  if (!logs.value || id === "panel") return;
+  const index = logs.value.files.findIndex((file) => file.id === id);
+  if (index < 0) return;
+  dismissedLogIds.add(id);
+  const files = logs.value.files.filter((file) => file.id !== id);
+  logs.value = { ...logs.value, files };
+  if (selectedLogId.value === id) {
+    selectedLogId.value = files[Math.max(0, index - 1)]?.id ?? files[0]?.id ?? "";
+    if (selectedLogId.value) void loadLogContent(selectedLogId.value, true);
   }
 }
 
@@ -1285,7 +1383,7 @@ function gameAccent(id: string) {
                       <strong class="fact-text">{{ formatDuration(game.uptimeSeconds) }}</strong>
                     </div>
                   </div>
-                  <div v-if="game.updateAvailable" class="update-callout">
+                  <div v-if="game.updateAvailable && !updateTaskRunning(game.id)" class="update-callout">
                     <div>
                       <RefreshCw :size="16" />
                       <span>
@@ -1358,7 +1456,17 @@ function gameAccent(id: string) {
                       <small>{{ item.stage || "执行中" }} · {{ activityProgress(item) }}%</small>
                     </div>
                   </div>
-                  <time>{{ formatRelative(item.updatedAt || item.createdAt) }}</time>
+                  <div class="activity-tail">
+                    <button
+                      v-if="item.logs?.length"
+                      class="activity-log-button"
+                      type="button"
+                      @click="openActivityLogs(item)"
+                    >
+                      <TerminalSquare :size="13" />查看日志
+                    </button>
+                    <time>{{ formatRelative(item.updatedAt || item.createdAt) }}</time>
+                  </div>
                 </div>
               </div>
             </article>
@@ -1475,7 +1583,7 @@ function gameAccent(id: string) {
             </div>
           </section>
 
-          <section v-if="selectedGame.updateAvailable" class="detail-update-banner">
+          <section v-if="selectedGame.updateAvailable && !updateTaskRunning(selectedGame.id)" class="detail-update-banner">
             <div class="banner-icon"><RefreshCw :size="20" /></div>
             <div>
               <strong>发现新的服务端版本</strong>
@@ -2098,7 +2206,7 @@ function gameAccent(id: string) {
               <h1>任务日志</h1>
               <p>操作记录、面板运行日志、帕鲁启动日志和 SteamCMD 更新输出。</p>
             </div>
-            <button class="button secondary" :disabled="logsLoading" @click="loadLogs">
+            <button class="button secondary" :disabled="logsLoading" @click="loadLogs(false)">
               <RefreshCw :size="16" :class="{ spin: logsLoading }" />刷新日志
             </button>
           </section>
@@ -2130,7 +2238,17 @@ function gameAccent(id: string) {
                       <small>{{ item.stage || "执行中" }} · {{ activityProgress(item) }}%</small>
                     </div>
                   </div>
-                  <time>{{ formatRelative(item.updatedAt || item.createdAt) }}</time>
+                  <div class="activity-tail">
+                    <button
+                      v-if="item.logs?.length"
+                      class="activity-log-button"
+                      type="button"
+                      @click="openActivityLogs(item)"
+                    >
+                      <TerminalSquare :size="13" />查看日志
+                    </button>
+                    <time>{{ formatRelative(item.updatedAt || item.createdAt) }}</time>
+                  </div>
                 </div>
                 <div v-if="logs.activities.length === 0" class="log-empty">暂时没有操作记录</div>
               </div>
@@ -2138,15 +2256,23 @@ function gameAccent(id: string) {
 
             <article class="panel-card log-viewer-card">
               <div class="log-tabs">
-                <button
+                <div
                   v-for="file in logs.files"
                   :key="file.id"
-                  :class="{ active: selectedLog?.id === file.id }"
-                  @click="selectedLogId = file.id"
+                  :class="['log-tab', { active: selectedLog?.id === file.id }]"
                 >
-                  <TerminalSquare :size="14" />
-                  <span>{{ file.label }}</span>
-                </button>
+                  <button type="button" class="log-tab-select" @click="selectLog(file.id)">
+                    <TerminalSquare :size="14" />
+                    <span>{{ file.label }}</span>
+                  </button>
+                  <button
+                    v-if="file.id !== 'panel'"
+                    type="button"
+                    class="log-tab-close"
+                    title="关闭日志"
+                    @click.stop="closeLog(file.id)"
+                  ><X :size="13" /></button>
+                </div>
               </div>
               <div v-if="selectedLog" class="log-viewer">
                 <div class="log-viewer-head">

@@ -248,13 +248,14 @@ and only evaluates staleness every 15 minutes rather than continuously invoking 
 automatic retries are at least one hour apart. A user with Update server permission can also click
 Check for updates. The task:
 
-1. Reads `buildid` from the local Steam manifest.
+1. Reads local `buildid` as a result-cache key and reads manifest IDs for installed depots.
 2. Confirms no other SteamCMD or Hearth task is active.
 3. Starts SteamCMD separately to finish its own preparation. Its version is neither displayed nor
    used for the server-version decision.
 4. Runs SteamCMD `app_info_print 2394010` to refresh metadata without downloading or modifying the
    Palworld server.
-5. Reads public-branch `buildid` and compares it with the local value.
+5. Reads public manifest IDs for each depot and compares only depots actually installed locally. The
+   App-level `buildid` is not the update decision.
 6. Displays only Server current, Palworld server update available, or Server version check unavailable,
    without placing differently formatted Build IDs beside the game version.
 
@@ -267,7 +268,19 @@ formal update.
 
 Valve documents [`app_info_print`](https://partner.steamgames.com/doc/sdk/uploading?l=english#DebuggingBuildIssues)
 as a debugging command that displays the current Steamworks app configuration. Hearth reads only the
-public-branch `buildid` from its output.
+public depot manifests from its output. If a real SteamCMD update reports App `2394010` as
+`already up to date`, Hearth shows Server already current and clears stale update state; later
+SteamCMD self-verification output is not treated as Palworld download progress.
+
+## Task logs
+
+Opening Task logs no longer scans and reads several historical files. The panel runtime log stays
+pinned. If a start, update, or version-check task is running when the page opens, its linked log is
+added as a closable tab. Completed logs open from their exact activity record; when an update also
+restarts the server, its SteamCMD and Palworld startup logs stay grouped under that one operation.
+Stop, backup, and configuration-save operations without separate console output show no View log
+action. Each request reads at most the final 128 KiB, and the API accepts only files explicitly
+referenced by current activity.
 
 ## Safe update flow
 

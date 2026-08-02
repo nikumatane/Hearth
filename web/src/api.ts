@@ -41,6 +41,12 @@ export type Activity = {
   progress?: number;
   createdAt: string;
   updatedAt?: string;
+  logs?: LogRef[];
+};
+
+export type LogRef = {
+  id: string;
+  label: string;
 };
 
 export type Overview = {
@@ -200,7 +206,7 @@ export type LogFile = {
   id: string;
   label: string;
   updatedAt: string;
-  content: string;
+  content?: string;
   truncated: boolean;
 };
 
@@ -267,6 +273,7 @@ export const api = {
       body: JSON.stringify(document)
     }),
   logs: () => request<Logs>("/api/v1/logs"),
+  log: (id: string) => request<LogFile>(`/api/v1/logs/${encodeURIComponent(id)}`),
   members: () =>
     request<{ members: MemberCredential[] }>("/api/v1/access/members"),
   createMember: (password: string, permissions: Permission[]) =>
