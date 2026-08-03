@@ -7,7 +7,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"hearth/internal/config"
@@ -75,7 +74,11 @@ func TestDiscoveryAndExplicitAdoption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !json.Valid(persisted) || !strings.Contains(string(persisted), installDir) {
+	var persistedConfig config.Config
+	if err := json.Unmarshal(persisted, &persistedConfig); err != nil {
+		t.Fatalf("decode persisted config: %v\n%s", err, persisted)
+	}
+	if persistedConfig.Games.Palworld.InstallDir != installDir {
 		t.Fatalf("persisted config = %s", persisted)
 	}
 }
