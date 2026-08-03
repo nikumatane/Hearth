@@ -20,9 +20,14 @@ const (
 	operationEventMemberDeleted = "member_deleted"
 	operationEventIPRuleAdded   = "ip_rule_added"
 	operationEventIPRuleRemoved = "ip_rule_removed"
+	operationEventGameAdopted   = "game_adopted"
+	operationEventGameInstall   = "game_install_started"
+	operationEventSystemUpdated = "system_settings_updated"
 
 	operationTargetMember = "member"
 	operationTargetIPRule = "ip_rule"
+	operationTargetGame   = "game"
+	operationTargetSystem = "system"
 
 	maxOperationAuditEntries = 1000
 	maxOperationAuditSize    = 5 << 20
@@ -176,6 +181,10 @@ func validOperationAuditEntry(entry operationAuditEntry) bool {
 		_, err := netip.ParseAddr(entry.TargetIP)
 		return err == nil && entry.TargetType == operationTargetIPRule && entry.TargetID != "" &&
 			(entry.RuleKind == ipRuleAllow || entry.RuleKind == ipRuleDeny)
+	case operationEventGameAdopted, operationEventGameInstall:
+		return entry.TargetType == operationTargetGame && entry.TargetID != ""
+	case operationEventSystemUpdated:
+		return entry.TargetType == operationTargetSystem && entry.TargetID == "hearth"
 	default:
 		return false
 	}

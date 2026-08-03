@@ -21,14 +21,15 @@
 
 ## What is Hearth?
 
-Hearth embeds its frontend and API in one Go binary and manages an existing SteamCMD game
-installation in place. It does not require Docker or move save data. The current production
-adapter focuses on Palworld servers on Windows; Don't Starve Together remains a future adapter.
+Hearth embeds its frontend and API in one Go binary. It can adopt an existing SteamCMD game in
+place or install a new Palworld Dedicated Server after explicit administrator confirmation. It
+does not require Docker and never adopts, starts, or moves saves automatically. The production
+adapter focuses on Windows Palworld; Don't Starve Together is detectable but remains explicitly planned.
 
 Hearth is intended for setups where:
 
 - A few regular friends share a server and a full hosting platform would be excessive.
-- The game is already installed and has existing saves.
+- The game already has existing saves, or a controlled installation is needed on a blank Windows host.
 - Friends should be able to update, restart, or back up the server without waiting for the owner.
 - Clear permission boundaries matter, but a database and account system do not.
 
@@ -41,7 +42,7 @@ Hearth is intended for setups where:
 | Monitoring | CPU, memory, disk, process, version, low-frequency Palworld public-branch checks, save ID, online counts and display names, and uptime |
 | Access control | One administrator password, up to 20 username-free member passwords, permission presets, adaptive throttling, and IP allow/deny rules |
 | Audit | Administrator-only recent activity, task logs, login/attack, security-operation, and parameter audit; passwords are never logged |
-| Deployment | Single-file Windows application, startup scheduled task, and versioned package |
+| Deployment | Single Windows binary, zero-game onboarding, read-only discovery/explicit adoption, administrator-triggered install, and startup task |
 
 ### Permission model
 
@@ -85,7 +86,7 @@ Sensitive settings are recorded only as “changed,” without their values. Rec
 `config-audit.jsonl`, rotated at 5 MiB with one previous generation retained, and the most recent
 1,000 entries are available under Access control → Parameter audit. `WorldOption.sav` remains
 administrator-only and currently does not receive per-parameter auditing. The login audit uses the
-same 5 MiB rotation policy. Successful member-credential and IP-rule mutations use an independent
+same 5 MiB rotation policy. Successful member, IP-rule, game-adoption/install-start, and backend-settings mutations use an independent
 `operation-audit.jsonl` with structured actor and target fields, no passwords or digests, the most
 recent 1,000 entries in memory, and the same 5 MiB one-generation rotation policy.
 
@@ -114,7 +115,7 @@ could forge their source IP and HTTPS marker.
 Requirements:
 
 - Windows Server 2022 or a compatible release
-- SteamCMD and Palworld Dedicated Server already installed
+- SteamCMD and Palworld Dedicated Server are optional; Hearth can be installed first on an empty host
 - Administrator PowerShell
 
 Build the package:
@@ -143,14 +144,19 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 The password entered by the installer is the Hearth administrator password, separate from
 Palworld's `AdminPassword`. The installer only installs Hearth and its startup task; it does not
-stop, start, update, or modify a running Palworld server.
+stop, start, update, or modify a running Palworld server. Startup discovery is bounded and read-only;
+it neither downloads nor adopts a game.
 
-## First Palworld takeover
+## First game setup
 
-1. Save and stop the game normally using the existing method.
-2. Install Hearth and open `http://127.0.0.1:8080` inside the ECS.
-3. Start the server from Hearth; starting does not depend on the REST API.
-4. If you need player data and safe stop/restart/update/backup while the server is running, open
+1. Install Hearth and open `http://127.0.0.1:8080` inside the ECS.
+2. With no game configured, administrators see dashboard onboarding. Once at least one game is
+   managed, use the separate System Settings → Game Management page.
+3. For an existing Palworld server, save and stop it normally, select a discovery candidate, and
+   explicitly confirm adoption. For a new server, select separate empty game and SteamCMD directories;
+   installation starts only after confirmation and does not start the server when complete.
+4. Start the server from Hearth; starting does not depend on the REST API.
+5. If you need player data and safe stop/restart/update/backup while the server is running, open
    the INI source, set a non-empty `AdminPassword`, enable `RESTAPIEnabled`, and confirm
    `RESTAPIPort=8212`.
 
@@ -173,6 +179,8 @@ newly created backup is always retained, and manually named or third-party files
 Adjust the thresholds with `backupRetentionDays` and `backupMaxTotalGB`.
 
 See the [Windows Palworld deployment guide](docs/windows-palworld.en.md) for the complete flow.
+
+See the [Hearth roadmap](ROADMAP.en.md) for the agreed boundaries of the next three open-source iterations.
 
 ## Checking for a new Palworld version
 
@@ -236,6 +244,10 @@ HEARTH_DEMO=true HEARTH_ADMIN_PASSWORD='replace-me' ./bin/hearth
 
 - [Windows Palworld deployment and upgrade](docs/windows-palworld.en.md)
 - [Architecture and security boundaries](docs/architecture.en.md)
+- [1.1.0–1.3.0 roadmap](ROADMAP.en.md)
+- [Contributing](CONTRIBUTING.en.md)
+- [Security reporting policy](SECURITY.en.md)
+- [MIT License](LICENSE)
 - [Changelog](CHANGELOG.en.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,21 +39,28 @@ type GamesConfig struct {
 	DontStarveTogether GameConfig `json:"dontStarveTogether"`
 }
 
+type ManagementConfig struct {
+	InstallRoot    string   `json:"installRoot,omitempty"`
+	SteamCmdRoot   string   `json:"steamCmdRoot,omitempty"`
+	DiscoveryRoots []string `json:"discoveryRoots,omitempty"`
+}
+
 type Config struct {
-	Listen             string      `json:"listen"`
-	Demo               bool        `json:"demo"`
-	SecureCookies      bool        `json:"secureCookies"`
-	LogFile            string      `json:"-"`
-	AdminPassword      string      `json:"-"`
-	PasswordFile       string      `json:"adminPasswordFile,omitempty"`
-	AccessFile         string      `json:"accessFile,omitempty"`
-	AuditFile          string      `json:"auditFile,omitempty"`
-	ConfigAuditFile    string      `json:"configAuditFile,omitempty"`
-	OperationAuditFile string      `json:"operationAuditFile,omitempty"`
-	IPRulesFile        string      `json:"ipRulesFile,omitempty"`
-	DeviceKeyFile      string      `json:"deviceKeyFile,omitempty"`
-	TrustedProxyCIDRs  []string    `json:"trustedProxyCidrs,omitempty"`
-	Games              GamesConfig `json:"games"`
+	Listen             string           `json:"listen"`
+	Demo               bool             `json:"demo"`
+	SecureCookies      bool             `json:"secureCookies"`
+	LogFile            string           `json:"-"`
+	AdminPassword      string           `json:"-"`
+	PasswordFile       string           `json:"adminPasswordFile,omitempty"`
+	AccessFile         string           `json:"accessFile,omitempty"`
+	AuditFile          string           `json:"auditFile,omitempty"`
+	ConfigAuditFile    string           `json:"configAuditFile,omitempty"`
+	OperationAuditFile string           `json:"operationAuditFile,omitempty"`
+	IPRulesFile        string           `json:"ipRulesFile,omitempty"`
+	DeviceKeyFile      string           `json:"deviceKeyFile,omitempty"`
+	TrustedProxyCIDRs  []string         `json:"trustedProxyCidrs,omitempty"`
+	Management         ManagementConfig `json:"management,omitempty"`
+	Games              GamesConfig      `json:"games"`
 }
 
 func Load(path string) (Config, error) {
@@ -116,4 +124,76 @@ func Load(path string) (Config, error) {
 		cfg.TrustedProxyCIDRs = []string{"127.0.0.0/8", "::1/128"}
 	}
 	return cfg, nil
+}
+
+// Revision returns a stable digest of the persisted, non-secret configuration.
+// Runtime-only values and the administrator password are excluded by their
+// json tags, so the revision can safely be returned to an authenticated admin.
+func Revision(cfg Config) (string, error) {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
+}
+
+// Save atomically replaces a configuration file and retains one known-good
+// predecessor at <path>.previous. It never persists runtime-only secrets.
+func Save(path string, cfg Config) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("configuration path is required")
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode configuration: %w", err)
+	}
+	data = append(data, '\n')
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("create configuration directory: %w", err)
+	}
+	temporary, err := os.CreateTemp(directory, ".hearth-config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary configuration: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	cleanup := true
+	defer func() {
+		_ = temporary.Close()
+		if cleanup {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	if err := temporary.Chmod(0o600); err != nil {
+		return fmt.Errorf("secure temporary configuration: %w", err)
+	}
+	if _, err := temporary.Write(data); err != nil {
+		return fmt.Errorf("write temporary configuration: %w", err)
+	}
+	if err := temporary.Sync(); err != nil {
+		return fmt.Errorf("sync temporary configuration: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close temporary configuration: %w", err)
+	}
+
+	previousPath := path + ".previous"
+	if _, err := os.Stat(path); err == nil {
+		if removeErr := os.Remove(previousPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return fmt.Errorf("remove stale previous configuration: %w", removeErr)
+		}
+		if err := os.Rename(path, previousPath); err != nil {
+			return fmt.Errorf("retain previous configuration: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect current configuration: %w", err)
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		if _, previousErr := os.Stat(previousPath); previousErr == nil {
+			_ = os.Rename(previousPath, path)
+		}
+		return fmt.Errorf("activate configuration: %w", err)
+	}
+	cleanup = false
+	return nil
 }

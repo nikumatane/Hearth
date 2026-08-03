@@ -177,3 +177,83 @@ type Logs struct {
 	Activities []Activity `json:"activities"`
 	Files      []LogFile  `json:"files"`
 }
+
+type GameCandidate struct {
+	ID              string `json:"id"`
+	InstallDir      string `json:"installDir"`
+	SteamCmd        string `json:"steamCmd,omitempty"`
+	SettingsPresent bool   `json:"settingsPresent"`
+	Detail          string `json:"detail"`
+}
+
+type ManagedGame struct {
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	ShortName    string          `json:"shortName"`
+	Support      string          `json:"support"`
+	State        string          `json:"state"`
+	Detail       string          `json:"detail"`
+	InstallDir   string          `json:"installDir,omitempty"`
+	SteamCmd     string          `json:"steamCmd,omitempty"`
+	CanInstall   bool            `json:"canInstall"`
+	CanAdopt     bool            `json:"canAdopt"`
+	Candidates   []GameCandidate `json:"candidates,omitempty"`
+	ActiveTaskID string          `json:"activeTaskId,omitempty"`
+}
+
+type SystemSettings struct {
+	Revision                  string   `json:"revision"`
+	InstallRoot               string   `json:"installRoot"`
+	SteamCmdRoot              string   `json:"steamCmdRoot"`
+	DiscoveryRoots            []string `json:"discoveryRoots"`
+	BackupRetentionDays       int      `json:"backupRetentionDays"`
+	BackupMaxTotalGB          int64    `json:"backupMaxTotalGB"`
+	ShutdownWaitSeconds       int      `json:"shutdownWaitSeconds"`
+	SteamCmdNoProgressMinutes int      `json:"steamCmdNoProgressMinutes"`
+	PalworldPort              int      `json:"palworldPort"`
+	SecureCookies             bool     `json:"secureCookies"`
+	TrustedProxyCIDRs         []string `json:"trustedProxyCidrs"`
+	RestartRequired           bool     `json:"restartRequired"`
+}
+
+type Management struct {
+	Games    []ManagedGame  `json:"games"`
+	Settings SystemSettings `json:"settings"`
+}
+
+type AdoptGameRequest struct {
+	CandidateID string `json:"candidateId"`
+	Confirm     bool   `json:"confirm"`
+}
+
+type InstallGameRequest struct {
+	InstallDir   string `json:"installDir"`
+	SteamCmdRoot string `json:"steamCmdRoot"`
+	Confirm      bool   `json:"confirm"`
+}
+
+type SystemSettingsPatch struct {
+	Revision                  string   `json:"revision"`
+	InstallRoot               string   `json:"installRoot"`
+	SteamCmdRoot              string   `json:"steamCmdRoot"`
+	DiscoveryRoots            []string `json:"discoveryRoots"`
+	BackupRetentionDays       int      `json:"backupRetentionDays"`
+	BackupMaxTotalGB          int64    `json:"backupMaxTotalGB"`
+	ShutdownWaitSeconds       int      `json:"shutdownWaitSeconds"`
+	SteamCmdNoProgressMinutes int      `json:"steamCmdNoProgressMinutes"`
+	PalworldPort              int      `json:"palworldPort"`
+	SecureCookies             bool     `json:"secureCookies"`
+	TrustedProxyCIDRs         []string `json:"trustedProxyCidrs"`
+}
+
+type ManagementService interface {
+	Management() Management
+	RefreshDiscovery() (Management, error)
+	AdoptGame(id string, request AdoptGameRequest) (ManagedGame, error)
+	InstallGame(id string, request InstallGameRequest) (Activity, error)
+	UpdateSystemSettings(patch SystemSettingsPatch) (SystemSettings, error)
+}
+
+type TaskLogLocator interface {
+	TaskLogPath(id string) (string, bool)
+}

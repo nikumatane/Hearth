@@ -44,6 +44,8 @@ type Service struct {
 	config   config.GameConfig
 	platform platformAdapter
 	rest     *restClient
+	ctx      context.Context
+	cancel   context.CancelFunc
 
 	mu             sync.Mutex
 	busy           bool
@@ -89,11 +91,13 @@ func NewService(gameConfig config.GameConfig) (*Service, error) {
 	if err := platformSupported(); err != nil {
 		return nil, err
 	}
-	service := &Service{config: gameConfig, platform: nativePlatform{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	service := &Service{config: gameConfig, platform: nativePlatform{}, ctx: ctx, cancel: cancel}
 	client, err := newRESTClient(gameConfig.RESTURL, gameConfig.RESTUsername, func() (string, error) {
 		return readAdminPassword(gameConfig.SettingsFile)
 	})
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	service.rest = client
@@ -101,6 +105,15 @@ func NewService(gameConfig config.GameConfig) (*Service, error) {
 	go service.refreshAPIStatus(service.apiGeneration)
 	go service.runAutomaticVersionChecks()
 	return service, nil
+}
+
+// Close stops background status and version-check work. It does not stop or
+// otherwise modify the managed Palworld process.
+func (s *Service) Close() error {
+	if s.cancel != nil {
+		s.cancel()
+	}
+	return nil
 }
 
 func applyDefaults(gameConfig *config.GameConfig) {
@@ -508,7 +521,11 @@ func (s *Service) cachedAPIStatus() apiStatus {
 }
 
 func (s *Service) refreshAPIStatus(generation uint64) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	parent := s.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 1200*time.Millisecond)
 	defer cancel()
 	status := apiStatus{}
 	var statusMu sync.Mutex

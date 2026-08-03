@@ -148,11 +148,12 @@ export type LoginAuditEntry = {
 
 export type OperationAuditEntry = {
   id: string;
-  event: "member_created" | "member_updated" | "member_deleted" | "ip_rule_added" | "ip_rule_removed";
+  event: "member_created" | "member_updated" | "member_deleted" | "ip_rule_added" | "ip_rule_removed" |
+    "game_adopted" | "game_install_started" | "system_settings_updated";
   actorCredentialId: string;
   actorRole: "admin" | "member";
   actorIp: string;
-  targetType: "member" | "ip_rule";
+  targetType: "member" | "ip_rule" | "game" | "system";
   targetId?: string;
   targetIp?: string;
   ruleKind?: "allow" | "deny";
@@ -215,6 +216,49 @@ export type LogFile = {
 export type Logs = {
   activities: Activity[];
   files: LogFile[];
+};
+
+export type GameCandidate = {
+  id: string;
+  installDir: string;
+  steamCmd?: string;
+  settingsPresent: boolean;
+  detail: string;
+};
+
+export type ManagedGame = {
+  id: string;
+  name: string;
+  shortName: string;
+  support: "available" | "planned";
+  state: "managed" | "detected" | "not_installed" | "installing" | "error";
+  detail: string;
+  installDir?: string;
+  steamCmd?: string;
+  canInstall: boolean;
+  canAdopt: boolean;
+  candidates?: GameCandidate[];
+  activeTaskId?: string;
+};
+
+export type SystemSettings = {
+  revision: string;
+  installRoot: string;
+  steamCmdRoot: string;
+  discoveryRoots: string[];
+  backupRetentionDays: number;
+  backupMaxTotalGB: number;
+  shutdownWaitSeconds: number;
+  steamCmdNoProgressMinutes: number;
+  palworldPort: number;
+  secureCookies: boolean;
+  trustedProxyCidrs: string[];
+  restartRequired: boolean;
+};
+
+export type Management = {
+  games: ManagedGame[];
+  settings: SystemSettings;
 };
 
 class APIError extends Error {
@@ -320,6 +364,36 @@ export const api = {
   deleteIPRule: (id: string) =>
     request<void>(`/api/v1/access/ip-rules/${encodeURIComponent(id)}`, {
       method: "DELETE"
+    }),
+  management: () => request<Management>("/api/v1/system/management"),
+  refreshDiscovery: () =>
+    request<Management>("/api/v1/system/discovery", { method: "POST" }),
+  adoptGame: (id: string, candidateId: string) =>
+    request<ManagedGame>(`/api/v1/system/games/${encodeURIComponent(id)}/adopt`, {
+      method: "POST",
+      body: JSON.stringify({ candidateId, confirm: true })
+    }),
+  installGame: (id: string, installDir: string, steamCmdRoot: string) =>
+    request<Activity>(`/api/v1/system/games/${encodeURIComponent(id)}/install`, {
+      method: "POST",
+      body: JSON.stringify({ installDir, steamCmdRoot, confirm: true })
+    }),
+  updateSystemSettings: (settings: SystemSettings) =>
+    request<SystemSettings>("/api/v1/system/settings", {
+      method: "PATCH",
+      body: JSON.stringify({
+        revision: settings.revision,
+        installRoot: settings.installRoot,
+        steamCmdRoot: settings.steamCmdRoot,
+        discoveryRoots: settings.discoveryRoots,
+        backupRetentionDays: settings.backupRetentionDays,
+        backupMaxTotalGB: settings.backupMaxTotalGB,
+        shutdownWaitSeconds: settings.shutdownWaitSeconds,
+        steamCmdNoProgressMinutes: settings.steamCmdNoProgressMinutes,
+        palworldPort: settings.palworldPort,
+        secureCookies: settings.secureCookies,
+        trustedProxyCidrs: settings.trustedProxyCidrs
+      })
     })
 };
 

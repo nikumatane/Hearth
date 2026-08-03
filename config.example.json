@@ -9,6 +9,11 @@
   "ipRulesFile": "C:\\ProgramData\\Hearth\\ip-rules.json",
   "deviceKeyFile": "C:\\ProgramData\\Hearth\\device-cookie.key",
   "trustedProxyCidrs": ["127.0.0.0/8", "::1/128"],
+  "management": {
+    "installRoot": "C:\\GameServers",
+    "steamCmdRoot": "C:\\SteamCMD",
+    "discoveryRoots": ["C:\\Users\\YOUR_USER\\Downloads"]
+  },
   "games": {
     "palworld": {
       "enabled": true,

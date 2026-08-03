@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"hearth/internal/config"
+	"hearth/internal/gamemanager"
 	"hearth/internal/httpapi"
-	"hearth/internal/palworld"
 	"hearth/internal/panel"
 )
 
@@ -41,16 +41,12 @@ func main() {
 	if cfg.Demo {
 		service = panel.NewDemoService()
 	} else {
-		if !cfg.Games.Palworld.Enabled {
-			slog.Error("palworld adapter must be enabled in production mode")
+		gameManager, managerErr := gamemanager.New(cfg, *configPath)
+		if managerErr != nil {
+			slog.Error("initialize game manager", "error", managerErr)
 			os.Exit(1)
 		}
-		palworldService, adapterErr := palworld.NewService(cfg.Games.Palworld)
-		if adapterErr != nil {
-			slog.Error("initialize Palworld Windows adapter", "error", adapterErr)
-			os.Exit(1)
-		}
-		service = palworldService
+		service = gameManager
 	}
 	handler, err := httpapi.New(cfg, service)
 	if err != nil {
@@ -82,6 +78,11 @@ func main() {
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
 		slog.Error("shutdown Hearth", "error", err)
+	}
+	if closer, ok := service.(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil {
+			slog.Warn("close game service", "error", err)
+		}
 	}
 	slog.Info("Hearth stopped")
 }

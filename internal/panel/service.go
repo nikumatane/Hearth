@@ -182,6 +182,60 @@ func (s *DemoService) UpdateWorldOption(WorldOptionDocument) (WorldOptionDocumen
 	return WorldOptionDocument{}, ErrNotFound
 }
 
+func (s *DemoService) Management() Management {
+	return Management{
+		Games: []ManagedGame{
+			{
+				ID: "palworld", Name: "幻兽帕鲁", ShortName: "PAL", Support: "available",
+				State: "managed", Detail: "演示模式中的已管理服务器",
+				InstallDir: `C:\GameServers\PalServer`, SteamCmd: `C:\SteamCMD\steamcmd.exe`,
+			},
+			{
+				ID: "dont-starve-together", Name: "饥荒联机版", ShortName: "DST",
+				Support: "planned", State: "not_installed", Detail: "计划在 1.3.0 提供生产适配器",
+			},
+		},
+		Settings: SystemSettings{
+			Revision: "demo", InstallRoot: `C:\GameServers`, SteamCmdRoot: `C:\SteamCMD`,
+			DiscoveryRoots:      []string{`C:\GameServers`, `C:\SteamCMD`},
+			BackupRetentionDays: 30, BackupMaxTotalGB: 20, ShutdownWaitSeconds: 30,
+			SteamCmdNoProgressMinutes: 30, PalworldPort: 8211,
+			TrustedProxyCIDRs: []string{"127.0.0.0/8", "::1/128"},
+		},
+	}
+}
+
+func (s *DemoService) RefreshDiscovery() (Management, error) {
+	return s.Management(), nil
+}
+
+func (s *DemoService) AdoptGame(string, AdoptGameRequest) (ManagedGame, error) {
+	return ManagedGame{}, ErrInvalid
+}
+
+func (s *DemoService) InstallGame(string, InstallGameRequest) (Activity, error) {
+	return Activity{}, ErrInvalid
+}
+
+func (s *DemoService) UpdateSystemSettings(patch SystemSettingsPatch) (SystemSettings, error) {
+	settings := s.Management().Settings
+	if patch.Revision != settings.Revision {
+		return SystemSettings{}, ErrInvalid
+	}
+	settings.InstallRoot = patch.InstallRoot
+	settings.SteamCmdRoot = patch.SteamCmdRoot
+	settings.DiscoveryRoots = append([]string(nil), patch.DiscoveryRoots...)
+	settings.BackupRetentionDays = patch.BackupRetentionDays
+	settings.BackupMaxTotalGB = patch.BackupMaxTotalGB
+	settings.ShutdownWaitSeconds = patch.ShutdownWaitSeconds
+	settings.SteamCmdNoProgressMinutes = patch.SteamCmdNoProgressMinutes
+	settings.PalworldPort = patch.PalworldPort
+	settings.SecureCookies = patch.SecureCookies
+	settings.TrustedProxyCIDRs = append([]string(nil), patch.TrustedProxyCIDRs...)
+	settings.RestartRequired = true
+	return settings, nil
+}
+
 func (s *DemoService) completeAction(id, action, activityID string) {
 	time.Sleep(500 * time.Millisecond)
 	s.mu.Lock()

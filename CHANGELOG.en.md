@@ -9,7 +9,17 @@ Unreleased and moves to a version section when a formal package is built.
 
 ## Unreleased
 
-None.
+- Hearth can now start with zero configured games. Startup discovery is bounded and read-only, and
+  missing Palworld files no longer terminate the panel.
+- Added administrator onboarding to the zero-game dashboard. Discovery, adoption, installation, and
+  backend parameters move to a separate System Settings page once a game is managed; members cannot access it.
+- Added explicitly confirmed adoption and fresh installation for Palworld. New installs stage the
+  SteamCMD download, validate ZIP paths and size, require an empty game directory, and never auto-start the server.
+- DST is detected read-only and labeled as planned for 1.3.0, without premature install or adoption actions.
+- Added backend settings for management paths, backup retention, SteamCMD no-progress timeout, port,
+  cookies, and trusted proxies, with revision checks, atomic replacement, and a previous configuration.
+  Game adoption, install starts, and backend-settings saves are recorded in administrator operation audit.
+- Adopted the MIT License and added bilingual roadmap, contribution and security policies, plus a GitHub Actions CI baseline.
 
 ## 1.0.4 - 2026-08-03
 
