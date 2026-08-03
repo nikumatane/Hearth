@@ -122,6 +122,6 @@ finally {
         # The smoke server does not launch child processes. Parameterless Kill
         # keeps cleanup compatible with Windows PowerShell 5.1 and PowerShell 7.
         $process.Kill()
-        $process.WaitForExit(5000)
+        [void]$process.WaitForExit(5000)
     }
 }
