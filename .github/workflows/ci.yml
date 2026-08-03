@@ -43,14 +43,14 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm --dir web install --frozen-lockfile
 
+      - name: Check and build frontend
+        run: pnpm --dir web build
+
       - name: Test backend
         run: go test ./...
 
       - name: Vet backend
         run: go vet ./...
-
-      - name: Check and build frontend
-        run: pnpm --dir web build
 
       - name: Cross-compile Windows server
         env:
@@ -72,6 +72,25 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build embedded frontend on Windows
+        shell: pwsh
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web build
 
       - name: Test backend on Windows
         run: go test ./...
