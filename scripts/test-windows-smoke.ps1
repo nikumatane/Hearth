@@ -61,10 +61,10 @@ $config = [ordered]@{
 $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = $resolvedExecutable
 $startInfo.UseShellExecute = $false
-[void]$startInfo.ArgumentList.Add("-config")
-[void]$startInfo.ArgumentList.Add($configPath)
-[void]$startInfo.ArgumentList.Add("-log")
-[void]$startInfo.ArgumentList.Add($logPath)
+# ProcessStartInfo.ArgumentList is unavailable in Windows PowerShell 5.1.
+# These generated Windows paths cannot contain double quotes, so an explicitly
+# quoted argument string remains safe and works on both PowerShell 5.1 and 7.
+$startInfo.Arguments = '-config "' + $configPath + '" -log "' + $logPath + '"'
 $process = [System.Diagnostics.Process]::Start($startInfo)
 
 try {
