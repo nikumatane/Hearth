@@ -11,6 +11,15 @@ Unreleased and moves to a version section when a formal package is built.
 
 None.
 
+## 1.0.4 - 2026-08-03
+
+- Added real online display names to the Palworld detail page. The panel API returns only sanitized
+  display names and never exposes platform accounts, Player IDs, or User IDs. Player data is renamed
+  to the clearer Player-count source.
+- The player limit prefers live REST metrics `maxplayernum`. When REST is unavailable and the active
+  world has `WorldOption.sav`, Hearth now reports the limit as unknown instead of falling back to a
+  potentially stale INI value.
+
 ## 1.0.3 - 2026-08-02
 
 - Fixed persistent false server-update notices when the Steam App Build ID changes but the Palworld

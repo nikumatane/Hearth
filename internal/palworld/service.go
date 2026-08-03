@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"hearth/internal/config"
 	"hearth/internal/panel"
@@ -74,6 +75,7 @@ type apiStatus struct {
 	Info         serverInfo
 	Metrics      serverMetrics
 	PlayerCount  int
+	Players      []panel.OnlinePlayer
 	InfoOK       bool
 	MetricsOK    bool
 	PlayerListOK bool
@@ -371,10 +373,12 @@ func (s *Service) UpdateWorldOption(document panel.WorldOptionDocument) (panel.W
 func (s *Service) snapshot() (panel.Game, panel.ResourceUsage) {
 	process, host, err := s.platform.sample(s.config.ProcessName, s.config.InstallDir)
 	now := time.Now()
+	configuredPlayerMax := readNumericOption(s.config.SettingsFile, "ServerPlayerMaxNum")
 	game := panel.Game{
 		ID: palworldID, Name: "幻兽帕鲁", ShortName: "PAL", State: "stopped",
 		Port: s.config.Port, Tags: []string{"Steam", "REST API", "Windows"},
-		PlayersMax:       readNumericOption(s.config.SettingsFile, "ServerPlayerMaxNum"),
+		PlayersMax:       configuredPlayerMax,
+		PlayersMaxKnown:  configuredPlayerMax > 0,
 		PlayersAvailable: true, PlayersSource: "进程已停止",
 		CPUHistory: []panel.MetricPoint{}, MemoryHistory: []panel.MetricPoint{},
 	}
@@ -384,6 +388,14 @@ func (s *Service) snapshot() (panel.Game, panel.ResourceUsage) {
 	if world, worldErr := detectActiveWorld(s.config.InstallDir); worldErr == nil {
 		game.SaveID = world.ID
 		game.SaveDetection = world.Detection
+		if _, optionErr := os.Stat(world.OptionPath); optionErr == nil || !errors.Is(optionErr, os.ErrNotExist) {
+			// WorldOption.sav takes precedence over PalWorldSettings.ini. The
+			// browser can decode it for editing, but the production backend does
+			// not guess values from a compressed save container. Live REST metrics
+			// will replace this unknown fallback while the server is running.
+			game.PlayersMax = 0
+			game.PlayersMaxKnown = false
+		}
 	}
 	resource := panel.ResourceUsage{CPUHistory: []panel.MetricPoint{}, MemoryHistory: []panel.MetricPoint{}}
 	if err != nil {
@@ -458,7 +470,10 @@ func applyAPIStatus(game *panel.Game, status apiStatus) {
 	}
 	if status.MetricsOK {
 		game.PlayersOnline = status.Metrics.CurrentPlayerNum
-		game.PlayersMax = status.Metrics.MaxPlayerNum
+		if status.Metrics.MaxPlayerNum > 0 {
+			game.PlayersMax = status.Metrics.MaxPlayerNum
+			game.PlayersMaxKnown = true
+		}
 		game.PlayersAvailable = true
 		game.PlayersSource = "REST API 指标"
 		if status.Metrics.Uptime > 0 {
@@ -474,6 +489,7 @@ func applyAPIStatus(game *panel.Game, status apiStatus) {
 			)
 		}
 		game.PlayersOnline = status.PlayerCount
+		game.Players = append([]panel.OnlinePlayer(nil), status.Players...)
 		game.PlayersAvailable = true
 		game.PlayersSource = "REST API 玩家列表"
 	}
@@ -516,9 +532,10 @@ func (s *Service) refreshAPIStatus(generation uint64) {
 	}()
 	go func() {
 		defer wait.Done()
-		if players, err := s.rest.players(ctx); err == nil {
+		if players, err := s.rest.players(ctx); err == nil && players.Players != nil {
 			statusMu.Lock()
 			status.PlayerCount, status.PlayerListOK = len(players.Players), true
+			status.Players = publicOnlinePlayers(players.Players)
 			statusMu.Unlock()
 		}
 	}()
@@ -534,6 +551,33 @@ func (s *Service) refreshAPIStatus(generation uint64) {
 	s.apiStatus = status
 	s.apiRefreshing = false
 	s.apiMu.Unlock()
+}
+
+func publicOnlinePlayers(players []serverPlayer) []panel.OnlinePlayer {
+	const (
+		maxPlayers    = 128
+		maxNameRunes  = 64
+		unnamedPlayer = "未命名玩家"
+	)
+	limit := min(len(players), maxPlayers)
+	result := make([]panel.OnlinePlayer, 0, limit)
+	for _, player := range players[:limit] {
+		name := strings.Map(func(value rune) rune {
+			if unicode.IsControl(value) || unicode.In(value, unicode.Cf, unicode.Zl, unicode.Zp) {
+				return -1
+			}
+			return value
+		}, strings.TrimSpace(player.Name))
+		runes := []rune(name)
+		if len(runes) > maxNameRunes {
+			name = string(runes[:maxNameRunes])
+		}
+		if name == "" {
+			name = unnamedPlayer
+		}
+		result = append(result, panel.OnlinePlayer{Name: name})
+	}
+	return result
 }
 
 func (s *Service) invalidateAPIStatus() {

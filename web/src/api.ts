@@ -14,8 +14,10 @@ export type Game = {
   versionCheck?: "unchecked" | "checking" | "current" | "update_available" | "unavailable";
   playersOnline: number;
   playersMax: number;
+  playersMaxKnown: boolean;
   playersAvailable: boolean;
   playersSource?: string;
+  players?: Array<{ name: string }>;
   uptimeSeconds: number;
   cpuPercent: number;
   memoryGB: number;

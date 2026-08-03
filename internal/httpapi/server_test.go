@@ -60,6 +60,27 @@ func TestLoginAndAuthenticatedOverview(t *testing.T) {
 	}
 }
 
+func TestOverviewExposesOnlyOnlinePlayerDisplayNames(t *testing.T) {
+	handler := newTestHandler(t, config.Config{AdminPassword: "correct"})
+	cookie := loginTestHandler(t, handler)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("overview status = %d body = %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"players":[{"name":"Moss"},{"name":"Nia"}]`) {
+		t.Fatalf("overview player names missing: %s", body)
+	}
+	for _, sensitiveField := range []string{"accountName", "playerId", "userId"} {
+		if strings.Contains(body, sensitiveField) {
+			t.Fatalf("overview exposed %s: %s", sensitiveField, body)
+		}
+	}
+}
+
 func TestLoginRejectsWrongPassword(t *testing.T) {
 	handler := newTestHandler(t, config.Config{AdminPassword: "correct"})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/session", bytes.NewBufferString(`{"password":"wrong"}`))

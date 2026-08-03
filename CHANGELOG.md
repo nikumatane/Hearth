@@ -11,6 +11,13 @@
 
 暂无。
 
+## 1.0.4 - 2026-08-03
+
+- 帕鲁详情页新增真实在线玩家昵称列表；面板 API 只返回清理后的显示名，不暴露 REST
+  响应中的平台账号、Player ID 或 User ID。“玩家数据”同时改名为更明确的“人数来源”。
+- 玩家上限优先使用运行中 REST metrics 的 `maxplayernum`。REST 不可用且当前世界存在
+  `WorldOption.sav` 时明确显示上限未知，不再错误回退到可能已失效的 INI 数值。
+
 ## 1.0.3 - 2026-08-02
 
 - 修复 Steam App 顶层 Build ID 变化但 Palworld Dedicated Server depot 未变化时持续误报

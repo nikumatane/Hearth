@@ -200,17 +200,18 @@ const restAPIEnabled = computed(() => {
 const playerSummary = computed(() => {
   const games = overview.value?.games ?? [];
   const max = games.reduce((sum, game) => sum + game.playersMax, 0);
+  const maxKnown = games.every((game) => game.playersMaxKnown);
   const unavailable = games.some(
     (game) => game.state === "running" && !game.playersAvailable
   );
   if (unavailable) {
-    return { online: null as number | null, max, source: "REST API 暂不可用" };
+    return { online: null as number | null, max: maxKnown ? max : null, source: "REST API 暂不可用" };
   }
   const online = games.reduce((sum, game) => sum + game.playersOnline, 0);
   const demo = games.some((game) => game.playersSource === "演示数据");
   return {
     online,
-    max,
+    max: maxKnown ? max : null,
     source: demo ? "演示数据" : "REST API 实时数据"
   };
 });
@@ -1331,7 +1332,7 @@ function gameAccent(id: string) {
               </div>
               <strong>
                 {{ playerSummary.online === null ? "—" : playerSummary.online }}
-                <em> / {{ playerSummary.max }}</em>
+                <em> / {{ playerSummary.max ?? "?" }}</em>
               </strong>
               <div :class="['player-data-status', { unavailable: playerSummary.online === null }]">
                 <span></span>{{ playerSummary.source }}
@@ -1370,7 +1371,7 @@ function gameAccent(id: string) {
                     <div>
                       <small>在线玩家</small>
                       <strong v-if="game.playersAvailable">
-                        {{ game.playersOnline }}<em>/{{ game.playersMax }}</em>
+                        {{ game.playersOnline }}<em>/{{ game.playersMaxKnown ? game.playersMax : "?" }}</em>
                       </strong>
                       <strong v-else class="fact-text">暂不可用</strong>
                     </div>
@@ -1629,11 +1630,12 @@ function gameAccent(id: string) {
                 <div>
                   <dt>在线玩家</dt>
                   <dd v-if="selectedGame.playersAvailable">
-                    {{ selectedGame.playersOnline }} / {{ selectedGame.playersMax }}
+                    {{ selectedGame.playersOnline }} /
+                    {{ selectedGame.playersMaxKnown ? selectedGame.playersMax : "上限未知" }}
                   </dd>
                   <dd v-else>暂不可用</dd>
                 </div>
-                <div><dt>玩家数据</dt><dd>{{ selectedGame.playersSource || "未知" }}</dd></div>
+                <div><dt>人数来源</dt><dd>{{ selectedGame.playersSource || "未知" }}</dd></div>
                 <div><dt>游戏端口</dt><dd>{{ selectedGame.port }} / UDP</dd></div>
                 <div><dt>最近备份</dt><dd>{{ formatRelative(selectedGame.lastBackupAt) }}</dd></div>
                 <div>
@@ -1662,6 +1664,29 @@ function gameAccent(id: string) {
                 <div><dt>进程状态</dt><dd class="good">{{ stateLabel(selectedGame.state) }}</dd></div>
                 <div><dt>REST 管理</dt><dd :class="selectedGame.restAvailable ? 'good' : ''">{{ selectedGame.restAvailable ? "已连接" : selectedGame.restEnabled ? "已启用但不可用" : "未启用" }}</dd></div>
               </dl>
+              <section
+                v-if="selectedGame.state === 'running' && selectedGame.playersAvailable"
+                class="online-player-panel"
+              >
+                <div class="online-player-heading">
+                  <div>
+                    <strong>在线玩家</strong>
+                    <span>仅展示游戏昵称，不显示平台账号与玩家 ID</span>
+                  </div>
+                  <em>{{ selectedGame.playersOnline }} 人</em>
+                </div>
+                <div v-if="selectedGame.players?.length" class="online-player-list">
+                  <span v-for="(player, index) in selectedGame.players" :key="`${player.name}-${index}`">
+                    <Users :size="13" />{{ player.name }}
+                  </span>
+                </div>
+                <p v-else-if="selectedGame.playersOnline === 0" class="online-player-empty">
+                  当前没有玩家在线
+                </p>
+                <p v-else class="online-player-empty">
+                  在线人数可用，但玩家名单接口暂不可用
+                </p>
+              </section>
             </article>
             <article class="panel-card quick-card">
               <div class="card-heading">

@@ -185,6 +185,12 @@ RESTAPIPort=8212
 
 Do not expose the REST API publicly. Hearth always accesses it through `127.0.0.1`.
 
+The server detail page uses `/v1/api/players` for online display names, but the panel API retains only
+sanitized names and never returns `accountName`, `playerId`, or `userId` to the browser. Online count
+comes from the player-list length, while the limit prefers `/v1/api/metrics` `maxplayernum`. If REST is
+temporarily unavailable and the active save has `WorldOption.sav`, Hearth shows an unknown limit rather
+than using an INI value that WorldOption may have overridden.
+
 When REST is disabled or temporarily unavailable, stop and restart remain available but explicitly
 warn that progress since the latest automatic save may be lost. After confirmation, the task tries
 a safe REST shutdown first and terminates only the same Palworld PID detected when the task began if

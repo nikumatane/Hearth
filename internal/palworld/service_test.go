@@ -466,16 +466,20 @@ func TestApplyAPIStatusPrefersPlayerList(t *testing.T) {
 		Info:         serverInfo{Version: "1.0.2"},
 		Metrics:      serverMetrics{CurrentPlayerNum: 4, MaxPlayerNum: 8, Uptime: 120},
 		PlayerCount:  2,
+		Players:      []panel.OnlinePlayer{{Name: "Moss"}, {Name: "Nia"}},
 		InfoOK:       true,
 		MetricsOK:    true,
 		PlayerListOK: true,
 	})
 
-	if game.PlayersOnline != 2 || !game.PlayersAvailable {
+	if game.PlayersOnline != 2 || !game.PlayersAvailable || !game.PlayersMaxKnown {
 		t.Fatalf("players = %d available = %v; want player list count", game.PlayersOnline, game.PlayersAvailable)
 	}
 	if game.PlayersSource != "REST API 玩家列表" || game.Version != "1.0.2" || game.UptimeSeconds != 120 {
 		t.Fatalf("game status = %#v", game)
+	}
+	if len(game.Players) != 2 || game.Players[0].Name != "Moss" || game.Players[1].Name != "Nia" {
+		t.Fatalf("player list = %#v", game.Players)
 	}
 }
 
@@ -486,11 +490,78 @@ func TestApplyAPIStatusFallsBackToMetrics(t *testing.T) {
 		MetricsOK: true,
 	})
 
-	if game.PlayersOnline != 3 || game.PlayersMax != 6 || !game.PlayersAvailable {
+	if game.PlayersOnline != 3 || game.PlayersMax != 6 || !game.PlayersMaxKnown || !game.PlayersAvailable {
 		t.Fatalf("game status = %#v", game)
 	}
 	if game.PlayersSource != "REST API 指标" {
 		t.Fatalf("players source = %q", game.PlayersSource)
+	}
+}
+
+func TestPublicOnlinePlayersExposeOnlySanitizedDisplayNames(t *testing.T) {
+	longName := strings.Repeat("帕", 70)
+	players := publicOnlinePlayers([]serverPlayer{
+		{Name: "  Moss\n\u202ePlayer  ", Account: "secret-account", PlayerID: "secret-player", UserID: "secret-user"},
+		{Name: "\t\r"},
+		{Name: longName},
+	})
+	if len(players) != 3 {
+		t.Fatalf("players = %#v", players)
+	}
+	if players[0].Name != "MossPlayer" || players[1].Name != "未命名玩家" {
+		t.Fatalf("sanitized players = %#v", players)
+	}
+	if len([]rune(players[2].Name)) != 64 {
+		t.Fatalf("long player name length = %d", len([]rune(players[2].Name)))
+	}
+}
+
+func TestSnapshotDoesNotUseINIPlayerLimitWhenWorldOptionExists(t *testing.T) {
+	installDir := t.TempDir()
+	settingsPath := filepath.Join(installDir, "PalWorldSettings.ini")
+	if err := os.WriteFile(settingsPath, []byte("OptionSettings=(ServerPlayerMaxNum=32)\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const worldID = "0123456789ABCDEF0123456789ABCDEF"
+	configDirectory := filepath.Join(installDir, "Pal", "Saved", "Config", "WindowsServer")
+	worldDirectory := filepath.Join(installDir, "Pal", "Saved", "SaveGames", "0", worldID)
+	if err := os.MkdirAll(configDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(worldDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(configDirectory, "GameUserSettings.ini"),
+		[]byte("DedicatedServerName="+worldID+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worldDirectory, "Level.sav"), []byte("level"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	worldOptionPath := filepath.Join(worldDirectory, "WorldOption.sav")
+	if err := os.WriteFile(worldOptionPath, []byte("option"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{
+		config: config.GameConfig{
+			InstallDir: installDir, SettingsFile: settingsPath, ProcessName: "PalServer.exe",
+		},
+		platform: &fakePlatform{},
+	}
+	game, _ := service.snapshot()
+	if game.PlayersMaxKnown || game.PlayersMax != 0 {
+		t.Fatalf("WorldOption fallback = %d known=%v; want unknown", game.PlayersMax, game.PlayersMaxKnown)
+	}
+
+	if err := os.Remove(worldOptionPath); err != nil {
+		t.Fatal(err)
+	}
+	game, _ = service.snapshot()
+	if !game.PlayersMaxKnown || game.PlayersMax != 32 {
+		t.Fatalf("INI fallback = %d known=%v; want 32 known", game.PlayersMax, game.PlayersMaxKnown)
 	}
 }
 

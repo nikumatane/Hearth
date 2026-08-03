@@ -46,6 +46,7 @@ func NewDemoService() *DemoService {
 				ID: "palworld", Name: "幻兽帕鲁", ShortName: "PAL",
 				State: "running", Version: "1.0.1.76890", AvailableVersion: "77142",
 				UpdateAvailable: true, VersionCheck: "update_available", PlayersOnline: 2, PlayersMax: 8,
+				PlayersMaxKnown: true, Players: []OnlinePlayer{{Name: "Moss"}, {Name: "Nia"}},
 				PlayersAvailable: true, PlayersSource: "演示数据",
 				UptimeSeconds: 5*3600 + 42*60, CPUPercent: 36.8, MemoryGB: 5.72,
 				Port: 8211, SaveID: "E67C6D5A4D25543748EBC2BAB926DC80",
@@ -55,7 +56,7 @@ func NewDemoService() *DemoService {
 			"dont-starve-together": {
 				ID: "dont-starve-together", Name: "饥荒联机版", ShortName: "DST",
 				State: "stopped", Version: "721347", UpdateAvailable: false,
-				PlayersOnline: 0, PlayersMax: 6, PlayersAvailable: true,
+				PlayersOnline: 0, PlayersMax: 6, PlayersMaxKnown: true, PlayersAvailable: true,
 				PlayersSource: "演示数据", CPUPercent: 0, MemoryGB: 0,
 				Port: 10999, LastBackupAt: &backup, Tags: []string{"Master", "Caves"},
 			},

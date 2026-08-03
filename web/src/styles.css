@@ -1855,6 +1855,66 @@ textarea:focus-visible {
   gap: 5px;
 }
 
+.online-player-panel {
+  padding-top: 15px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.online-player-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.online-player-heading > div {
+  display: grid;
+  gap: 5px;
+}
+
+.online-player-heading strong {
+  font-size: 12px;
+}
+
+.online-player-heading span,
+.online-player-empty {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.online-player-heading em {
+  color: var(--green);
+  font: 500 12px "DM Mono", monospace;
+  font-style: normal;
+}
+
+.online-player-list {
+  margin-top: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.online-player-list > span {
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid rgba(72, 211, 154, .15);
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: #a9dcca;
+  background: rgba(72, 211, 154, .045);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-player-empty {
+  margin: 13px 0 0;
+}
+
 .version-detail small {
   color: var(--dim);
   font: 500 11px Inter, sans-serif;

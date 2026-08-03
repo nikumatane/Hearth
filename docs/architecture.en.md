@@ -146,6 +146,8 @@ current small-server use case.
   the frontend masks sensitive values after parsing. Neither source writes a password back unless it
   was explicitly entered.
 - The Palworld REST API target is fixed at `127.0.0.1`; the frontend cannot control its address.
+- Player-list responses are reduced inside the game adapter to sanitized display names. Platform
+  accounts, Player IDs, and User IDs never enter the shared panel model or reach the browser.
 
 ## Current acceptance criteria
 

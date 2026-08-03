@@ -38,7 +38,7 @@ Hearth is intended for setups where:
 | --- | --- |
 | Game lifecycle | Start, safe stop, restart, SteamCMD update, ZIP backup, and staged progress |
 | Palworld configuration | Read and incrementally save `WorldOption.sav` / `PalWorldSettings.ini` as separate sources, with duplicate-source conflict indicators |
-| Monitoring | CPU, memory, disk, process, version, low-frequency Palworld public-branch checks, save ID, players, and uptime |
+| Monitoring | CPU, memory, disk, process, version, low-frequency Palworld public-branch checks, save ID, online counts and display names, and uptime |
 | Access control | One administrator password, up to 20 username-free member passwords, permission presets, adaptive throttling, and IP allow/deny rules |
 | Audit | Administrator-only recent activity, task logs, login/attack, security-operation, and parameter audit; passwords are never logged |
 | Deployment | Single-file Windows application, startup scheduled task, and versioned package |
@@ -158,6 +158,11 @@ Hearth always accesses the Palworld REST API through `127.0.0.1`. Starting remai
 REST is unavailable. Stop and restart first attempt a safe shutdown and, only after an explicit
 save-risk confirmation, can fall back to terminating the identified Palworld process. Update and
 backup while running still require REST and never silently degrade to forced termination.
+
+The detail-page player list shows sanitized in-game display names only. Platform accounts, Player IDs,
+and User IDs are never returned by the panel API. The player limit prefers live REST metrics; when REST
+is unavailable and the active world has `WorldOption.sav`, Hearth shows the limit as unknown instead of
+using an INI value that WorldOption may have overridden.
 Before a safe shutdown, Hearth refreshes the online count. A confirmed empty server uses a five-second
 notice; online players or an unavailable count retain `shutdownWaitSeconds` (30 seconds by default),
 and task detail shows the shutdown countdown.

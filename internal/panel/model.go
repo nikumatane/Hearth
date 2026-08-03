@@ -21,30 +21,38 @@ type ResourceUsage struct {
 }
 
 type Game struct {
-	ID               string        `json:"id"`
-	Name             string        `json:"name"`
-	ShortName        string        `json:"shortName"`
-	State            string        `json:"state"`
-	Version          string        `json:"version"`
-	AvailableVersion string        `json:"availableVersion,omitempty"`
-	UpdateAvailable  bool          `json:"updateAvailable"`
-	VersionCheck     string        `json:"versionCheck,omitempty"`
-	PlayersOnline    int           `json:"playersOnline"`
-	PlayersMax       int           `json:"playersMax"`
-	PlayersAvailable bool          `json:"playersAvailable"`
-	PlayersSource    string        `json:"playersSource,omitempty"`
-	UptimeSeconds    int64         `json:"uptimeSeconds"`
-	CPUPercent       float64       `json:"cpuPercent"`
-	MemoryGB         float64       `json:"memoryGB"`
-	Port             int           `json:"port"`
-	SaveID           string        `json:"saveId,omitempty"`
-	SaveDetection    string        `json:"saveDetection,omitempty"`
-	LastBackupAt     *time.Time    `json:"lastBackupAt,omitempty"`
-	CPUHistory       []MetricPoint `json:"cpuHistory"`
-	MemoryHistory    []MetricPoint `json:"memoryHistory"`
-	Tags             []string      `json:"tags"`
-	RESTEnabled      bool          `json:"restEnabled"`
-	RESTAvailable    bool          `json:"restAvailable"`
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	ShortName        string         `json:"shortName"`
+	State            string         `json:"state"`
+	Version          string         `json:"version"`
+	AvailableVersion string         `json:"availableVersion,omitempty"`
+	UpdateAvailable  bool           `json:"updateAvailable"`
+	VersionCheck     string         `json:"versionCheck,omitempty"`
+	PlayersOnline    int            `json:"playersOnline"`
+	PlayersMax       int            `json:"playersMax"`
+	PlayersMaxKnown  bool           `json:"playersMaxKnown"`
+	PlayersAvailable bool           `json:"playersAvailable"`
+	PlayersSource    string         `json:"playersSource,omitempty"`
+	Players          []OnlinePlayer `json:"players,omitempty"`
+	UptimeSeconds    int64          `json:"uptimeSeconds"`
+	CPUPercent       float64        `json:"cpuPercent"`
+	MemoryGB         float64        `json:"memoryGB"`
+	Port             int            `json:"port"`
+	SaveID           string         `json:"saveId,omitempty"`
+	SaveDetection    string         `json:"saveDetection,omitempty"`
+	LastBackupAt     *time.Time     `json:"lastBackupAt,omitempty"`
+	CPUHistory       []MetricPoint  `json:"cpuHistory"`
+	MemoryHistory    []MetricPoint  `json:"memoryHistory"`
+	Tags             []string       `json:"tags"`
+	RESTEnabled      bool           `json:"restEnabled"`
+	RESTAvailable    bool           `json:"restAvailable"`
+}
+
+// OnlinePlayer intentionally contains only the in-game display name. REST
+// account names and platform/player identifiers never cross the panel API.
+type OnlinePlayer struct {
+	Name string `json:"name"`
 }
 
 type Activity struct {
