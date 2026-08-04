@@ -115,6 +115,14 @@ try {
         throw "Unexpected Don't Starve Together support state: $($dontStarveTogether | ConvertTo-Json -Compress)"
     }
 
+    $panelUpdate = Invoke-RestMethod `
+        -Method Get `
+        -Uri "$baseUrl/api/v1/system/update" `
+        -WebSession $webSession
+    if ($panelUpdate.currentVersion -ne $ExpectedVersion -or $panelUpdate.channel -ne "stable") {
+        throw "Unexpected panel update status: $($panelUpdate | ConvertTo-Json -Compress)"
+    }
+
     Write-Host "Windows first-start smoke test passed."
 }
 finally {

@@ -126,6 +126,22 @@ func TestLoadFileAndEnvironmentOverride(t *testing.T) {
 		cfg.TrustedProxyCIDRs[1] != "::1/128" {
 		t.Fatalf("TrustedProxyCIDRs = %#v", cfg.TrustedProxyCIDRs)
 	}
+	if cfg.Update.Channel != "stable" ||
+		cfg.Update.TokenFile != filepath.Join(directory, "github-token.txt") ||
+		cfg.Update.StagingDir != filepath.Join(directory, "updates") {
+		t.Fatalf("Update = %#v", cfg.Update)
+	}
+}
+
+func TestLoadRejectsUnknownUpdateChannel(t *testing.T) {
+	t.Setenv("HEARTH_DEMO", "true")
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"update":{"channel":"nightly"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("Load() accepted an unknown update channel")
+	}
 }
 
 func TestLoadRejectsShortProductionAdminPassword(t *testing.T) {

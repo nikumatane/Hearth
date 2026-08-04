@@ -103,6 +103,13 @@ Set-ExecutionPolicy -Scope Process Bypass
 后台设置保存带修订号，拒绝覆盖并发修改；写入成功时保留 `config.json.previous`。运行期
 安全参数在页面明确提示需要重启 Hearth，游戏进程不会因保存后台设置而重启。
 
+## 更新 Hearth 面板
+
+管理员从“系统设置 → 面板更新”手动检查并确认安装。私有仓库阶段需把仅
+Contents: Read 的 GitHub Token 写入 `C:\ProgramData\Hearth\github-token.txt`；公开后
+无需 Token。独立更新器只替换 Hearth，在新版本健康检查失败时恢复旧程序，不停止 Palworld。
+完整边界和人工恢复方式见 [面板安全更新指南](panel-update.md)。
+
 ## 当前存档识别
 
 面板不写死世界 ID。每次读取状态或配置时按以下顺序识别当前世界：

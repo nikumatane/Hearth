@@ -42,7 +42,7 @@ Hearth is intended for setups where:
 | Monitoring | CPU, memory, disk, process, version, low-frequency Palworld public-branch checks, save ID, online counts and display names, and uptime |
 | Access control | One administrator password, up to 20 username-free member passwords, permission presets, adaptive throttling, and IP allow/deny rules |
 | Audit | Administrator-only recent activity, task logs, login/attack, security-operation, and parameter audit; passwords are never logged |
-| Deployment | Single Windows binary, zero-game onboarding, read-only discovery/explicit adoption, administrator-triggered install, and startup task |
+| Deployment | Windows binaries, zero-game onboarding, read-only discovery/explicit adoption, administrator-triggered install, startup task, and safe panel self-update |
 
 ### Permission model
 
@@ -128,6 +128,7 @@ Extract `hearth-windows-amd64-v<version>.zip` and keep these files together:
 
 ```text
 hearth.exe
+hearth-updater.exe
 install-windows.ps1
 uninstall-windows.ps1
 LICENSE
@@ -181,6 +182,9 @@ newly created backup is always retained, and manually named or third-party files
 Adjust the thresholds with `backupRetentionDays` and `backupMaxTotalGB`.
 
 See the [Windows Palworld deployment guide](docs/windows-palworld.en.md) for the complete flow.
+
+See the [panel safe-update guide](docs/panel-update.en.md) for release verification, private-repository
+tokens, health checks, and rollback behavior.
 
 See the [Hearth roadmap](ROADMAP.en.md) for the agreed boundaries of the next three open-source iterations.
 
@@ -245,6 +249,7 @@ HEARTH_DEMO=true HEARTH_ADMIN_PASSWORD='replace-me' ./bin/hearth
 ## Documentation
 
 - [Windows Palworld deployment and upgrade](docs/windows-palworld.en.md)
+- [Panel safe update](docs/panel-update.en.md)
 - [Architecture and security boundaries](docs/architecture.en.md)
 - [1.1.0–1.3.0 roadmap](ROADMAP.en.md)
 - [Contributing](CONTRIBUTING.en.md)

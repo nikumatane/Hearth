@@ -12,14 +12,16 @@ dev-api:
 
 build:
 	pnpm --dir web build
-	go build -ldflags="$(LDFLAGS)" -o bin/hearth ./cmd/hearth
+	go build -buildvcs=false -ldflags="$(LDFLAGS)" -o bin/hearth ./cmd/hearth
 
 windows-package:
 	pnpm --dir web build
 	mkdir -p dist/windows-amd64
-	GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w $(LDFLAGS)" -o dist/windows-amd64/hearth.exe ./cmd/hearth
+	GOOS=windows GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags="-s -w $(LDFLAGS)" -o dist/windows-amd64/hearth.exe ./cmd/hearth
+	GOOS=windows GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags="-s -w $(LDFLAGS)" -o dist/windows-amd64/hearth-updater.exe ./cmd/hearth-updater
 	cp scripts/install-windows.ps1 scripts/uninstall-windows.ps1 LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.zh-CN.md VERSION dist/windows-amd64/
-	cd dist/windows-amd64 && zip -FS -j -q ../hearth-windows-amd64-v$(VERSION).zip hearth.exe install-windows.ps1 uninstall-windows.ps1 LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.zh-CN.md VERSION
+	cd dist/windows-amd64 && zip -FS -j -q ../hearth-windows-amd64-v$(VERSION).zip hearth.exe hearth-updater.exe install-windows.ps1 uninstall-windows.ps1 LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.zh-CN.md VERSION
+	cd dist && shasum -a 256 hearth-windows-amd64-v$(VERSION).zip > hearth-windows-amd64-v$(VERSION).zip.sha256
 	cp $(WINDOWS_ZIP) dist/hearth-windows-amd64.zip
 
 test:

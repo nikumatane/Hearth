@@ -149,7 +149,9 @@ export type LoginAuditEntry = {
 export type OperationAuditEntry = {
   id: string;
   event: "member_created" | "member_updated" | "member_deleted" | "ip_rule_added" | "ip_rule_removed" |
-    "game_adopted" | "game_install_started" | "system_settings_updated";
+    "game_adopted" | "game_install_started" | "system_settings_updated" |
+    "panel_update_checked" | "panel_update_started" | "panel_update_succeeded" |
+    "panel_update_rolled_back" | "panel_update_failed";
   actorCredentialId: string;
   actorRole: "admin" | "member";
   actorIp: string;
@@ -157,6 +159,9 @@ export type OperationAuditEntry = {
   targetId?: string;
   targetIp?: string;
   ruleKind?: "allow" | "deny";
+  updateVersion?: string;
+  previousVersion?: string;
+  detail?: string;
   expiresAt?: string;
   passwordChanged?: boolean;
   permissionsChanged?: boolean;
@@ -254,12 +259,27 @@ export type SystemSettings = {
   palworldPort: number;
   secureCookies: boolean;
   trustedProxyCidrs: string[];
+  updateChannel: "stable" | "prerelease";
   restartRequired: boolean;
 };
 
 export type Management = {
   games: ManagedGame[];
   settings: SystemSettings;
+};
+
+export type PanelUpdateStatus = {
+  currentVersion: string;
+  latestVersion?: string;
+  channel: "stable" | "prerelease";
+  state: "idle" | "checking" | "ready" | "preparing" | "succeeded" | "rolled_back" | "failed";
+  stage: string;
+  progress: number;
+  updateAvailable: boolean;
+  canApply: boolean;
+  tokenConfigured: boolean;
+  checkedAt?: string;
+  message?: string;
 };
 
 class APIError extends Error {
@@ -393,8 +413,17 @@ export const api = {
         steamCmdNoProgressMinutes: settings.steamCmdNoProgressMinutes,
         palworldPort: settings.palworldPort,
         secureCookies: settings.secureCookies,
-        trustedProxyCidrs: settings.trustedProxyCidrs
+        trustedProxyCidrs: settings.trustedProxyCidrs,
+        updateChannel: settings.updateChannel
       })
+    }),
+  panelUpdate: () => request<PanelUpdateStatus>("/api/v1/system/update"),
+  checkPanelUpdate: () =>
+    request<PanelUpdateStatus>("/api/v1/system/update/check", { method: "POST" }),
+  applyPanelUpdate: (version: string) =>
+    request<PanelUpdateStatus>("/api/v1/system/update/apply", {
+      method: "POST",
+      body: JSON.stringify({ version, confirm: true })
     })
 };
 

@@ -232,6 +232,7 @@ func (s *Service) systemSettingsLocked(restartRequired bool) panel.SystemSetting
 		PalworldPort:              defaultInt(game.Port, 8211),
 		SecureCookies:             s.config.SecureCookies,
 		TrustedProxyCIDRs:         append([]string(nil), s.config.TrustedProxyCIDRs...),
+		UpdateChannel:             s.config.Update.Channel,
 		RestartRequired:           restartRequired,
 	}
 }
@@ -292,6 +293,9 @@ func (s *Service) UpdateSystemSettings(patch panel.SystemSettingsPatch) (panel.S
 	if patch.Revision == "" || patch.Revision != currentRevision {
 		return panel.SystemSettings{}, fmt.Errorf("%w: 后台设置已被其他操作修改，请重新载入", panel.ErrInvalid)
 	}
+	if patch.UpdateChannel == "" {
+		patch.UpdateChannel = s.config.Update.Channel
+	}
 	if err := validateSystemSettingsPatch(patch); err != nil {
 		return panel.SystemSettings{}, err
 	}
@@ -306,10 +310,12 @@ func (s *Service) UpdateSystemSettings(patch panel.SystemSettingsPatch) (panel.S
 	next.Games.Palworld.Port = patch.PalworldPort
 	next.SecureCookies = patch.SecureCookies
 	next.TrustedProxyCIDRs = cleanUniqueStrings(patch.TrustedProxyCIDRs)
+	next.Update.Channel = patch.UpdateChannel
 	if err := config.Save(s.configPath, next); err != nil {
 		return panel.SystemSettings{}, err
 	}
 	restartRequired := next.SecureCookies != s.config.SecureCookies ||
+		next.Update.Channel != s.config.Update.Channel ||
 		!sameStrings(next.TrustedProxyCIDRs, s.config.TrustedProxyCIDRs) ||
 		next.Games.Palworld.BackupRetentionDays != s.config.Games.Palworld.BackupRetentionDays ||
 		next.Games.Palworld.BackupMaxTotalGB != s.config.Games.Palworld.BackupMaxTotalGB ||
@@ -486,6 +492,9 @@ func sameStrings(left, right []string) bool {
 }
 
 func validateSystemSettingsPatch(patch panel.SystemSettingsPatch) error {
+	if patch.UpdateChannel != "stable" && patch.UpdateChannel != "prerelease" {
+		return fmt.Errorf("%w: 面板更新通道必须是 stable 或 prerelease", panel.ErrInvalid)
+	}
 	for name, value := range map[string]string{
 		"installRoot":  patch.InstallRoot,
 		"steamCmdRoot": patch.SteamCmdRoot,

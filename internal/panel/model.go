@@ -1,6 +1,9 @@
 package panel
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type MetricPoint struct {
 	At    time.Time `json:"at"`
@@ -214,6 +217,7 @@ type SystemSettings struct {
 	PalworldPort              int      `json:"palworldPort"`
 	SecureCookies             bool     `json:"secureCookies"`
 	TrustedProxyCIDRs         []string `json:"trustedProxyCidrs"`
+	UpdateChannel             string   `json:"updateChannel"`
 	RestartRequired           bool     `json:"restartRequired"`
 }
 
@@ -244,6 +248,7 @@ type SystemSettingsPatch struct {
 	PalworldPort              int      `json:"palworldPort"`
 	SecureCookies             bool     `json:"secureCookies"`
 	TrustedProxyCIDRs         []string `json:"trustedProxyCidrs"`
+	UpdateChannel             string   `json:"updateChannel"`
 }
 
 type ManagementService interface {
@@ -256,4 +261,47 @@ type ManagementService interface {
 
 type TaskLogLocator interface {
 	TaskLogPath(id string) (string, bool)
+}
+
+type PanelUpdateStatus struct {
+	CurrentVersion  string     `json:"currentVersion"`
+	LatestVersion   string     `json:"latestVersion,omitempty"`
+	Channel         string     `json:"channel"`
+	State           string     `json:"state"`
+	Stage           string     `json:"stage"`
+	Progress        int        `json:"progress"`
+	UpdateAvailable bool       `json:"updateAvailable"`
+	CanApply        bool       `json:"canApply"`
+	TokenConfigured bool       `json:"tokenConfigured"`
+	CheckedAt       *time.Time `json:"checkedAt,omitempty"`
+	Message         string     `json:"message,omitempty"`
+}
+
+type PanelUpdateRequest struct {
+	Version           string `json:"version"`
+	Confirm           bool   `json:"confirm"`
+	ActorCredentialID string `json:"-"`
+	ActorRole         string `json:"-"`
+	ActorIP           string `json:"-"`
+}
+
+type PanelUpdateResult struct {
+	State             string
+	Version           string
+	PreviousVersion   string
+	Message           string
+	ActorCredentialID string
+	ActorRole         string
+	ActorIP           string
+}
+
+type PanelUpdateService interface {
+	UpdateStatus() PanelUpdateStatus
+	CheckForUpdate(context.Context) (PanelUpdateStatus, error)
+	ApplyUpdate(PanelUpdateRequest) (PanelUpdateStatus, error)
+}
+
+type PanelUpdateResultConsumer interface {
+	ConsumeUpdateResult() *PanelUpdateResult
+	CompleteUpdateResultImport(success bool) error
 }

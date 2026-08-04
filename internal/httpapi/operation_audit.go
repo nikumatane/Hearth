@@ -15,14 +15,19 @@ import (
 )
 
 const (
-	operationEventMemberCreated = "member_created"
-	operationEventMemberUpdated = "member_updated"
-	operationEventMemberDeleted = "member_deleted"
-	operationEventIPRuleAdded   = "ip_rule_added"
-	operationEventIPRuleRemoved = "ip_rule_removed"
-	operationEventGameAdopted   = "game_adopted"
-	operationEventGameInstall   = "game_install_started"
-	operationEventSystemUpdated = "system_settings_updated"
+	operationEventMemberCreated         = "member_created"
+	operationEventMemberUpdated         = "member_updated"
+	operationEventMemberDeleted         = "member_deleted"
+	operationEventIPRuleAdded           = "ip_rule_added"
+	operationEventIPRuleRemoved         = "ip_rule_removed"
+	operationEventGameAdopted           = "game_adopted"
+	operationEventGameInstall           = "game_install_started"
+	operationEventSystemUpdated         = "system_settings_updated"
+	operationEventPanelUpdateChecked    = "panel_update_checked"
+	operationEventPanelUpdateStarted    = "panel_update_started"
+	operationEventPanelUpdateSucceeded  = "panel_update_succeeded"
+	operationEventPanelUpdateRolledBack = "panel_update_rolled_back"
+	operationEventPanelUpdateFailed     = "panel_update_failed"
 
 	operationTargetMember = "member"
 	operationTargetIPRule = "ip_rule"
@@ -49,6 +54,9 @@ type operationAuditEntry struct {
 	PermissionsChanged bool       `json:"permissionsChanged,omitempty"`
 	CurrentPermissions []string   `json:"currentPermissions,omitempty"`
 	Success            bool       `json:"success"`
+	UpdateVersion      string     `json:"updateVersion,omitempty"`
+	PreviousVersion    string     `json:"previousVersion,omitempty"`
+	Detail             string     `json:"detail,omitempty"`
 	CreatedAt          time.Time  `json:"createdAt"`
 }
 
@@ -183,8 +191,11 @@ func validOperationAuditEntry(entry operationAuditEntry) bool {
 			(entry.RuleKind == ipRuleAllow || entry.RuleKind == ipRuleDeny)
 	case operationEventGameAdopted, operationEventGameInstall:
 		return entry.TargetType == operationTargetGame && entry.TargetID != ""
-	case operationEventSystemUpdated:
+	case operationEventSystemUpdated, operationEventPanelUpdateChecked, operationEventPanelUpdateStarted:
 		return entry.TargetType == operationTargetSystem && entry.TargetID == "hearth"
+	case operationEventPanelUpdateSucceeded, operationEventPanelUpdateRolledBack, operationEventPanelUpdateFailed:
+		return entry.TargetType == operationTargetSystem && entry.TargetID == "hearth" &&
+			entry.UpdateVersion != "" && entry.PreviousVersion != "" && len(entry.Detail) <= 4096
 	default:
 		return false
 	}

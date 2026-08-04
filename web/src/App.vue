@@ -57,6 +57,7 @@ import {
   type OperationAuditEntry,
   type Overview,
   type PalworldSettings,
+  type PanelUpdateStatus,
   type Permission,
   type Setting
 } from "./api";
@@ -169,7 +170,9 @@ const deletingMemberId = ref("");
 const management = ref<Management | null>(null);
 const managementLoading = ref(false);
 const managementSaving = ref(false);
-const systemTab = ref<"games" | "settings">("games");
+const systemTab = ref<"games" | "settings" | "updates">("games");
+const panelUpdate = ref<PanelUpdateStatus | null>(null);
+const panelUpdateBusy = ref(false);
 const installSteamCmdRoot = ref("");
 const installConsent = ref(false);
 const discoveryRootsText = ref("");
@@ -458,7 +461,79 @@ function navigate(next: Page, gameId?: string) {
   if (next === "settings" && !settings.value) void loadSettings();
   if (next === "logs") void loadLogs(enteringLogs);
   if (next === "access") void loadAccess();
-  if (next === "system") void loadManagement();
+  if (next === "system") {
+    void loadManagement();
+    void loadPanelUpdate(true);
+  }
+}
+
+async function loadPanelUpdate(silent = false) {
+  if (!isAdmin.value) return;
+  try {
+    panelUpdate.value = await api.panelUpdate();
+  } catch (error) {
+    if (!silent) showToast("error", error instanceof Error ? error.message : "面板更新状态读取失败");
+  }
+}
+
+async function checkPanelUpdate() {
+  panelUpdateBusy.value = true;
+  try {
+    panelUpdate.value = await api.checkPanelUpdate();
+    showToast("success", panelUpdate.value.updateAvailable ? `发现 Hearth ${panelUpdate.value.latestVersion}` : "当前已是所选通道的最新版本");
+  } catch (error) {
+    await loadPanelUpdate(true);
+    showToast("error", error instanceof Error ? error.message : "面板版本检查失败");
+  } finally {
+    panelUpdateBusy.value = false;
+  }
+}
+
+async function applyPanelUpdate() {
+  const target = panelUpdate.value?.latestVersion;
+  if (!target || !panelUpdate.value?.updateAvailable) return;
+  if (!window.confirm(`确认将 Hearth 更新到 ${target}？面板会短暂离线；游戏服务器和存档不会停止或修改。`)) return;
+  panelUpdateBusy.value = true;
+  try {
+    panelUpdate.value = await api.applyPanelUpdate(target);
+    showToast("success", "更新包正在校验；完成后面板会自动重启并执行健康检查");
+    await waitForPanelUpdate(target);
+  } catch (error) {
+    await loadPanelUpdate(true);
+    showToast("error", error instanceof Error ? error.message : "面板更新启动失败");
+  } finally {
+    panelUpdateBusy.value = false;
+  }
+}
+
+async function waitForPanelUpdate(target: string) {
+  const deadline = Date.now() + 120_000;
+  let observedOffline = false;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    try {
+      const response = await fetch("/api/v1/health", { cache: "no-store" });
+      if (!response.ok) continue;
+      const health = await response.json() as { status?: string; version?: string };
+      if (health.status === "ok" && health.version === target) {
+        window.location.reload();
+        return;
+      }
+      if (observedOffline && health.status === "ok") {
+        await loadPanelUpdate(true);
+        throw new Error(panelUpdate.value?.message || `新版本未生效，面板已恢复 ${health.version ?? "旧版本"}`);
+      }
+      await loadPanelUpdate(true);
+      if (panelUpdate.value?.state === "failed") {
+        throw new Error(`更新准备失败：${panelUpdate.value.message || panelUpdate.value.stage}`);
+      }
+    } catch (error) {
+      if (error instanceof Error && (error.message.startsWith("新版本未生效") || error.message.startsWith("更新准备失败"))) throw error;
+      observedOffline = true;
+    }
+  }
+  await loadPanelUpdate(true);
+  throw new Error(panelUpdate.value?.message || "等待面板重启超时，请查看更新状态和 panel-update.log");
 }
 
 function syncManagementInputs(document: Management) {
@@ -1196,6 +1271,11 @@ function operationActionLabel(entry: OperationAuditEntry) {
     case "game_adopted": return "接管游戏服务器";
     case "game_install_started": return "启动游戏安装";
     case "system_settings_updated": return "保存后台设置";
+    case "panel_update_checked": return "检查面板更新";
+    case "panel_update_started": return "启动面板更新";
+    case "panel_update_succeeded": return "面板更新完成";
+    case "panel_update_rolled_back": return "面板更新已回滚";
+    case "panel_update_failed": return "面板更新失败";
   }
 }
 
@@ -1229,6 +1309,11 @@ function operationDetailLabel(entry: OperationAuditEntry) {
   if (entry.event === "game_adopted") return "已保存经确认的现有安装路径";
   if (entry.event === "game_install_started") return "安装任务已进入队列，完成后不会自动启动";
   if (entry.event === "system_settings_updated") return "配置已保存；页面会提示是否需要重启 Hearth";
+  if (entry.event === "panel_update_checked") return "已查询固定官方仓库的 Release 元数据";
+  if (entry.event === "panel_update_started") return "已确认下载、校验并由独立更新器执行健康检查与回滚";
+  if (entry.event === "panel_update_succeeded") return `已从 ${entry.previousVersion || "旧版本"} 更新至 ${entry.updateVersion || "新版本"}`;
+  if (entry.event === "panel_update_rolled_back") return entry.detail || `新版本未通过健康检查，已恢复 ${entry.previousVersion || "旧版本"}`;
+  if (entry.event === "panel_update_failed") return entry.detail || "更新未完成，请查看 panel-update.log";
   return "IP 规则已删除";
 }
 
@@ -1896,7 +1981,7 @@ function gameAccent(id: string) {
               <h1>系统设置与游戏管理</h1>
               <p>探测始终只读；接管和安装只会在管理员明确确认后执行。</p>
             </div>
-            <button class="button secondary" :disabled="managementLoading" @click="refreshDiscovery">
+            <button v-if="systemTab === 'games'" class="button secondary" :disabled="managementLoading" @click="refreshDiscovery">
               <FolderSearch :size="16" :class="{ spin: managementLoading }" />重新探测
             </button>
           </section>
@@ -1907,6 +1992,9 @@ function gameAccent(id: string) {
             </button>
             <button :class="{ active: systemTab === 'settings' }" @click="systemTab = 'settings'">
               <Settings2 :size="16" />后台设置
+            </button>
+            <button :class="{ active: systemTab === 'updates' }" @click="systemTab = 'updates'; loadPanelUpdate()">
+              <Download :size="16" />面板更新
             </button>
           </section>
 
@@ -2008,6 +2096,7 @@ function gameAccent(id: string) {
             <div class="system-settings-section">
               <div><h2>面板网络边界</h2><p>修改后需要重启 Hearth；错误代理范围可能影响登录来源判断。</p></div>
               <label class="toggle-setting"><input v-model="management.settings.secureCookies" type="checkbox" /><span>强制 Secure Cookie</span></label>
+              <label><span>面板更新通道</span><select v-model="management.settings.updateChannel"><option value="stable">Stable（推荐）</option><option value="prerelease">Prerelease</option></select><small>切换后重启 Hearth 生效；任何通道都不会静默安装。</small></label>
               <label class="wide"><span>可信代理 CIDR</span><textarea v-model="trustedProxyCIDRsText" rows="4"></textarea><small>每行一个最小范围；不要使用 0.0.0.0/0。</small></label>
             </div>
             <footer class="system-settings-actions">
@@ -2018,6 +2107,67 @@ function gameAccent(id: string) {
               </button>
             </footer>
           </form>
+
+          <section
+            v-else-if="systemTab === 'updates'"
+            class="panel-card panel-update-card"
+          >
+            <header class="panel-update-heading">
+              <div class="panel-update-icon"><Download :size="22" /></div>
+              <div>
+                <span class="eyebrow">HEARTH PANEL · WINDOWS</span>
+                <h2>面板安全更新</h2>
+                <p>只替换 Hearth 程序；不会停止游戏服务器，也不会修改存档或游戏配置。</p>
+              </div>
+              <span v-if="panelUpdate" :class="['panel-update-state', panelUpdate.state]">{{ panelUpdate.stage }}</span>
+            </header>
+
+            <div v-if="!panelUpdate" class="page-loader">
+              <LoaderCircle class="spin" :size="22" />正在读取面板更新状态…
+            </div>
+            <template v-else>
+              <div class="panel-update-facts">
+                <label><span>当前版本</span><strong>v{{ panelUpdate.currentVersion }}</strong></label>
+                <label><span>最新版本</span><strong>{{ panelUpdate.latestVersion ? `v${panelUpdate.latestVersion}` : "尚未检查" }}</strong></label>
+                <label><span>更新通道</span><strong>{{ panelUpdate.channel === "prerelease" ? "Prerelease" : "Stable" }}</strong></label>
+                <label><span>私有仓库凭据</span><strong>{{ panelUpdate.tokenConfigured ? "已配置只读 Token" : "未配置" }}</strong></label>
+              </div>
+
+              <div v-if="panelUpdate.state === 'checking' || panelUpdate.state === 'preparing'" class="panel-update-progress">
+                <div><span>{{ panelUpdate.stage }}</span><strong>{{ panelUpdate.progress }}%</strong></div>
+                <div class="activity-progress-track"><i :style="{ width: `${panelUpdate.progress}%` }"></i></div>
+              </div>
+
+              <div :class="['panel-update-message', panelUpdate.state]">
+                <ShieldCheck v-if="panelUpdate.state === 'ready' || panelUpdate.state === 'succeeded'" :size="18" />
+                <AlertTriangle v-else-if="panelUpdate.state === 'failed' || panelUpdate.state === 'rolled_back'" :size="18" />
+                <CloudCog v-else :size="18" />
+                <span>
+                  <strong>{{ panelUpdate.message || "更新由管理员手动检查和确认，不会静默安装。" }}</strong>
+                  <small v-if="!panelUpdate.tokenConfigured">仓库保持私有期间，默认在 <code>C:\ProgramData\Hearth\github-token.txt</code> 写入仅授予 Contents: Read 的 fine-grained Token；仓库公开后无需 Token。</small>
+                  <small v-else>下载源固定为 <code>nikumatane/Hearth</code>，安装前校验 Release 摘要、SHA256 与包内版本。</small>
+                  <small v-if="!panelUpdate.canApply">当前系统只支持检查版本；面板内安装与自动回滚目前仅支持 Windows。</small>
+                </span>
+              </div>
+
+              <footer class="panel-update-actions">
+                <small v-if="panelUpdate.checkedAt">上次检查：{{ formatDateTime(panelUpdate.checkedAt) }}</small>
+                <span v-else></span>
+                <button class="button secondary" :disabled="panelUpdateBusy" @click="checkPanelUpdate">
+                  <LoaderCircle v-if="panelUpdateBusy && panelUpdate.state !== 'preparing'" class="spin" :size="16" />
+                  <RefreshCw v-else :size="16" />检查更新
+                </button>
+                <button
+                  class="button primary"
+                  :disabled="panelUpdateBusy || !panelUpdate.updateAvailable || !panelUpdate.canApply"
+                  @click="applyPanelUpdate"
+                >
+                  <LoaderCircle v-if="panelUpdate.state === 'preparing'" class="spin" :size="16" />
+                  <Download v-else :size="16" />{{ panelUpdate.state === "preparing" ? "准备更新…" : "确认并安装" }}
+                </button>
+              </footer>
+            </template>
+          </section>
         </template>
 
         <template v-else-if="page === 'access' && isAdmin">

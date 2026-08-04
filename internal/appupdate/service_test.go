@@ -1,0 +1,173 @@
+package appupdate
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"hearth/internal/buildinfo"
+	"hearth/internal/config"
+	"hearth/internal/panel"
+)
+
+func TestServiceChecksStagesAndLaunchesVerifiedRelease(t *testing.T) {
+	t.Setenv(githubTokenEnv, "test-read-token")
+	previousVersion := buildinfo.Version
+	buildinfo.Version = "1.1.0"
+	t.Cleanup(func() { buildinfo.Version = previousVersion })
+
+	packageData := testPackage(t, "1.2.0")
+	digestBytes := sha256.Sum256(packageData)
+	digest := hex.EncodeToString(digestBytes[:])
+	zipName := "hearth-windows-amd64-v1.2.0.zip"
+	checksum := []byte(digest + "  " + zipName + "\n")
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-read-token" {
+			t.Fatalf("missing private repository authorization")
+		}
+		switch r.URL.Path {
+		case "/repos/nikumatane/Hearth/releases/latest":
+			_ = json.NewEncoder(w).Encode(githubRelease{TagName: "v1.2.0", Assets: []githubAsset{
+				{Name: zipName, URL: server.URL + "/assets/package", Size: int64(len(packageData)), Digest: "sha256:" + digest},
+				{Name: zipName + ".sha256", URL: server.URL + "/assets/checksum", Size: int64(len(checksum))},
+			}})
+		case "/assets/package":
+			if r.Header.Get("Accept") != "application/octet-stream" {
+				t.Errorf("package Accept = %q", r.Header.Get("Accept"))
+			}
+			_, _ = w.Write(packageData)
+		case "/assets/checksum":
+			_, _ = w.Write(checksum)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	temporary := t.TempDir()
+	installed := filepath.Join(temporary, "installed", "hearth.exe")
+	if err := os.MkdirAll(filepath.Dir(installed), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installed, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	launched := make(chan string, 1)
+	service, err := New(config.Config{
+		Listen: "127.0.0.1:18080",
+		Update: config.UpdateConfig{Channel: "stable", StagingDir: filepath.Join(temporary, "updates")},
+	}, filepath.Join(temporary, "config.json"), Options{
+		APIBase: server.URL, Executable: installed, RuntimeGOOS: "windows",
+		Launch: func(path string) error { launched <- path; return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := service.CheckForUpdate(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.UpdateAvailable || status.LatestVersion != "1.2.0" {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+	if _, err := service.ApplyUpdate(panel.PanelUpdateRequest{Version: "1.2.0", Confirm: true, ActorCredentialID: "ADMIN", ActorRole: "admin", ActorIP: "127.0.0.1"}); err != nil {
+		t.Fatal(err)
+	}
+	helper := <-launched
+	if filepath.Base(helper) != "hearth-updater.exe" {
+		t.Fatalf("launched %s", helper)
+	}
+	plan, err := ReadPlan(filepath.Join(filepath.Dir(helper), updatePlanName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Version != "1.2.0" || plan.TargetExecutable != installed {
+		t.Fatalf("unexpected plan: %+v", plan)
+	}
+}
+
+func TestServiceRejectsReleaseWithoutGitHubDigest(t *testing.T) {
+	previousVersion := buildinfo.Version
+	buildinfo.Version = "1.1.0"
+	t.Cleanup(func() { buildinfo.Version = previousVersion })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(githubRelease{TagName: "v1.2.0", Assets: []githubAsset{
+			{Name: "hearth-windows-amd64-v1.2.0.zip", URL: "https://example.invalid/package", Size: 1},
+			{Name: "hearth-windows-amd64-v1.2.0.zip.sha256", URL: "https://example.invalid/checksum", Size: 1},
+		}})
+	}))
+	defer server.Close()
+	service, err := New(config.Config{Listen: "127.0.0.1:8080", Update: config.UpdateConfig{Channel: "stable", StagingDir: t.TempDir()}}, "", Options{APIBase: server.URL, Executable: filepath.Join(t.TempDir(), "hearth.exe")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CheckForUpdate(context.Background()); err == nil {
+		t.Fatal("expected missing digest to be rejected")
+	}
+}
+
+func TestParseVersion(t *testing.T) {
+	for _, value := range []string{"v1.2.0", "1.2.0-rc.1"} {
+		if _, ok := parseVersion(value); !ok {
+			t.Errorf("expected %s to be valid", value)
+		}
+	}
+	for _, value := range []string{"1.2", "1.02.0", "1.2.0/evil", "1.2.0-../evil", "latest"} {
+		if _, ok := parseVersion(value); ok {
+			t.Errorf("expected %s to be invalid", value)
+		}
+	}
+}
+
+func TestCompareVersionsUsesSemanticPrereleaseOrder(t *testing.T) {
+	for _, test := range []struct {
+		left, right string
+		expected    int
+	}{
+		{"1.2.0", "1.1.9", 1}, {"1.2.0-rc.2", "1.2.0-rc.10", -1},
+		{"1.2.0", "1.2.0-rc.10", 1}, {"1.2.0-rc.1", "1.2.0-rc.1", 0},
+	} {
+		actual := compareVersions(test.left, test.right)
+		if (actual < 0 && test.expected >= 0) || (actual > 0 && test.expected <= 0) || (actual == 0 && test.expected != 0) {
+			t.Errorf("compareVersions(%q, %q) = %d, expected sign %d", test.left, test.right, actual, test.expected)
+		}
+	}
+}
+
+func TestSafeRequestErrorDoesNotExposeSignedURL(t *testing.T) {
+	err := safeRequestError("download package", &url.Error{Op: "Get", URL: "https://example.invalid/file?jwt=secret", Err: context.DeadlineExceeded})
+	if strings.Contains(err.Error(), "jwt=") || !strings.Contains(err.Error(), "deadline") {
+		t.Fatalf("unsafe request error: %s", err)
+	}
+}
+
+func testPackage(t *testing.T, version string) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	archive := zip.NewWriter(&output)
+	for name, content := range map[string]string{"hearth.exe": "new-panel", "hearth-updater.exe": "new-updater", "VERSION": version} {
+		entry, err := archive.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fmt.Fprint(entry, content); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}

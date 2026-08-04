@@ -111,6 +111,14 @@ Backend settings use a revision and reject concurrent overwrites. A successful s
 `config.json.previous`. Runtime security changes are marked as requiring a Hearth restart and never
 restart a game process.
 
+## Updating the Hearth panel
+
+Administrators check and explicitly install from System Settings → Panel Update. While the repository
+is private, store a Contents: Read GitHub token in
+`C:\ProgramData\Hearth\github-token.txt`; no token is needed once it is public. The independent updater
+replaces only Hearth and restores the old program when the new health check fails. It does not stop
+Palworld. See the [panel safe-update guide](panel-update.en.md) for the complete boundary and manual recovery.
+
 ## Active-save detection
 
 Hearth does not hard-code a world ID. It detects the active world in this order whenever status or

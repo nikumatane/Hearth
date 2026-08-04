@@ -53,12 +53,14 @@ jobs:
       - name: Vet backend
         run: go vet ./...
 
-      - name: Cross-compile Windows server
+      - name: Cross-compile Windows panel and updater
         env:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: "0"
-        run: go build -trimpath -o /tmp/hearth.exe ./cmd/hearth
+        run: |
+          go build -buildvcs=false -trimpath -o /tmp/hearth.exe ./cmd/hearth
+          go build -buildvcs=false -trimpath -o /tmp/hearth-updater.exe ./cmd/hearth-updater
 
   windows-smoke:
     name: Windows smoke test
@@ -96,11 +98,12 @@ jobs:
       - name: Test backend on Windows
         run: go test ./...
 
-      - name: Build native Windows server
+      - name: Build native Windows panel and updater
         shell: pwsh
         run: |
           $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
-          go build -trimpath -ldflags "-X hearth/internal/buildinfo.Version=$version" -o hearth.exe ./cmd/hearth
+          go build -buildvcs=false -trimpath -ldflags "-X hearth/internal/buildinfo.Version=$version" -o hearth.exe ./cmd/hearth
+          go build -buildvcs=false -trimpath -ldflags "-X hearth/internal/buildinfo.Version=$version" -o hearth-updater.exe ./cmd/hearth-updater
 
       - name: Validate Windows scripts
         shell: pwsh

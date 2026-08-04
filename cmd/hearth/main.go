@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"hearth/internal/appupdate"
 	"hearth/internal/config"
 	"hearth/internal/gamemanager"
 	"hearth/internal/httpapi"
@@ -48,7 +49,18 @@ func main() {
 		}
 		service = gameManager
 	}
-	handler, err := httpapi.New(cfg, service)
+	updateStop := make(chan struct{}, 1)
+	updates, err := appupdate.New(cfg, *configPath, appupdate.Options{Shutdown: func() {
+		select {
+		case updateStop <- struct{}{}:
+		default:
+		}
+	}})
+	if err != nil {
+		slog.Error("initialize panel update service", "error", err)
+		os.Exit(1)
+	}
+	handler, err := httpapi.NewWithUpdates(cfg, service, updates)
 	if err != nil {
 		slog.Error("initialize HTTP API", "error", err)
 		os.Exit(1)
@@ -72,7 +84,11 @@ func main() {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
+	select {
+	case <-stop:
+	case <-updateStop:
+		slog.Info("Hearth update helper requested a graceful restart")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

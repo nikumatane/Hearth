@@ -9,7 +9,20 @@ Unreleased and moves to a version section when a formal package is built.
 
 ## Unreleased
 
-No changes yet.
+- Added administrator-only stable/prerelease checks and explicitly confirmed installation under
+  System Settings → Panel Update. Updates are never installed silently.
+- Panel updates are pinned to versioned Windows assets from the `nikumatane/Hearth` GitHub Release.
+  Hearth verifies the GitHub asset digest, sidecar SHA256, exact asset name, and packaged `VERSION`.
+  While the repository is private, a Contents: Read token may be read from a protected file or
+  environment variable; neither the API nor UI returns its value.
+- Added the packaged `hearth-updater.exe`. It waits for the old panel to exit, replaces only Hearth,
+  starts the `Hearth` scheduled task, and checks the expected health version. Failure restores the
+  old program automatically. Game processes, saves, and game configuration are outside this flow.
+- Update checks, starts, success, failure, and rollback are administrator operation-audit events.
+  Results cross the restart through a protected one-time state file; detailed output uses
+  `panel-update.log`.
+- The backend settings page can select the update channel using the existing revision check and
+  atomic configuration replacement; the selection takes effect after restarting Hearth.
 
 ## 1.1.0 - 2026-08-04
 

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,77 @@ import (
 	"hearth/internal/config"
 	"hearth/internal/panel"
 )
+
+type updateTestService struct {
+	status       panel.PanelUpdateStatus
+	request      panel.PanelUpdateRequest
+	result       *panel.PanelUpdateResult
+	acknowledged bool
+}
+
+func (s *updateTestService) UpdateStatus() panel.PanelUpdateStatus { return s.status }
+func (s *updateTestService) CheckForUpdate(context.Context) (panel.PanelUpdateStatus, error) {
+	return s.status, nil
+}
+func (s *updateTestService) ApplyUpdate(request panel.PanelUpdateRequest) (panel.PanelUpdateStatus, error) {
+	s.request = request
+	return s.status, nil
+}
+func (s *updateTestService) ConsumeUpdateResult() *panel.PanelUpdateResult { return s.result }
+func (s *updateTestService) CompleteUpdateResultImport(success bool) error {
+	s.acknowledged = success
+	return nil
+}
+
+func TestPanelUpdateIsAdminOnlyConfirmedAndAudited(t *testing.T) {
+	updates := &updateTestService{status: panel.PanelUpdateStatus{
+		CurrentVersion: "1.1.0", LatestVersion: "1.2.0", Channel: "stable",
+		State: "ready", Stage: "发现新版本", Progress: 100, UpdateAvailable: true, CanApply: true,
+	}}
+	handler, err := NewWithUpdates(config.Config{AdminPassword: "correct"}, panel.NewDemoService(), updates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthorized := requestForTest(t, handler, http.MethodGet, "/api/v1/system/update", "", nil)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized update status = %d", unauthorized.Code)
+	}
+	cookie := loginTestHandler(t, handler)
+	checked := requestForTest(t, handler, http.MethodPost, "/api/v1/system/update/check", "", cookie)
+	if checked.Code != http.StatusOK {
+		t.Fatalf("check update = %d %s", checked.Code, checked.Body.String())
+	}
+	applied := requestForTest(t, handler, http.MethodPost, "/api/v1/system/update/apply", `{"version":"1.2.0","confirm":true}`, cookie)
+	if applied.Code != http.StatusAccepted {
+		t.Fatalf("apply update = %d %s", applied.Code, applied.Body.String())
+	}
+	if updates.request.ActorRole != roleAdmin || updates.request.ActorCredentialID == "" || updates.request.ActorIP != "192.0.2.1" {
+		t.Fatalf("update actor not bound by server: %+v", updates.request)
+	}
+	audit := requestForTest(t, handler, http.MethodGet, "/api/v1/access/operation-audit", "", cookie)
+	if !strings.Contains(audit.Body.String(), operationEventPanelUpdateStarted) || !strings.Contains(audit.Body.String(), operationEventPanelUpdateChecked) {
+		t.Fatalf("panel update audit = %s", audit.Body.String())
+	}
+}
+
+func TestPanelUpdateResultIsImportedAndAcknowledged(t *testing.T) {
+	updates := &updateTestService{result: &panel.PanelUpdateResult{
+		State: "rolled_back", Version: "1.2.0", PreviousVersion: "1.1.0", Message: "health timeout",
+		ActorCredentialID: "ADMIN", ActorRole: roleAdmin, ActorIP: "192.0.2.1",
+	}}
+	handler, err := NewWithUpdates(config.Config{AdminPassword: "correct"}, panel.NewDemoService(), updates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updates.acknowledged {
+		t.Fatal("update result was not acknowledged after audit persistence")
+	}
+	cookie := loginTestHandler(t, handler)
+	audit := requestForTest(t, handler, http.MethodGet, "/api/v1/access/operation-audit", "", cookie)
+	if !strings.Contains(audit.Body.String(), operationEventPanelUpdateRolledBack) || !strings.Contains(audit.Body.String(), "health timeout") {
+		t.Fatalf("panel update result audit = %s", audit.Body.String())
+	}
+}
 
 func TestLoginAndAuthenticatedOverview(t *testing.T) {
 	handler := newTestHandler(t, config.Config{AdminPassword: "correct"})

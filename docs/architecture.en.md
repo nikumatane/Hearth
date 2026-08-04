@@ -39,6 +39,14 @@ Production is deployed as one Go binary:
     actions; DST exposes planned status only until 1.3.0.
 12. Backend settings reject stale revisions, replace through a same-directory temporary file, and
     retain `.previous`. Installation stages SteamCMD in isolation and never starts Palworld on completion.
+13. The panel-update layer queries only the fixed official GitHub Release. It verifies the asset
+    digest, sidecar SHA256, packaged version, and safe extraction before creating an update plan.
+    An independent Windows updater replaces panel binaries after the main process exits and commits
+    or rolls back according to the expected-version health check; game adapters, processes, and saves
+    do not participate in this transaction.
+14. A protected result file crosses the panel restart. The new process marks it consumed only after
+    persisting the corresponding security-operation audit entry, preventing both duplicates and lost
+    evidence when audit persistence fails.
 
 Frontend and backend remain separate in source code but merge for deployment. This is a better fit
 for one small ECS than Node SSR, Redis, and a standalone database.

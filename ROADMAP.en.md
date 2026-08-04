@@ -10,6 +10,8 @@ presented as production-ready features.
 
 ## 1.1.0 · Open-source and game-management foundation
 
+Status: complete. Repository publication is a separate maintainer decision and does not block later development.
+
 - Adopt the MIT License and add contribution and security policies, continuous integration, and reproducible release foundations.
 - Hearth performs bounded, read-only discovery at startup. It never downloads, installs, adopts, or starts a game automatically.
 - When no manageable game is found, administrators see onboarding on the dashboard; members only see an unconfigured state.
@@ -20,6 +22,8 @@ presented as production-ready features.
 
 ## 1.2.0 · Safe panel self-update
 
+Status: in development.
+
 - Administrators can check stable or prerelease updates in the panel; updates are never installed silently.
 - Hearth downloads a versioned Windows GitHub Release asset and verifies its digest and provenance before upgrading.
 - A separate updater stops the Hearth scheduled task, swaps the executable, restarts it, and performs a health check.
@@ -27,6 +31,8 @@ presented as production-ready features.
 - Panel updates never stop or modify game processes and saves.
 
 ## 1.3.0 · Production DST adapter
+
+Status: planned.
 
 - Add production discovery, adoption, and administrator-triggered installation for Don't Starve Together Dedicated Server.
 - Manage Master and Caves processes, ports, logs, and lifecycle as one logical game instance.

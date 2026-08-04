@@ -41,7 +41,7 @@ Hearth 把前端和 API 合并为一个 Go 二进制，可以原地接管现有 
 | 状态监控 | CPU、内存、磁盘、进程、版本、低频检查 Palworld public 分支、存档 ID、在线人数与昵称和运行时间 |
 | 访问控制 | 一个管理员密码、最多 20 个无用户名成员密码、权限模板、渐进限流与 IP 黑白名单 |
 | 审计 | 管理员可查看最近任务活动、任务日志、登录/攻击、安全操作和参数审计；不记录密码明文 |
-| 部署 | 单文件 Windows 程序、零游戏首次向导、只读探测/显式接管、管理员触发安装、计划任务自启动 |
+| 部署 | Windows 程序、零游戏首次向导、只读探测/显式接管、管理员触发安装、计划任务自启动与安全自更新 |
 
 ### 权限模型
 
@@ -116,6 +116,7 @@ make windows-package
 
 ```text
 hearth.exe
+hearth-updater.exe
 install-windows.ps1
 uninstall-windows.ps1
 LICENSE
@@ -163,6 +164,9 @@ Palworld 进程。运行中的更新和备份仍要求 REST API，绝不会自�
 `backupMaxTotalGB` 调整。
 
 完整流程见 [Windows 帕鲁部署指南](docs/windows-palworld.md)。
+
+面板自身更新的校验、私有仓库 Token、健康检查和回滚说明见
+[面板安全更新指南](docs/panel-update.md)。
 
 三个已确认的开源迭代边界见 [Hearth 路线图](ROADMAP.md)。
 
@@ -223,6 +227,7 @@ HEARTH_DEMO=true HEARTH_ADMIN_PASSWORD='replace-me' ./bin/hearth
 ## 文档
 
 - [Windows 帕鲁部署与升级](docs/windows-palworld.md)
+- [面板安全更新](docs/panel-update.md)
 - [架构与安全边界](docs/architecture.md)
 - [1.1.0–1.3.0 路线图](ROADMAP.md)
 - [参与贡献](CONTRIBUTING.md)

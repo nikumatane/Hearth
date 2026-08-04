@@ -45,6 +45,12 @@ type ManagementConfig struct {
 	DiscoveryRoots []string `json:"discoveryRoots,omitempty"`
 }
 
+type UpdateConfig struct {
+	Channel    string `json:"channel,omitempty"`
+	TokenFile  string `json:"tokenFile,omitempty"`
+	StagingDir string `json:"stagingDir,omitempty"`
+}
+
 type Config struct {
 	Listen             string           `json:"listen"`
 	Demo               bool             `json:"demo"`
@@ -60,6 +66,7 @@ type Config struct {
 	DeviceKeyFile      string           `json:"deviceKeyFile,omitempty"`
 	TrustedProxyCIDRs  []string         `json:"trustedProxyCidrs,omitempty"`
 	Management         ManagementConfig `json:"management,omitempty"`
+	Update             UpdateConfig     `json:"update,omitempty"`
 	Games              GamesConfig      `json:"games"`
 }
 
@@ -122,6 +129,37 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.TrustedProxyCIDRs == nil {
 		cfg.TrustedProxyCIDRs = []string{"127.0.0.0/8", "::1/128"}
+	}
+	if cfg.Update.Channel == "" {
+		cfg.Update.Channel = "stable"
+	}
+	if cfg.Update.Channel != "stable" && cfg.Update.Channel != "prerelease" {
+		return Config{}, errors.New("update channel must be stable or prerelease")
+	}
+	stateDirectory := ""
+	if cfg.AuditFile != "" {
+		stateDirectory = filepath.Dir(cfg.AuditFile)
+	} else if path != "" {
+		stateDirectory = filepath.Dir(path)
+	}
+	if stateDirectory != "" {
+		absoluteStateDirectory, err := filepath.Abs(stateDirectory)
+		if err != nil {
+			return Config{}, fmt.Errorf("resolve Hearth state directory: %w", err)
+		}
+		stateDirectory = absoluteStateDirectory
+		if cfg.Update.TokenFile == "" {
+			cfg.Update.TokenFile = filepath.Join(stateDirectory, "github-token.txt")
+		}
+		if cfg.Update.StagingDir == "" {
+			cfg.Update.StagingDir = filepath.Join(stateDirectory, "updates")
+		}
+	}
+	if cfg.Update.TokenFile != "" && !filepath.IsAbs(cfg.Update.TokenFile) {
+		return Config{}, errors.New("update tokenFile must be an absolute path")
+	}
+	if cfg.Update.StagingDir != "" && !filepath.IsAbs(cfg.Update.StagingDir) {
+		return Config{}, errors.New("update stagingDir must be an absolute path")
 	}
 	return cfg, nil
 }

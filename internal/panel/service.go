@@ -193,6 +193,7 @@ func (s *DemoService) Management() Management {
 			BackupRetentionDays: 30, BackupMaxTotalGB: 20, ShutdownWaitSeconds: 30,
 			SteamCmdNoProgressMinutes: 30, PalworldPort: 8211,
 			TrustedProxyCIDRs: []string{"127.0.0.0/8", "::1/128"},
+			UpdateChannel:     "stable",
 		},
 	}
 }
@@ -214,6 +215,9 @@ func (s *DemoService) UpdateSystemSettings(patch SystemSettingsPatch) (SystemSet
 	if patch.Revision != settings.Revision {
 		return SystemSettings{}, ErrInvalid
 	}
+	if patch.UpdateChannel == "" {
+		patch.UpdateChannel = settings.UpdateChannel
+	}
 	settings.InstallRoot = patch.InstallRoot
 	settings.SteamCmdRoot = patch.SteamCmdRoot
 	settings.DiscoveryRoots = append([]string(nil), patch.DiscoveryRoots...)
@@ -224,6 +228,7 @@ func (s *DemoService) UpdateSystemSettings(patch SystemSettingsPatch) (SystemSet
 	settings.PalworldPort = patch.PalworldPort
 	settings.SecureCookies = patch.SecureCookies
 	settings.TrustedProxyCIDRs = append([]string(nil), patch.TrustedProxyCIDRs...)
+	settings.UpdateChannel = patch.UpdateChannel
 	settings.RestartRequired = true
 	return settings, nil
 }

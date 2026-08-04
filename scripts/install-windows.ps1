@@ -29,8 +29,10 @@ $taskName = 'Hearth'
 $minimumPanelPasswordLength = 10
 $installRoot = Join-Path $env:ProgramData $taskName
 $sourceExecutable = Join-Path $SourceDirectory 'hearth.exe'
+$sourceUpdater = Join-Path $SourceDirectory 'hearth-updater.exe'
 $versionFile = Join-Path $SourceDirectory 'VERSION'
 $targetExecutable = Join-Path $installRoot 'hearth.exe'
+$targetUpdater = Join-Path $installRoot 'hearth-updater.exe'
 $configPath = Join-Path $installRoot 'config.json'
 $passwordPath = Join-Path $installRoot 'admin-password.txt'
 $accessPath = Join-Path $installRoot 'member-credentials.json'
@@ -46,7 +48,7 @@ $settingsFile = Join-Path $palworldRoot 'Pal\Saved\Config\WindowsServer\PalWorld
 $defaultSettingsFile = Join-Path $palworldRoot 'DefaultPalWorldSettings.ini'
 $palworldExecutable = Join-Path $palworldRoot 'Pal\Binaries\Win64\PalServer-Win64-Shipping-Cmd.exe'
 
-foreach ($requiredPath in @($sourceExecutable, $versionFile)) {
+foreach ($requiredPath in @($sourceExecutable, $sourceUpdater, $versionFile)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required file was not found: $requiredPath"
     }
@@ -109,6 +111,7 @@ try {
 
     New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
     $executableBackupPath = $null
+    $updaterBackupPath = $null
     if ($Force -and (Test-Path -LiteralPath $configPath -PathType Leaf)) {
         $backupName = 'config.json.install-backup-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss')
         Copy-Item -LiteralPath $configPath -Destination (Join-Path $installRoot $backupName) -Force
@@ -116,6 +119,10 @@ try {
     if ($null -ne $existingTask -and (Test-Path -LiteralPath $targetExecutable -PathType Leaf)) {
         $executableBackupPath = Join-Path $installRoot 'hearth.exe.install-backup'
         Copy-Item -LiteralPath $targetExecutable -Destination $executableBackupPath -Force
+    }
+    if ($null -ne $existingTask -and (Test-Path -LiteralPath $targetUpdater -PathType Leaf)) {
+        $updaterBackupPath = Join-Path $installRoot 'hearth-updater.exe.install-backup'
+        Copy-Item -LiteralPath $targetUpdater -Destination $updaterBackupPath -Force
     }
 
     if ($null -ne $existingTask) {
@@ -133,10 +140,14 @@ try {
 
     try {
         Copy-Item -LiteralPath $sourceExecutable -Destination $targetExecutable -Force
+        Copy-Item -LiteralPath $sourceUpdater -Destination $targetUpdater -Force
     }
     catch {
         if ($null -ne $executableBackupPath -and (Test-Path -LiteralPath $executableBackupPath -PathType Leaf)) {
             Copy-Item -LiteralPath $executableBackupPath -Destination $targetExecutable -Force
+        }
+        if ($null -ne $updaterBackupPath -and (Test-Path -LiteralPath $updaterBackupPath -PathType Leaf)) {
+            Copy-Item -LiteralPath $updaterBackupPath -Destination $targetUpdater -Force
         }
         if ($null -ne $existingTask) {
             Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -167,6 +178,11 @@ try {
             installRoot   = (Join-Path $SteamCmdRoot 'steamapps\common')
             steamCmdRoot  = $SteamCmdRoot
             discoveryRoots = @($SteamCmdRoot)
+        }
+        update            = [ordered]@{
+            channel    = 'stable'
+            tokenFile  = (Join-Path $installRoot 'github-token.txt')
+            stagingDir = (Join-Path $installRoot 'updates')
         }
         games             = [ordered]@{
             palworld = [ordered]@{
@@ -267,6 +283,12 @@ if (-not $healthVerified) {
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if ($null -ne $executableBackupPath -and (Test-Path -LiteralPath $executableBackupPath -PathType Leaf)) {
         Copy-Item -LiteralPath $executableBackupPath -Destination $targetExecutable -Force
+        if ($null -ne $updaterBackupPath -and (Test-Path -LiteralPath $updaterBackupPath -PathType Leaf)) {
+            Copy-Item -LiteralPath $updaterBackupPath -Destination $targetUpdater -Force
+        }
+        else {
+            Remove-Item -LiteralPath $targetUpdater -Force -ErrorAction SilentlyContinue
+        }
         Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     }
     else {

@@ -28,6 +28,7 @@ import (
 type server struct {
 	config          config.Config
 	service         panel.Service
+	updates         panel.PanelUpdateService
 	sessions        *sessionStore
 	logins          *loginGate
 	access          *accessStore
@@ -39,6 +40,10 @@ type server struct {
 }
 
 func New(cfg config.Config, service panel.Service) (http.Handler, error) {
+	return NewWithUpdates(cfg, service, nil)
+}
+
+func NewWithUpdates(cfg config.Config, service panel.Service, updates panel.PanelUpdateService) (http.Handler, error) {
 	access, err := newAccessStore(cfg.AdminPassword, cfg.AccessFile, cfg.AuditFile)
 	if err != nil {
 		return nil, err
@@ -66,6 +71,7 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 	s := &server{
 		config:          cfg,
 		service:         service,
+		updates:         updates,
 		sessions:        newSessionStore(),
 		logins:          newLoginGate(),
 		access:          access,
@@ -75,6 +81,7 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 		devices:         devices,
 		ipRules:         ipRules,
 	}
+	s.consumePanelUpdateResult()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
 	mux.HandleFunc("POST /api/v1/session", s.login)
@@ -116,8 +123,92 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 	mux.HandleFunc("POST /api/v1/system/games/{id}/adopt", s.admin(s.adoptGame))
 	mux.HandleFunc("POST /api/v1/system/games/{id}/install", s.admin(s.installGame))
 	mux.HandleFunc("PATCH /api/v1/system/settings", s.admin(s.updateSystemSettings))
+	mux.HandleFunc("GET /api/v1/system/update", s.admin(s.panelUpdateStatus))
+	mux.HandleFunc("POST /api/v1/system/update/check", s.admin(s.checkPanelUpdate))
+	mux.HandleFunc("POST /api/v1/system/update/apply", s.admin(s.applyPanelUpdate))
 	mux.Handle("/", spaHandler())
 	return securityHeaders(mux), nil
+}
+
+func (s *server) panelUpdateStatus(w http.ResponseWriter, _ *http.Request) {
+	if s.updates == nil {
+		writeServiceError(w, fmt.Errorf("%w: panel update service is unavailable", panel.ErrNotFound))
+		return
+	}
+	status := s.updates.UpdateStatus()
+	s.consumePanelUpdateResult()
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *server) checkPanelUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.updates == nil {
+		writeServiceError(w, fmt.Errorf("%w: panel update service is unavailable", panel.ErrNotFound))
+		return
+	}
+	status, err := s.updates.CheckForUpdate(r.Context())
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	s.recordManagementOperation(r, operationEventPanelUpdateChecked, operationTargetSystem, "hearth")
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *server) applyPanelUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.updates == nil {
+		writeServiceError(w, fmt.Errorf("%w: panel update service is unavailable", panel.ErrNotFound))
+		return
+	}
+	var request panel.PanelUpdateRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "面板更新请求格式不正确")
+		return
+	}
+	identity, _ := principalFromContext(r.Context())
+	request.ActorCredentialID = identity.CredentialID
+	request.ActorRole = identity.Role
+	request.ActorIP = s.proxy.clientIP(r)
+	status, err := s.updates.ApplyUpdate(request)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	s.recordManagementOperation(r, operationEventPanelUpdateStarted, operationTargetSystem, "hearth")
+	writeJSON(w, http.StatusAccepted, status)
+}
+
+func (s *server) consumePanelUpdateResult() {
+	consumer, ok := s.updates.(panel.PanelUpdateResultConsumer)
+	if !ok {
+		return
+	}
+	result := consumer.ConsumeUpdateResult()
+	if result == nil {
+		return
+	}
+	event := operationEventPanelUpdateFailed
+	success := false
+	switch result.State {
+	case "succeeded":
+		event, success = operationEventPanelUpdateSucceeded, true
+	case "rolled_back":
+		event = operationEventPanelUpdateRolledBack
+	}
+	entry := operationAuditEntry{
+		ID: newAuditID(), Event: event,
+		ActorCredentialID: result.ActorCredentialID, ActorRole: result.ActorRole, ActorIP: result.ActorIP,
+		TargetType: operationTargetSystem, TargetID: "hearth", Success: success,
+		UpdateVersion: result.Version, PreviousVersion: result.PreviousVersion, Detail: result.Message,
+		CreatedAt: time.Now(),
+	}
+	if err := s.operationAudits.record(entry); err != nil {
+		_ = consumer.CompleteUpdateResultImport(false)
+		slog.Error("persist panel update result audit", "error", err)
+		return
+	}
+	if err := consumer.CompleteUpdateResultImport(true); err != nil {
+		slog.Warn("acknowledge panel update result audit", "error", err)
+	}
 }
 
 func (s *server) managementService() (panel.ManagementService, error) {
