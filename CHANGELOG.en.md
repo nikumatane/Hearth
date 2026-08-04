@@ -33,6 +33,9 @@ Unreleased and moves to a version section when a formal package is built.
 - Panel updates now map actual downloaded bytes to 15–40% with transferred-size detail. The UI wait
   covers download, restart, and rollback, polls backend stages every second, and resumes tracking a
   running update after a refresh or page re-entry.
+- Fixed stale progress when the new panel becomes healthy just before the updater writes its result.
+  The backend imports an unconsumed terminal result only when it matches the running version, and the
+  page stops tracking only after an explicit success, failure, or rollback result.
 
 ## 1.1.0 - 2026-08-04
 

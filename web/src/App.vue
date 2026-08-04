@@ -465,21 +465,39 @@ function navigate(next: Page, gameId?: string) {
   if (next === "access") void loadAccess();
   if (next === "system") {
     void loadManagement();
-    void loadPanelUpdate(true);
+    void refreshPanelUpdateOnEntry();
   }
 }
 
-async function loadPanelUpdate(silent = false) {
-  if (!isAdmin.value) return;
+async function loadPanelUpdate(silent = false): Promise<boolean> {
+  if (!isAdmin.value) return false;
+  const controller = new AbortController();
+  const requestTimeout = window.setTimeout(() => controller.abort(), panelHealthRequestTimeoutMs);
   try {
-    const status = await api.panelUpdate();
+    const status = await api.panelUpdate(controller.signal);
     panelUpdate.value = status;
     if (status.state === "preparing" && status.latestVersion && !panelUpdateBusy.value) {
       resumePanelUpdateWait(status.latestVersion);
     }
+    return true;
   } catch (error) {
     if (!silent) showToast("error", error instanceof Error ? error.message : "面板更新状态读取失败");
+    return false;
+  } finally {
+    window.clearTimeout(requestTimeout);
   }
+}
+
+async function refreshPanelUpdateOnEntry() {
+  if (!isAdmin.value) return;
+  if (!panelUpdateBusy.value && (panelUpdate.value?.state === "checking" || panelUpdate.value?.state === "preparing")) {
+    panelUpdate.value = null;
+  }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await loadPanelUpdate(true)) return;
+    if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 1000));
+  }
+  showToast("error", "面板刚刚重启，更新状态暂时无法读取，请稍后重试");
 }
 
 function resumePanelUpdateWait(target: string) {
@@ -529,9 +547,24 @@ async function waitForPanelUpdate(target: string) {
   const deadline = Date.now() + panelUpdateWaitTimeoutMs;
   while (Date.now() < deadline) {
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    const statusLoaded = await loadPanelUpdate(true);
+    const status = panelUpdate.value;
+    if (statusLoaded && status?.state === "failed") {
+      throw new Error(`更新失败：${status.message || status.stage}`);
+    }
+    if (statusLoaded && status?.state === "rolled_back") {
+      throw new Error(status.message || "新版本未生效，面板已恢复上一版本");
+    }
+    if (statusLoaded && status?.state === "succeeded" && status.currentVersion === target) {
+      showToast("success", `Hearth ${target} 更新完成`);
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+      window.location.reload();
+      return;
+    }
+
     const controller = new AbortController();
     const requestTimeout = window.setTimeout(() => controller.abort(), panelHealthRequestTimeoutMs);
-    let health: { status?: string; version?: string };
+    let health: { status?: string; version?: string } | undefined;
     try {
       const response = await fetch("/api/v1/health", { cache: "no-store", signal: controller.signal });
       if (!response.ok) continue;
@@ -542,20 +575,17 @@ async function waitForPanelUpdate(target: string) {
       window.clearTimeout(requestTimeout);
     }
     if (health.status === "ok" && health.version === target) {
-      window.location.reload();
-      return;
-    }
-    await loadPanelUpdate(true);
-    const status = panelUpdate.value;
-    if (status?.state === "failed") {
-      throw new Error(`更新失败：${status.message || status.stage}`);
-    }
-    if (status?.state === "rolled_back") {
-      throw new Error(status.message || `新版本未生效，面板已恢复 ${health.version ?? "旧版本"}`);
-    }
-    if (status?.state === "succeeded" && status.currentVersion === target) {
-      window.location.reload();
-      return;
+      if (statusLoaded && status) {
+        panelUpdate.value = {
+          ...status,
+          latestVersion: target,
+          state: "preparing",
+          stage: "等待更新结果",
+          progress: Math.max(status.progress, 99),
+          message: "新版本已经启动，正在等待独立更新器确认健康检查结果"
+        };
+      }
+      continue;
     }
   }
   await loadPanelUpdate(true);
@@ -2019,7 +2049,7 @@ function gameAccent(id: string) {
             <button :class="{ active: systemTab === 'settings' }" @click="systemTab = 'settings'">
               <Settings2 :size="16" />后台设置
             </button>
-            <button :class="{ active: systemTab === 'updates' }" @click="systemTab = 'updates'; loadPanelUpdate()">
+            <button :class="{ active: systemTab === 'updates' }" @click="systemTab = 'updates'; refreshPanelUpdateOnEntry()">
               <Download :size="16" />面板更新
             </button>
           </section>

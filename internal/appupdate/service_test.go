@@ -232,6 +232,114 @@ func TestDownloadAssetReportsMonotonicByteProgress(t *testing.T) {
 	}
 }
 
+func TestUpdateStatusImportsResultWrittenAfterServiceStart(t *testing.T) {
+	previousVersion := buildinfo.Version
+	buildinfo.Version = "1.2.0-rc.9"
+	t.Cleanup(func() { buildinfo.Version = previousVersion })
+
+	stagingDir := t.TempDir()
+	service, err := New(
+		config.Config{Update: config.UpdateConfig{Channel: "prerelease", StagingDir: stagingDir}},
+		"",
+		Options{Executable: filepath.Join(t.TempDir(), "hearth.exe"), RuntimeGOOS: "windows"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := service.UpdateStatus(); status.State != "idle" {
+		t.Fatalf("initial status = %+v", status)
+	}
+
+	completedAt := time.Date(2026, 8, 4, 19, 30, 0, 0, time.FixedZone("CST", 8*60*60))
+	result := Result{
+		State: "succeeded", Stage: "面板更新完成", Version: buildinfo.Version, PreviousVersion: "1.2.0-rc.8",
+		Message: "新版本已通过健康检查", CompletedAt: completedAt,
+		ActorCredentialID: "ADMIN", ActorRole: "admin", ActorIP: "127.0.0.1",
+	}
+	if err := writeJSONAtomic(filepath.Join(stagingDir, updateResultName), &result); err != nil {
+		t.Fatal(err)
+	}
+
+	status := service.UpdateStatus()
+	if status.State != "succeeded" || status.Stage != result.Stage || status.Progress != 100 || status.LatestVersion != buildinfo.Version {
+		t.Fatalf("imported status = %+v", status)
+	}
+	claimed := service.ConsumeUpdateResult()
+	if claimed == nil || claimed.Version != buildinfo.Version {
+		t.Fatalf("claimed result = %+v", claimed)
+	}
+	if err := service.CompleteUpdateResultImport(true); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := service.readResult()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted == nil || !persisted.Consumed {
+		t.Fatalf("persisted result = %+v", persisted)
+	}
+	if duplicate := service.ConsumeUpdateResult(); duplicate != nil {
+		t.Fatalf("result imported twice: %+v", duplicate)
+	}
+}
+
+func TestServiceIgnoresTerminalResultForAnotherRuntimeVersion(t *testing.T) {
+	previousVersion := buildinfo.Version
+	buildinfo.Version = "1.2.0-rc.9"
+	t.Cleanup(func() { buildinfo.Version = previousVersion })
+
+	stagingDir := t.TempDir()
+	result := Result{
+		State: "succeeded", Stage: "面板更新完成", Version: "1.2.0-rc.8", PreviousVersion: "1.2.0-rc.7",
+		Message: "stale result", CompletedAt: time.Now(),
+		ActorCredentialID: "ADMIN", ActorRole: "admin", ActorIP: "127.0.0.1", Consumed: true,
+	}
+	if err := writeJSONAtomic(filepath.Join(stagingDir, updateResultName), &result); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(
+		config.Config{Update: config.UpdateConfig{Channel: "prerelease", StagingDir: stagingDir}},
+		"",
+		Options{Executable: filepath.Join(t.TempDir(), "hearth.exe"), RuntimeGOOS: "windows"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := service.UpdateStatus(); status.State != "idle" || status.Stage != "等待检查" {
+		t.Fatalf("stale result changed status: %+v", status)
+	}
+}
+
+func TestServiceIgnoresConsumedTerminalResultForCurrentVersion(t *testing.T) {
+	previousVersion := buildinfo.Version
+	buildinfo.Version = "1.2.0-rc.9"
+	t.Cleanup(func() { buildinfo.Version = previousVersion })
+
+	stagingDir := t.TempDir()
+	result := Result{
+		State: "failed", Stage: "旧更新失败", Version: buildinfo.Version, PreviousVersion: "1.2.0-rc.8",
+		Message: "consumed failure from an earlier attempt", CompletedAt: time.Now(),
+		ActorCredentialID: "ADMIN", ActorRole: "admin", ActorIP: "127.0.0.1", Consumed: true,
+	}
+	if err := writeJSONAtomic(filepath.Join(stagingDir, updateResultName), &result); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(
+		config.Config{Update: config.UpdateConfig{Channel: "prerelease", StagingDir: stagingDir}},
+		"",
+		Options{Executable: filepath.Join(t.TempDir(), "hearth.exe"), RuntimeGOOS: "windows"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := service.UpdateStatus(); status.State != "idle" || status.Stage != "等待检查" {
+		t.Fatalf("consumed result changed status: %+v", status)
+	}
+	if duplicate := service.ConsumeUpdateResult(); duplicate != nil {
+		t.Fatalf("consumed result was imported again: %+v", duplicate)
+	}
+}
+
 func testPackage(t *testing.T, version string) []byte {
 	t.Helper()
 	var output bytes.Buffer

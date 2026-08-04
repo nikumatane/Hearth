@@ -143,13 +143,7 @@ func New(cfg config.Config, _ string, options Options) (*Service, error) {
 		CanApply:        runtimeOS == "windows",
 		TokenConfigured: s.tokenConfigured(),
 	}
-	if result, err := s.readResult(); err == nil && result != nil {
-		s.lastResult = result
-		s.status.State = result.State
-		s.status.Stage = result.Stage
-		s.status.Message = result.Message
-		s.status.Progress = 100
-	} else if err != nil {
+	if err := s.refreshResultLocked(); err != nil {
 		s.status.State = "failed"
 		s.status.Stage = "更新结果读取失败"
 		s.status.Message = err.Error()
@@ -208,11 +202,65 @@ func (s *Service) CompleteUpdateResultImport(success bool) error {
 }
 
 func (s *Service) UpdateStatus() panel.PanelUpdateStatus {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	if err := s.refreshResultLocked(); err != nil && s.status.State != "checking" && s.status.State != "preparing" {
+		s.status.State = "failed"
+		s.status.Stage = "更新结果读取失败"
+		s.status.Progress = 0
+		s.status.Message = err.Error()
+	}
 	status := s.status
+	s.mu.Unlock()
 	status.TokenConfigured = s.tokenConfigured()
 	return status
+}
+
+func (s *Service) refreshResultLocked() error {
+	result, err := s.readResult()
+	if err != nil || result == nil {
+		return err
+	}
+	if result.Consumed {
+		if !sameResult(s.lastResult, result) {
+			s.lastResult = result
+			s.resultClaimed = false
+		}
+		return nil
+	}
+	if !resultMatchesRunningVersion(result, buildinfo.Version) || sameResult(s.lastResult, result) {
+		return nil
+	}
+	s.lastResult = result
+	s.resultClaimed = false
+	s.status.State = result.State
+	s.status.Stage = result.Stage
+	s.status.Message = result.Message
+	s.status.Progress = 100
+	s.status.LatestVersion = result.Version
+	s.status.UpdateAvailable = false
+	return nil
+}
+
+func sameResult(left, right *Result) bool {
+	return left != nil && right != nil &&
+		left.State == right.State && left.Version == right.Version &&
+		left.PreviousVersion == right.PreviousVersion && left.CompletedAt.Equal(right.CompletedAt)
+}
+
+func resultMatchesRunningVersion(result *Result, currentVersion string) bool {
+	if result == nil {
+		return false
+	}
+	switch result.State {
+	case "succeeded":
+		return result.Version == currentVersion
+	case "rolled_back":
+		return result.PreviousVersion == currentVersion
+	case "failed":
+		return result.Version == currentVersion || result.PreviousVersion == currentVersion
+	default:
+		return false
+	}
 }
 
 func (s *Service) CheckForUpdate(ctx context.Context) (panel.PanelUpdateStatus, error) {

@@ -417,7 +417,7 @@ export const api = {
         updateChannel: settings.updateChannel
       })
     }),
-  panelUpdate: () => request<PanelUpdateStatus>("/api/v1/system/update"),
+  panelUpdate: (signal?: AbortSignal) => request<PanelUpdateStatus>("/api/v1/system/update", { signal }),
   checkPanelUpdate: () =>
     request<PanelUpdateStatus>("/api/v1/system/update/check", { method: "POST" }),
   applyPanelUpdate: (version: string) =>

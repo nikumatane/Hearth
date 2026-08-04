@@ -43,7 +43,9 @@ audit events. Detailed output is stored in
 `install-windows.ps1 -Force`; the existing `config.json` remains preserved.
 Actual downloaded bytes map to 15–40%. The page waits up to 15 minutes and polls backend state every
 second; refreshing or revisiting the page resumes tracking an unfinished update instead of treating
-an old 15% value as the final result.
+an old 15% value as the final result. Target-version health means only that the new process has
+started. Tracking ends after the independent updater publishes an explicit matching success,
+failure, or rollback result; the new process also imports an unconsumed result written after startup.
 
 The 1.2.0 trust boundary is the fixed GitHub repository, GitHub TLS/access control, the Release asset
 digest, and sidecar checksum. A separate project signing key would protect a stronger account-
