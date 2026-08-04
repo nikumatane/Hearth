@@ -30,11 +30,11 @@ func (s *Service) InstallGame(id string, request panel.InstallGameRequest) (pane
 	if !request.Confirm {
 		return panel.Activity{}, fmt.Errorf("%w: 安装需要管理员明确确认", panel.ErrInvalid)
 	}
-	installDir := filepath.Clean(strings.TrimSpace(request.InstallDir))
 	steamCmdRoot := filepath.Clean(strings.TrimSpace(request.SteamCmdRoot))
-	if err := validateInstallPaths(installDir, steamCmdRoot, s.configPath); err != nil {
+	if err := validateInstallPaths(steamCmdRoot, s.configPath); err != nil {
 		return panel.Activity{}, err
 	}
+	installDir := palworldInstallDir(steamCmdRoot)
 	if err := requireEmptyInstallDirectory(installDir); err != nil {
 		return panel.Activity{}, err
 	}
@@ -47,7 +47,7 @@ func (s *Service) InstallGame(id string, request panel.InstallGameRequest) (pane
 	now := time.Now()
 	activity := panel.Activity{
 		ID: fmt.Sprintf("install-%d", now.UnixNano()), GameID: palworldID, Action: "install",
-		Title: "安装 Palworld Dedicated Server", Detail: "管理员已确认安装目录，任务准备开始",
+		Title: "安装 Palworld Dedicated Server", Detail: "管理员已确认 SteamCMD 目录，任务准备开始",
 		Status: "running", Stage: "准备目录", Progress: 5, CreatedAt: now, UpdatedAt: now,
 	}
 	s.activities = append([]panel.Activity{activity}, s.activities...)
@@ -70,11 +70,7 @@ func (s *Service) runInstall(activityID, installDir, steamCmdRoot string) {
 		s.finishInstallActivity(activityID, false, "安装失败", safeErrorDetail(err))
 	}
 
-	report("准备目录", 8, "正在创建管理员选择的安装目录")
-	if err := os.MkdirAll(installDir, 0o700); err != nil {
-		fail(fmt.Errorf("create game install directory: %w", err))
-		return
-	}
+	report("准备目录", 8, "正在准备 SteamCMD 目录")
 	if err := os.MkdirAll(steamCmdRoot, 0o700); err != nil {
 		fail(fmt.Errorf("create SteamCMD directory: %w", err))
 		return
@@ -92,7 +88,7 @@ func (s *Service) runInstall(activityID, installDir, steamCmdRoot string) {
 		report("检查 SteamCMD", 12, "使用管理员确认目录中的现有 steamcmd.exe")
 	}
 
-	logDirectory := filepath.Join(installDir, "panel-logs")
+	logDirectory := filepath.Join(steamCmdRoot, "hearth-logs")
 	if err := os.MkdirAll(logDirectory, 0o700); err != nil {
 		fail(fmt.Errorf("create installation log directory: %w", err))
 		return
@@ -105,7 +101,7 @@ func (s *Service) runInstall(activityID, installDir, steamCmdRoot string) {
 	noProgressMinutes := defaultInt(s.config.Games.Palworld.SteamCmdNoProgressMinutes, 30)
 	s.mu.RUnlock()
 	if err := palworld.InstallDedicatedServer(
-		steamCmd, installDir, logPath, time.Duration(noProgressMinutes)*time.Minute,
+		steamCmd, logPath, time.Duration(noProgressMinutes)*time.Minute,
 		func(stage string, progress int, detail string) { report(stage, progress, detail) },
 	); err != nil {
 		fail(fmt.Errorf("install Palworld with SteamCMD: %w", err))
@@ -198,27 +194,25 @@ func (s *Service) finishInstallActivity(id string, success bool, title, detail s
 	s.activeTask = ""
 }
 
-func validateInstallPaths(installDir, steamCmdRoot, configPath string) error {
-	for name, value := range map[string]string{"installDir": installDir, "steamCmdRoot": steamCmdRoot} {
-		if value == "." || !filepath.IsAbs(value) {
-			return fmt.Errorf("%w: %s 必须是绝对路径", panel.ErrInvalid, name)
-		}
-		volume := filepath.VolumeName(value)
-		if volume != "" && filepath.Clean(value) == filepath.Clean(volume+string(filepath.Separator)) {
-			return fmt.Errorf("%w: %s 不能是磁盘根目录", panel.ErrInvalid, name)
-		}
+func validateInstallPaths(steamCmdRoot, configPath string) error {
+	if steamCmdRoot == "." || !filepath.IsAbs(steamCmdRoot) {
+		return fmt.Errorf("%w: steamCmdRoot 必须是绝对路径", panel.ErrInvalid)
 	}
-	if pathContains(installDir, steamCmdRoot) || pathContains(steamCmdRoot, installDir) {
-		return fmt.Errorf("%w: 游戏目录和 SteamCMD 目录必须分开且不能互相包含", panel.ErrInvalid)
+	volume := filepath.VolumeName(steamCmdRoot)
+	if volume != "" && filepath.Clean(steamCmdRoot) == filepath.Clean(volume+string(filepath.Separator)) {
+		return fmt.Errorf("%w: steamCmdRoot 不能是磁盘根目录", panel.ErrInvalid)
 	}
 	if configPath != "" {
 		configDirectory := filepath.Dir(configPath)
-		if pathContains(installDir, configDirectory) || pathContains(configDirectory, installDir) ||
-			pathContains(steamCmdRoot, configDirectory) || pathContains(configDirectory, steamCmdRoot) {
-			return fmt.Errorf("%w: 安装目录不能覆盖 Hearth 配置目录", panel.ErrInvalid)
+		if pathContains(steamCmdRoot, configDirectory) || pathContains(configDirectory, steamCmdRoot) {
+			return fmt.Errorf("%w: SteamCMD 目录不能覆盖 Hearth 配置目录", panel.ErrInvalid)
 		}
 	}
 	return nil
+}
+
+func palworldInstallDir(steamCmdRoot string) string {
+	return filepath.Join(filepath.Clean(steamCmdRoot), "steamapps", "common", "PalServer")
 }
 
 func requireEmptyInstallDirectory(path string) error {
@@ -230,7 +224,7 @@ func requireEmptyInstallDirectory(path string) error {
 		return fmt.Errorf("%w: inspect install directory: %v", panel.ErrInvalid, err)
 	}
 	if len(entries) > 0 {
-		return fmt.Errorf("%w: 新安装目录必须为空；现有服务器请使用接管", panel.ErrInvalid)
+		return fmt.Errorf("%w: SteamCMD 的 PalServer 目录必须为空；现有服务器请使用接管", panel.ErrInvalid)
 	}
 	return nil
 }

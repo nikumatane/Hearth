@@ -622,7 +622,7 @@ func (s *Service) installedBuildID() string {
 }
 
 func (s *Service) appManifestPath() string {
-	return filepath.Clean(filepath.Join(s.config.InstallDir, "..", "..", "appmanifest_"+palworldAppID+".acf"))
+	return filepath.Join(filepath.Dir(s.config.SteamCmd), "steamapps", "appmanifest_"+palworldAppID+".acf")
 }
 
 func applyVersionStatus(game *panel.Game, status steamVersionStatus) {
@@ -867,6 +867,7 @@ func (s *Service) forceStop(expected processSample, report taskReporter) error {
 }
 
 func (s *Service) start(report taskReporter, registerLog taskLogReporter) error {
+	executableName := filepath.Base(s.config.Executable)
 	report("准备启动", 5, "正在准备 Palworld 启动日志")
 	logDirectory := filepath.Join(s.config.InstallDir, "panel-logs")
 	if err := os.MkdirAll(logDirectory, 0o700); err != nil {
@@ -875,7 +876,7 @@ func (s *Service) start(report taskReporter, registerLog taskLogReporter) error 
 	logName := taskLogName("palworld")
 	logPath := filepath.Join(logDirectory, logName)
 	registerLog(logName, "帕鲁启动日志")
-	report("启动进程", 25, "正在启动 PalServer.exe")
+	report("启动进程", 25, "正在启动 "+executableName)
 	if err := s.platform.startDetached(s.config.Executable, s.config.InstallDir, s.config.StartArgs, logPath); err != nil {
 		return fmt.Errorf("start Palworld: %w", err)
 	}
@@ -893,7 +894,7 @@ func (s *Service) start(report taskReporter, registerLog taskLogReporter) error 
 			return nil
 		}
 		waitProgress := int(time.Since(waitStarted) * 40 / (90 * time.Second))
-		report("等待进程出现", min(95, 55+waitProgress), "PalServer.exe 已启动，正在等待游戏进程出现")
+		report("等待进程出现", min(95, 55+waitProgress), executableName+" 已启动，正在等待游戏进程出现")
 		time.Sleep(time.Second)
 	}
 	return errors.New("Palworld process did not appear within 90 seconds")
@@ -972,15 +973,27 @@ func (s *Service) runSteamCMD(logPath string, report taskReporter) (steamUpdateO
 	noProgressTimeout := s.steamNoProgressTimeout()
 	for attempt := 1; attempt <= 2; attempt++ {
 		if attempt > 1 {
+			report("等待 SteamCMD 退出", 15, "SteamCMD 可能完成了自更新，正在等待派生进程退出后重试")
+			if err := waitForSteamCMDExit(30 * time.Second); err != nil {
+				return "", err
+			}
 			if _, err := fmt.Fprintln(logFile, "\n[Hearth] SteamCMD exited cleanly without an app completion marker; retrying once after a possible self-update."); err != nil {
 				return "", err
 			}
 			report("SteamCMD 自更新", 15, "首次运行可能完成了 SteamCMD 自身更新，正在自动重试一次")
 		}
+		attemptLogOffset := logFileSize(logPath)
 		if err := s.runSteamCMDAttempt(logFile, logPath, noProgressTimeout, report); err != nil {
+			if attempt == 1 && steamCMDSelfUpdateCompletedSince(logPath, attemptLogOffset) {
+				continue
+			}
 			return "", err
 		}
 		if outcome, completed := steamUpdateResult(logPath); completed {
+			report("等待 SteamCMD 退出", 98, "文件校验已完成，正在等待 SteamCMD 派生进程完全退出")
+			if err := waitForSteamCMDExit(30 * time.Second); err != nil {
+				return "", err
+			}
 			if outcome == steamUpdateAlreadyCurrent {
 				report("SteamCMD 更新", 100, "Palworld Dedicated Server 已是最新版，无需下载")
 			} else {
@@ -1007,12 +1020,12 @@ func (s *Service) runSteamCMDAttempt(
 	report taskReporter,
 ) error {
 	initialSize := logFileSize(logPath)
-	command := exec.Command(s.config.SteamCmd,
-		"+force_install_dir", s.config.InstallDir,
+	arguments := []string{
 		"+login", "anonymous",
 		"+app_update", palworldAppID,
 		"+quit",
-	)
+	}
+	command := exec.Command(s.config.SteamCmd, arguments...)
 	command.Dir = filepath.Dir(s.config.SteamCmd)
 	command.Stdout, command.Stderr = logFile, logFile
 	prepareManagedCommand(command)
@@ -1118,6 +1131,27 @@ func steamUpdateResult(path string) (steamUpdateOutcome, bool) {
 		}
 	}
 	return "", false
+}
+
+func steamCMDSelfUpdateCompletedSince(path string, offset int64) bool {
+	const maxSelfUpdateTailBytes int64 = 256 << 10
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.Size() <= offset {
+		return false
+	}
+	start := max(offset, info.Size()-maxSelfUpdateTailBytes)
+	data := make([]byte, info.Size()-start)
+	read, err := file.ReadAt(data, start)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false
+	}
+	text := strings.ToLower(string(data[:read]))
+	return strings.Contains(text, "update complete, launching")
 }
 
 func taskLogName(prefix string) string {

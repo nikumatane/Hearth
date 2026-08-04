@@ -170,7 +170,6 @@ const management = ref<Management | null>(null);
 const managementLoading = ref(false);
 const managementSaving = ref(false);
 const systemTab = ref<"games" | "settings">("games");
-const installDirectory = ref("");
 const installSteamCmdRoot = ref("");
 const installConsent = ref(false);
 const discoveryRootsText = ref("");
@@ -201,6 +200,10 @@ const runningCount = computed(
 const palworldGame = computed(() =>
   overview.value?.games.find((game) => game.id === "palworld")
 );
+const steamCmdPalworldPath = computed(() => {
+  const root = installSteamCmdRoot.value.trim().replace(/[\\/]+$/, "");
+  return root ? `${root}\\steamapps\\common\\PalServer` : "SteamCMD\\steamapps\\common\\PalServer";
+});
 
 const hasManagedGames = computed(() => (overview.value?.games.length ?? 0) > 0);
 const palworldManagement = computed(() =>
@@ -461,9 +464,6 @@ function navigate(next: Page, gameId?: string) {
 function syncManagementInputs(document: Management) {
   const settings = document.settings;
   installSteamCmdRoot.value = installSteamCmdRoot.value || settings.steamCmdRoot;
-  if (!installDirectory.value && settings.installRoot) {
-    installDirectory.value = `${settings.installRoot.replace(/[\\/]+$/, "")}\\PalServer`;
-  }
   discoveryRootsText.value = settings.discoveryRoots.join("\n");
   trustedProxyCIDRsText.value = settings.trustedProxyCidrs.join("\n");
 }
@@ -511,12 +511,12 @@ async function adoptManagedGame(game: ManagedGame, candidateId: string) {
 
 async function installManagedGame(game: ManagedGame) {
   if (!installConsent.value) {
-    showToast("error", "请先确认安装会联网下载并写入所选目录");
+    showToast("error", "请先确认安装会联网下载并写入 SteamCMD 目录");
     return;
   }
   managementSaving.value = true;
   try {
-    await api.installGame(game.id, installDirectory.value, installSteamCmdRoot.value);
+    await api.installGame(game.id, installSteamCmdRoot.value);
     showToast("success", "安装任务已开始；完成后不会自动启动游戏");
     installConsent.value = false;
     await Promise.all([refresh(true), loadManagement(true)]);
@@ -1945,8 +1945,8 @@ function gameAccent(id: string) {
                   <button
                     v-if="game.support === 'available' && game.state !== 'managed'"
                     class="button secondary small"
-                    :disabled="managementSaving || !candidate.settingsPresent || !candidate.steamCmd"
-                    :title="!candidate.settingsPresent ? '缺少 PalWorldSettings.ini，不会自动创建' : !candidate.steamCmd ? '未找到 steamcmd.exe' : '确认后只保存管理路径'"
+                    :disabled="managementSaving || !candidate.canAdopt"
+                    :title="!candidate.settingsPresent ? '缺少 PalWorldSettings.ini，不会自动创建' : !candidate.steamCmd ? '未找到 steamcmd.exe' : !candidate.canAdopt ? '仅支持 SteamCMD 标准目录' : '确认后只保存管理路径'"
                     @click="adoptManagedGame(game, candidate.id)"
                   >确认接管</button>
                 </div>
@@ -1962,21 +1962,17 @@ function gameAccent(id: string) {
                   <div><strong>安装新服务器</strong><span>安装完成后保持停止，不会自动开放防火墙。</span></div>
                 </div>
                 <label>
-                  <span>Palworld 安装目录</span>
-                  <input v-model="installDirectory" autocomplete="off" placeholder="C:\GameServers\PalServer" />
-                </label>
-                <label>
                   <span>SteamCMD 目录</span>
                   <input v-model="installSteamCmdRoot" autocomplete="off" placeholder="C:\SteamCMD" />
-                  <small>目录中已有 steamcmd.exe 时直接使用；空目录会从 Valve 官方地址下载。</small>
+                  <small>目录中已有 steamcmd.exe 时直接使用；空目录会从 Valve 官方地址下载。Palworld 固定安装到 <code>{{ steamCmdPalworldPath }}</code>。</small>
                 </label>
                 <label class="install-consent">
                   <input v-model="installConsent" type="checkbox" />
-                  <span>我确认联网下载，并仅向上述两个目录写入文件。</span>
+                  <span>我确认联网下载，并向 SteamCMD 目录及其 steamapps 子目录写入文件。</span>
                 </label>
                 <button
                   class="button primary"
-                  :disabled="managementSaving || game.state === 'installing' || !installDirectory || !installSteamCmdRoot || !installConsent"
+                  :disabled="managementSaving || game.state === 'installing' || !installSteamCmdRoot || !installConsent"
                 >
                   <LoaderCircle v-if="game.state === 'installing'" class="spin" :size="16" />
                   <Download v-else :size="16" />
@@ -1997,7 +1993,7 @@ function gameAccent(id: string) {
           >
             <div class="system-settings-section">
               <div><h2>安装与探测</h2><p>启动时只读取这些有边界的目录，不扫描整块磁盘。</p></div>
-              <label><span>默认游戏根目录</span><input v-model="management.settings.installRoot" autocomplete="off" /></label>
+              <label><span>默认游戏探测根目录</span><input v-model="management.settings.installRoot" autocomplete="off" /><small>用于发现已有游戏；新安装仍使用 SteamCMD 的标准 steamapps 目录。</small></label>
               <label><span>默认 SteamCMD 目录</span><input v-model="management.settings.steamCmdRoot" autocomplete="off" /></label>
               <label class="wide"><span>额外探测根目录</span><textarea v-model="discoveryRootsText" rows="4"></textarea><small>每行一个绝对路径，最多向下探测 5 层。</small></label>
             </div>

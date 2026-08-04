@@ -143,6 +143,86 @@ echo "Success! App '2394010' fully installed."
 	}
 }
 
+func TestRunSteamCMDRetriesOnceAfterSelfUpdateExitError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX shell script")
+	}
+	directory := t.TempDir()
+	counterPath := filepath.Join(directory, "attempts")
+	scriptPath := filepath.Join(directory, "steamcmd")
+	script := fmt.Sprintf(`#!/bin/sh
+count=0
+if [ -f %q ]; then count=$(cat %q); fi
+count=$((count + 1))
+printf "%%s" "$count" > %q
+if [ "$count" -eq 1 ]; then
+  echo "[----] Update complete, launching Steamcmd..."
+  exit 7
+fi
+echo "Success! App '2394010' fully installed."
+`, counterPath, counterPath, counterPath)
+	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(directory, "steamcmd.log")
+	service := &Service{config: config.GameConfig{
+		SteamCmd:                  scriptPath,
+		InstallDir:                directory,
+		SteamCmdNoProgressMinutes: 1,
+	}}
+
+	outcome, err := service.runSteamCMD(logPath, func(string, int, string) {})
+	if err != nil {
+		t.Fatalf("runSteamCMD() error = %v", err)
+	}
+	if outcome != steamUpdateApplied {
+		t.Fatalf("runSteamCMD() outcome = %q; want %q", outcome, steamUpdateApplied)
+	}
+	attempts, err := os.ReadFile(counterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(attempts) != "2" {
+		t.Fatalf("attempts = %q", attempts)
+	}
+}
+
+func TestRunSteamCMDAttemptUsesSteamCMDDefaultLibrary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX shell script")
+	}
+	steamCmdRoot := t.TempDir()
+	argumentsPath := filepath.Join(steamCmdRoot, "arguments")
+	steamCmd := filepath.Join(steamCmdRoot, "steamcmd")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\n", argumentsPath)
+	if err := os.WriteFile(steamCmd, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(steamCmdRoot, "steamcmd.log")
+	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &Service{config: config.GameConfig{
+		SteamCmd:   steamCmd,
+		InstallDir: filepath.Join(steamCmdRoot, "steamapps", "common", "PalServer"),
+	}}
+	err = service.runSteamCMDAttempt(logFile, logPath, time.Second, func(string, int, string) {})
+	if closeErr := logFile.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatalf("runSteamCMDAttempt() error = %v", err)
+	}
+	arguments, err := os.ReadFile(argumentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(arguments), "+force_install_dir") {
+		t.Fatalf("SteamCMD arguments unexpectedly override the default library: %q", arguments)
+	}
+}
+
 func TestSteamUpdateResultDistinguishesNoOpUpdate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "steamcmd.log")
 	if err := os.WriteFile(path, []byte("Success! App '2394010' already up to date.\n"), 0o600); err != nil {

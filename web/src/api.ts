@@ -223,6 +223,7 @@ export type GameCandidate = {
   installDir: string;
   steamCmd?: string;
   settingsPresent: boolean;
+  canAdopt: boolean;
   detail: string;
 };
 
@@ -373,10 +374,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ candidateId, confirm: true })
     }),
-  installGame: (id: string, installDir: string, steamCmdRoot: string) =>
+  installGame: (id: string, steamCmdRoot: string) =>
     request<Activity>(`/api/v1/system/games/${encodeURIComponent(id)}/install`, {
       method: "POST",
-      body: JSON.stringify({ installDir, steamCmdRoot, confirm: true })
+      body: JSON.stringify({ steamCmdRoot, confirm: true })
     }),
   updateSystemSettings: (settings: SystemSettings) =>
     request<SystemSettings>("/api/v1/system/settings", {

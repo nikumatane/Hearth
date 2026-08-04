@@ -269,7 +269,10 @@ func TestInstalledBuildIDReadsSteamManifest(t *testing.T) {
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	service := &Service{config: config.GameConfig{InstallDir: installDir}}
+	service := &Service{config: config.GameConfig{
+		InstallDir: installDir,
+		SteamCmd:   filepath.Join(root, "steamcmd.exe"),
+	}}
 
 	if got := service.installedBuildID(); got != "24681357" {
 		t.Fatalf("installedBuildID() = %q; want 24681357", got)

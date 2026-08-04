@@ -15,8 +15,8 @@ import (
 
 func TestDiscoveryAndExplicitAdoption(t *testing.T) {
 	root := t.TempDir()
-	installDir := filepath.Join(root, "steamapps", "common", "PalServer")
 	steamRoot := filepath.Join(root, "steamcmd")
+	installDir := filepath.Join(steamRoot, "steamapps", "common", "PalServer")
 	settingsPath := filepath.Join(installDir, "Pal", "Saved", "Config", "WindowsServer", "PalWorldSettings.ini")
 	for _, path := range []string{
 		filepath.Join(installDir, "PalServer.exe"),
@@ -55,7 +55,7 @@ func TestDiscoveryAndExplicitAdoption(t *testing.T) {
 	manager.factory = func(config.GameConfig) (panel.Service, error) { return panel.NewDemoService(), nil }
 	document := manager.Management()
 	game := document.Games[0]
-	if game.State != "detected" || len(game.Candidates) != 1 || !game.CanAdopt {
+	if game.State != "detected" || len(game.Candidates) != 1 || !game.CanAdopt || !game.Candidates[0].CanAdopt {
 		t.Fatalf("game = %#v", game)
 	}
 	if _, err := manager.AdoptGame(palworldID, panel.AdoptGameRequest{CandidateID: game.Candidates[0].ID}); !errors.Is(err, panel.ErrInvalid) {
@@ -80,6 +80,47 @@ func TestDiscoveryAndExplicitAdoption(t *testing.T) {
 	}
 	if persistedConfig.Games.Palworld.InstallDir != installDir {
 		t.Fatalf("persisted config = %s", persisted)
+	}
+	wantExecutable := filepath.Join(installDir, "Pal", "Binaries", "Win64", "PalServer-Win64-Shipping-Cmd.exe")
+	if persistedConfig.Games.Palworld.Executable != wantExecutable {
+		t.Fatalf("persisted executable = %q, want %q", persistedConfig.Games.Palworld.Executable, wantExecutable)
+	}
+	if len(persistedConfig.Games.Palworld.StartArgs) != 3 {
+		t.Fatalf("persisted start args = %#v", persistedConfig.Games.Palworld.StartArgs)
+	}
+}
+
+func TestAdoptableCandidateRequiresSteamCMDDefaultLayout(t *testing.T) {
+	root := t.TempDir()
+	steamCmd := filepath.Join(root, "steamcmd.exe")
+	standard := panel.GameCandidate{
+		InstallDir:      filepath.Join(root, "steamapps", "common", "PalServer"),
+		SteamCmd:        steamCmd,
+		SettingsPresent: true,
+	}
+	if !candidateUsesSteamCMDDefaultLayout(standard) {
+		t.Fatal("standard SteamCMD candidate was not adoptable")
+	}
+	custom := standard
+	custom.InstallDir = filepath.Join(root, "custom", "PalServer")
+	if candidateUsesSteamCMDDefaultLayout(custom) {
+		t.Fatal("custom install candidate was adoptable")
+	}
+}
+
+func TestManagementMarksAdoptionPerCandidate(t *testing.T) {
+	manager := &Service{candidates: map[string][]panel.GameCandidate{
+		palworldID: {
+			{ID: "standard", SettingsPresent: true, SteamCmd: "steamcmd.exe", CanAdopt: true},
+			{ID: "custom", SettingsPresent: true, SteamCmd: "steamcmd.exe", CanAdopt: false},
+		},
+	}}
+	game := manager.managementLocked().Games[0]
+	if !game.CanAdopt || len(game.Candidates) != 2 {
+		t.Fatalf("game = %#v", game)
+	}
+	if !game.Candidates[0].CanAdopt || game.Candidates[1].CanAdopt {
+		t.Fatalf("candidate adoption flags = %#v", game.Candidates)
 	}
 }
 
@@ -140,10 +181,18 @@ func TestSystemSettingsRejectStaleRevisionAndGlobalProxy(t *testing.T) {
 
 func TestInstallValidationRejectsOverlapAndExistingFiles(t *testing.T) {
 	root := t.TempDir()
-	if err := validateInstallPaths(filepath.Join(root, "steamcmd", "PalServer"), filepath.Join(root, "steamcmd"), filepath.Join(root, "hearth", "config.json")); !errors.Is(err, panel.ErrInvalid) {
+	steamCmdRoot := filepath.Join(root, "steamcmd")
+	wantInstallDir := filepath.Join(steamCmdRoot, "steamapps", "common", "PalServer")
+	if got := palworldInstallDir(steamCmdRoot); got != wantInstallDir {
+		t.Fatalf("palworldInstallDir() = %q, want %q", got, wantInstallDir)
+	}
+	if err := validateInstallPaths(steamCmdRoot, filepath.Join(root, "hearth", "config.json")); err != nil {
+		t.Fatalf("validateInstallPaths() error = %v", err)
+	}
+	if err := validateInstallPaths(filepath.Join(root, "hearth", "steamcmd"), filepath.Join(root, "hearth", "config.json")); !errors.Is(err, panel.ErrInvalid) {
 		t.Fatalf("overlap error = %v", err)
 	}
-	installDir := filepath.Join(root, "PalServer")
+	installDir := wantInstallDir
 	if err := os.MkdirAll(installDir, 0o700); err != nil {
 		t.Fatal(err)
 	}

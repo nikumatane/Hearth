@@ -183,6 +183,7 @@ type GameCandidate struct {
 	InstallDir      string `json:"installDir"`
 	SteamCmd        string `json:"steamCmd,omitempty"`
 	SettingsPresent bool   `json:"settingsPresent"`
+	CanAdopt        bool   `json:"canAdopt"`
 	Detail          string `json:"detail"`
 }
 
@@ -227,7 +228,6 @@ type AdoptGameRequest struct {
 }
 
 type InstallGameRequest struct {
-	InstallDir   string `json:"installDir"`
 	SteamCmdRoot string `json:"steamCmdRoot"`
 	Confirm      bool   `json:"confirm"`
 }

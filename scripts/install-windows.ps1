@@ -44,7 +44,7 @@ $palworldRoot = Join-Path $SteamCmdRoot 'steamapps\common\PalServer'
 $steamCmd = Join-Path $SteamCmdRoot 'steamcmd.exe'
 $settingsFile = Join-Path $palworldRoot 'Pal\Saved\Config\WindowsServer\PalWorldSettings.ini'
 $defaultSettingsFile = Join-Path $palworldRoot 'DefaultPalWorldSettings.ini'
-$palworldExecutable = Join-Path $palworldRoot 'PalServer.exe'
+$palworldExecutable = Join-Path $palworldRoot 'Pal\Binaries\Win64\PalServer-Win64-Shipping-Cmd.exe'
 
 foreach ($requiredPath in @($sourceExecutable, $versionFile)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
@@ -177,7 +177,7 @@ try {
                 defaultSettingsFile = $defaultSettingsFile
                 executable          = $palworldExecutable
                 processName         = 'PalServer-Win64-Shipping-Cmd.exe'
-                startArgs           = @()
+                startArgs           = @('-useperfthreads', '-NoAsyncLoadingThread', '-UseMultithreadForDS')
                 backupDir           = (Join-Path $palworldRoot 'panel-backups')
                 backupRetentionDays = 30
                 backupMaxTotalGB    = 20

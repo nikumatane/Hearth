@@ -258,6 +258,12 @@ func (s *Service) AdoptGame(id string, request panel.AdoptGameRequest) (panel.Ma
 	if strings.TrimSpace(candidate.SteamCmd) == "" {
 		return panel.ManagedGame{}, fmt.Errorf("%w: 未找到与该安装配套的 steamcmd.exe", panel.ErrInvalid)
 	}
+	if !candidate.CanAdopt {
+		return panel.ManagedGame{}, fmt.Errorf(
+			"%w: 仅支持接管 SteamCMD 标准目录 steamapps\\common\\PalServer",
+			panel.ErrInvalid,
+		)
+	}
 	next := s.config
 	next.Games.Palworld = palworldConfig(candidate.InstallDir, candidate.SteamCmd, next.Games.Palworld)
 	next.Games.Palworld.Enabled = true
@@ -339,10 +345,16 @@ func (s *Service) Close() error {
 func palworldConfig(installDir, steamCmd string, previous config.GameConfig) config.GameConfig {
 	previous.InstallDir = filepath.Clean(installDir)
 	previous.SteamCmd = filepath.Clean(steamCmd)
-	previous.Executable = filepath.Join(previous.InstallDir, "PalServer.exe")
+	previous.Executable = filepath.Join(
+		previous.InstallDir,
+		"Pal", "Binaries", "Win64", "PalServer-Win64-Shipping-Cmd.exe",
+	)
 	previous.SettingsFile = filepath.Join(previous.InstallDir, "Pal", "Saved", "Config", "WindowsServer", "PalWorldSettings.ini")
 	previous.DefaultSettingsFile = filepath.Join(previous.InstallDir, "DefaultPalWorldSettings.ini")
 	previous.BackupDir = filepath.Join(previous.InstallDir, "panel-backups")
+	if len(previous.StartArgs) == 0 {
+		previous.StartArgs = []string{"-useperfthreads", "-NoAsyncLoadingThread", "-UseMultithreadForDS"}
+	}
 	if previous.ProcessName == "" {
 		previous.ProcessName = "PalServer-Win64-Shipping-Cmd.exe"
 	}
@@ -360,11 +372,19 @@ func candidateByID(candidates []panel.GameCandidate, id string) (panel.GameCandi
 
 func hasAdoptableCandidate(candidates []panel.GameCandidate) bool {
 	for _, candidate := range candidates {
-		if candidate.SettingsPresent && candidate.SteamCmd != "" {
+		if candidate.CanAdopt {
 			return true
 		}
 	}
 	return false
+}
+
+func candidateUsesSteamCMDDefaultLayout(candidate panel.GameCandidate) bool {
+	if !candidate.SettingsPresent || strings.TrimSpace(candidate.SteamCmd) == "" {
+		return false
+	}
+	expected := palworldInstallDir(filepath.Dir(candidate.SteamCmd))
+	return strings.EqualFold(filepath.Clean(candidate.InstallDir), expected)
 }
 
 func candidateState(candidates []panel.GameCandidate) string {

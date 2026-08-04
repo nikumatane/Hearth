@@ -81,10 +81,15 @@ func (s *Service) discoverLocked() {
 		if steamCmd == "" {
 			detail += "；未找到 steamcmd.exe"
 		}
-		s.candidates[palworldID] = append(s.candidates[palworldID], panel.GameCandidate{
+		candidate := panel.GameCandidate{
 			ID: candidateID(palworldID, directory), InstallDir: directory, SteamCmd: steamCmd,
 			SettingsPresent: settingsPresent, Detail: detail,
-		})
+		}
+		candidate.CanAdopt = candidateUsesSteamCMDDefaultLayout(candidate)
+		if settingsPresent && steamCmd != "" && !candidate.CanAdopt {
+			candidate.Detail += "；不在 SteamCMD 标准目录，暂不接管"
+		}
+		s.candidates[palworldID] = append(s.candidates[palworldID], candidate)
 	}
 	s.candidates[dstID] = make([]panel.GameCandidate, 0, len(dstDirectories))
 	for _, directory := range dstDirectories {

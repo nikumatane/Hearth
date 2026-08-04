@@ -53,17 +53,9 @@ func NewDemoService() *DemoService {
 				SaveDetection: "GameUserSettings.ini", LastBackupAt: &backup, Tags: []string{"Steam", "REST API"},
 				RESTEnabled: true, RESTAvailable: true,
 			},
-			"dont-starve-together": {
-				ID: "dont-starve-together", Name: "饥荒联机版", ShortName: "DST",
-				State: "stopped", Version: "721347", UpdateAvailable: false,
-				PlayersOnline: 0, PlayersMax: 6, PlayersMaxKnown: true, PlayersAvailable: true,
-				PlayersSource: "演示数据", CPUPercent: 0, MemoryGB: 0,
-				Port: 10999, LastBackupAt: &backup, Tags: []string{"Master", "Caves"},
-			},
 		},
 		activities: []Activity{
 			{ID: "a-1", GameID: "palworld", Title: "自动备份完成", Detail: "世界存档与服务器配置已归档", Status: "success", Stage: "完成", Progress: 100, CreatedAt: backup, UpdatedAt: backup},
-			{ID: "a-2", GameID: "dont-starve-together", Title: "服务器已停止", Detail: "由管理员执行", Status: "neutral", Stage: "完成", Progress: 100, CreatedAt: now.Add(-8 * time.Hour), UpdatedAt: now.Add(-8 * time.Hour)},
 			{ID: "a-3", GameID: "palworld", Title: "检测到新版本", Detail: "1.0.2.77142 可更新", Status: "warning", Stage: "完成", Progress: 100, CreatedAt: now.Add(-26 * time.Minute), UpdatedAt: now.Add(-26 * time.Minute)},
 		},
 		settings: demoPalworldSettings(now),
@@ -76,7 +68,7 @@ func (s *DemoService) Overview() Overview {
 	s.refreshDemoMetricsLocked()
 
 	games := make([]Game, 0, len(s.games))
-	for _, id := range []string{"palworld", "dont-starve-together"} {
+	for _, id := range []string{"palworld"} {
 		game := s.games[id]
 		game.CPUHistory = history(game.CPUPercent, 7.5, 24)
 		game.MemoryHistory = history(game.MemoryGB, .28, 24)
