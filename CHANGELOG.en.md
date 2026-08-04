@@ -23,6 +23,8 @@ Unreleased and moves to a version section when a formal package is built.
   `panel-update.log`.
 - The backend settings page can select the update channel using the existing revision check and
   atomic configuration replacement; the selection takes effect after restarting Hearth.
+- Fixed update-channel saves being rejected when a legacy configuration has no trusted proxies. An
+  explicitly saved empty list now means trust no proxy and retains that security boundary after restart.
 
 ## 1.1.0 - 2026-08-04
 

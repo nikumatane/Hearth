@@ -133,6 +133,27 @@ func TestLoadFileAndEnvironmentOverride(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadPreservesExplicitEmptyTrustedProxyList(t *testing.T) {
+	t.Setenv("HEARTH_DEMO", "false")
+	t.Setenv("HEARTH_ADMIN_PASSWORD", "secret1234")
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := Config{
+		Listen:            "127.0.0.1:8080",
+		TrustedProxyCIDRs: []string{},
+	}
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.TrustedProxyCIDRs == nil || len(loaded.TrustedProxyCIDRs) != 0 {
+		t.Fatalf("TrustedProxyCIDRs = %#v; want explicit empty list", loaded.TrustedProxyCIDRs)
+	}
+}
+
 func TestLoadRejectsUnknownUpdateChannel(t *testing.T) {
 	t.Setenv("HEARTH_DEMO", "true")
 	path := filepath.Join(t.TempDir(), "config.json")

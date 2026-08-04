@@ -231,7 +231,7 @@ func (s *Service) systemSettingsLocked(restartRequired bool) panel.SystemSetting
 		SteamCmdNoProgressMinutes: defaultInt(game.SteamCmdNoProgressMinutes, 30),
 		PalworldPort:              defaultInt(game.Port, 8211),
 		SecureCookies:             s.config.SecureCookies,
-		TrustedProxyCIDRs:         append([]string(nil), s.config.TrustedProxyCIDRs...),
+		TrustedProxyCIDRs:         append([]string{}, s.config.TrustedProxyCIDRs...),
 		UpdateChannel:             s.config.Update.Channel,
 		RestartRequired:           restartRequired,
 	}
@@ -522,9 +522,6 @@ func validateSystemSettingsPatch(patch panel.SystemSettingsPatch) error {
 	}
 	if patch.PalworldPort < 1 || patch.PalworldPort > 65_535 {
 		return fmt.Errorf("%w: Palworld 端口无效", panel.ErrInvalid)
-	}
-	if len(patch.TrustedProxyCIDRs) == 0 {
-		return fmt.Errorf("%w: 至少保留一个可信代理 CIDR", panel.ErrInvalid)
 	}
 	for _, value := range patch.TrustedProxyCIDRs {
 		prefix, err := netip.ParsePrefix(strings.TrimSpace(value))

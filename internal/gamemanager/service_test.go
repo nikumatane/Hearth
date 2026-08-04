@@ -154,6 +154,7 @@ func TestSystemSettingsRejectStaleRevisionAndGlobalProxy(t *testing.T) {
 	cfg := config.Config{
 		Management:        config.ManagementConfig{InstallRoot: filepath.Join(root, "games"), SteamCmdRoot: filepath.Join(root, "steamcmd")},
 		TrustedProxyCIDRs: []string{"127.0.0.0/8"},
+		Update:            config.UpdateConfig{Channel: "stable"},
 	}
 	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatal(err)
@@ -176,6 +177,26 @@ func TestSystemSettingsRejectStaleRevisionAndGlobalProxy(t *testing.T) {
 	patch.TrustedProxyCIDRs = []string{"0.0.0.0/0"}
 	if _, err := manager.UpdateSystemSettings(patch); !errors.Is(err, panel.ErrInvalid) {
 		t.Fatalf("global proxy error = %v", err)
+	}
+
+	patch.TrustedProxyCIDRs = []string{}
+	updated, err := manager.UpdateSystemSettings(patch)
+	if err != nil {
+		t.Fatalf("empty trusted proxy list error = %v", err)
+	}
+	if updated.TrustedProxyCIDRs == nil || len(updated.TrustedProxyCIDRs) != 0 {
+		t.Fatalf("TrustedProxyCIDRs = %#v; want explicit empty list", updated.TrustedProxyCIDRs)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted config.Config
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.TrustedProxyCIDRs == nil || len(persisted.TrustedProxyCIDRs) != 0 {
+		t.Fatalf("persisted TrustedProxyCIDRs = %#v; want explicit empty list", persisted.TrustedProxyCIDRs)
 	}
 }
 

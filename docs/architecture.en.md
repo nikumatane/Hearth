@@ -119,7 +119,8 @@ current small-server use case.
   rules.
 - Forwarded headers are accepted only when the direct peer belongs to `trustedProxyCidrs`. Hearth
   removes trusted proxies from the right side of `X-Forwarded-For`; malformed, oversized, or overly
-  long chains fall back to the direct peer. Only loopback proxies are trusted by default.
+  long chains fall back to the direct peer. Only loopback proxies are trusted by default; an explicitly
+  saved empty list trusts no proxy and ignores all forwarded headers.
 - Entering warning/critical attack severity is explicitly audited. Repeated throttle or deny-rule
   blocks write at most once per minute so an attacker cannot expand the audit file without bound.
   Login JSONL rotates at 5 MiB with one previous generation.

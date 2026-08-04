@@ -2097,7 +2097,7 @@ function gameAccent(id: string) {
               <div><h2>面板网络边界</h2><p>修改后需要重启 Hearth；错误代理范围可能影响登录来源判断。</p></div>
               <label class="toggle-setting"><input v-model="management.settings.secureCookies" type="checkbox" /><span>强制 Secure Cookie</span></label>
               <label><span>面板更新通道</span><select v-model="management.settings.updateChannel"><option value="stable">Stable（推荐）</option><option value="prerelease">Prerelease</option></select><small>切换后重启 Hearth 生效；任何通道都不会静默安装。</small></label>
-              <label class="wide"><span>可信代理 CIDR</span><textarea v-model="trustedProxyCIDRsText" rows="4"></textarea><small>每行一个最小范围；不要使用 0.0.0.0/0。</small></label>
+              <label class="wide"><span>可信代理 CIDR</span><textarea v-model="trustedProxyCIDRsText" rows="4"></textarea><small>每行一个最小范围；留空表示不信任任何代理，不要使用 0.0.0.0/0。</small></label>
             </div>
             <footer class="system-settings-actions">
               <div><AlertTriangle :size="16" />保存会保留一份 <code>config.json.previous</code>，不会自动重启面板或游戏。</div>

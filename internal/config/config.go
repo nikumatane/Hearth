@@ -64,7 +64,7 @@ type Config struct {
 	OperationAuditFile string           `json:"operationAuditFile,omitempty"`
 	IPRulesFile        string           `json:"ipRulesFile,omitempty"`
 	DeviceKeyFile      string           `json:"deviceKeyFile,omitempty"`
-	TrustedProxyCIDRs  []string         `json:"trustedProxyCidrs,omitempty"`
+	TrustedProxyCIDRs  []string         `json:"trustedProxyCidrs"`
 	Management         ManagementConfig `json:"management,omitempty"`
 	Update             UpdateConfig     `json:"update,omitempty"`
 	Games              GamesConfig      `json:"games"`

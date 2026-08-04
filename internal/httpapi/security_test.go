@@ -58,6 +58,23 @@ func TestProxyResolverOnlyTrustsForwardedProtoFromTrustedPeer(t *testing.T) {
 	}
 }
 
+func TestProxyResolverEmptyListTrustsNoForwardedHeaders(t *testing.T) {
+	resolver, err := newProxyResolver([]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = "127.0.0.1:4321"
+	request.Header.Set("X-Forwarded-For", "203.0.113.9")
+	request.Header.Set("X-Forwarded-Proto", "https")
+	if got := resolver.clientIP(request); got != "127.0.0.1" {
+		t.Fatalf("empty-list forwarded IP = %q; want direct peer", got)
+	}
+	if got := resolver.forwardedProto(request); got != "" {
+		t.Fatalf("empty-list forwarded proto = %q; want ignored header", got)
+	}
+}
+
 func TestKnownDeviceCookieIsSignedAndExpires(t *testing.T) {
 	manager, err := newDeviceCookieManager(filepath.Join(t.TempDir(), "device.key"))
 	if err != nil {

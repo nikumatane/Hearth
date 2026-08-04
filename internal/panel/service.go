@@ -227,7 +227,7 @@ func (s *DemoService) UpdateSystemSettings(patch SystemSettingsPatch) (SystemSet
 	settings.SteamCmdNoProgressMinutes = patch.SteamCmdNoProgressMinutes
 	settings.PalworldPort = patch.PalworldPort
 	settings.SecureCookies = patch.SecureCookies
-	settings.TrustedProxyCIDRs = append([]string(nil), patch.TrustedProxyCIDRs...)
+	settings.TrustedProxyCIDRs = append([]string{}, patch.TrustedProxyCIDRs...)
 	settings.UpdateChannel = patch.UpdateChannel
 	settings.RestartRequired = true
 	return settings, nil
