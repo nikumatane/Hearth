@@ -195,6 +195,43 @@ func TestDownloadAssetRemovesIncompleteTemporaryFile(t *testing.T) {
 	}
 }
 
+func TestDownloadAssetReportsMonotonicByteProgress(t *testing.T) {
+	payload := bytes.Repeat([]byte("progress"), 16<<10)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+	service := &Service{
+		downloadClient: server.Client(),
+		status:         panel.PanelUpdateStatus{State: "preparing", Stage: "下载更新包", Progress: 15},
+	}
+	var previous int64
+	path := filepath.Join(t.TempDir(), "package.zip")
+	err := service.downloadAssetWithProgress(
+		context.Background(),
+		releaseAsset{Name: "package.zip", URL: server.URL, Size: int64(len(payload))},
+		path,
+		int64(len(payload)),
+		func(written, total int64) {
+			if written < previous || written > total {
+				t.Errorf("progress = %d/%d after %d", written, total, previous)
+			}
+			previous = written
+			service.setDownloadProgress(written, total)
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if previous != int64(len(payload)) {
+		t.Fatalf("last progress = %d; want %d", previous, len(payload))
+	}
+	status := service.UpdateStatus()
+	if status.Progress != 40 || !strings.Contains(status.Message, "MiB") {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
 func testPackage(t *testing.T, version string) []byte {
 	t.Helper()
 	var output bytes.Buffer

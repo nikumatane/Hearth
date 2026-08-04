@@ -30,6 +30,9 @@ Unreleased and moves to a version section when a formal package is built.
 - GitHub Release asset downloads now have a separate ten-minute total timeout instead of sharing the
   30-second metadata limit, while retaining short connection/header and artifact-size bounds and
   immediately removing failed `.part` files.
+- Panel updates now map actual downloaded bytes to 15–40% with transferred-size detail. The UI wait
+  covers download, restart, and rollback, polls backend stages every second, and resumes tracking a
+  running update after a refresh or page re-entry.
 
 ## 1.1.0 - 2026-08-04
 

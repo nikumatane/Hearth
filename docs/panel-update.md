@@ -38,6 +38,8 @@ C:\ProgramData\Hearth\github-token.txt
 更新状态会显示在页面；开始、成功、失败与自动回滚写入“安全操作审计”。详细日志位于
 `C:\ProgramData\Hearth\updates\panel-update.log`。若自动回滚也失败，使用上一版 ZIP
 重新运行 `install-windows.ps1 -Force` 人工恢复；原 `config.json` 会继续保留。
+下载阶段按实际字节映射为 15%–40%，页面最多等待 15 分钟并每秒同步后端状态；刷新或重新
+进入页面后会继续跟踪尚未完成的更新，而不会把旧的 15% 状态当成最终结果。
 
 当前信任边界是固定 GitHub 仓库、GitHub TLS/访问控制、Release 制品摘要和随包校验文件。
 独立项目签名密钥能抵御更强的发布账号失陷场景，但也需要离线密钥、CI 签名和轮换流程，

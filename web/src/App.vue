@@ -75,6 +75,8 @@ type Page = "overview" | "game" | "settings" | "logs" | "access" | "system";
 type ActionName = "start" | "stop" | "restart" | "update" | "backup";
 type SettingsSource = "world" | "ini";
 const minimumPasswordLength = 10;
+const panelUpdateWaitTimeoutMs = 15 * 60_000;
+const panelHealthRequestTimeoutMs = 5_000;
 
 function passwordCharacterCount(password: string) {
   return Array.from(password).length;
@@ -470,10 +472,27 @@ function navigate(next: Page, gameId?: string) {
 async function loadPanelUpdate(silent = false) {
   if (!isAdmin.value) return;
   try {
-    panelUpdate.value = await api.panelUpdate();
+    const status = await api.panelUpdate();
+    panelUpdate.value = status;
+    if (status.state === "preparing" && status.latestVersion && !panelUpdateBusy.value) {
+      resumePanelUpdateWait(status.latestVersion);
+    }
   } catch (error) {
     if (!silent) showToast("error", error instanceof Error ? error.message : "面板更新状态读取失败");
   }
+}
+
+function resumePanelUpdateWait(target: string) {
+  if (panelUpdateBusy.value) return;
+  panelUpdateBusy.value = true;
+  void waitForPanelUpdate(target)
+    .catch(async (error) => {
+      await loadPanelUpdate(true);
+      showToast("error", error instanceof Error ? error.message : "面板更新状态跟踪失败");
+    })
+    .finally(() => {
+      panelUpdateBusy.value = false;
+    });
 }
 
 async function checkPanelUpdate() {
@@ -507,33 +526,40 @@ async function applyPanelUpdate() {
 }
 
 async function waitForPanelUpdate(target: string) {
-  const deadline = Date.now() + 120_000;
-  let observedOffline = false;
+  const deadline = Date.now() + panelUpdateWaitTimeoutMs;
   while (Date.now() < deadline) {
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    const controller = new AbortController();
+    const requestTimeout = window.setTimeout(() => controller.abort(), panelHealthRequestTimeoutMs);
+    let health: { status?: string; version?: string };
     try {
-      const response = await fetch("/api/v1/health", { cache: "no-store" });
+      const response = await fetch("/api/v1/health", { cache: "no-store", signal: controller.signal });
       if (!response.ok) continue;
-      const health = await response.json() as { status?: string; version?: string };
-      if (health.status === "ok" && health.version === target) {
-        window.location.reload();
-        return;
-      }
-      if (observedOffline && health.status === "ok") {
-        await loadPanelUpdate(true);
-        throw new Error(panelUpdate.value?.message || `新版本未生效，面板已恢复 ${health.version ?? "旧版本"}`);
-      }
-      await loadPanelUpdate(true);
-      if (panelUpdate.value?.state === "failed") {
-        throw new Error(`更新准备失败：${panelUpdate.value.message || panelUpdate.value.stage}`);
-      }
-    } catch (error) {
-      if (error instanceof Error && (error.message.startsWith("新版本未生效") || error.message.startsWith("更新准备失败"))) throw error;
-      observedOffline = true;
+      health = await response.json() as { status?: string; version?: string };
+    } catch {
+      continue;
+    } finally {
+      window.clearTimeout(requestTimeout);
+    }
+    if (health.status === "ok" && health.version === target) {
+      window.location.reload();
+      return;
+    }
+    await loadPanelUpdate(true);
+    const status = panelUpdate.value;
+    if (status?.state === "failed") {
+      throw new Error(`更新失败：${status.message || status.stage}`);
+    }
+    if (status?.state === "rolled_back") {
+      throw new Error(status.message || `新版本未生效，面板已恢复 ${health.version ?? "旧版本"}`);
+    }
+    if (status?.state === "succeeded" && status.currentVersion === target) {
+      window.location.reload();
+      return;
     }
   }
   await loadPanelUpdate(true);
-  throw new Error(panelUpdate.value?.message || "等待面板重启超时，请查看更新状态和 panel-update.log");
+  throw new Error(panelUpdate.value?.message || "等待更新完成超过 15 分钟，请查看面板更新状态和 panel-update.log");
 }
 
 function syncManagementInputs(document: Management) {
@@ -2153,13 +2179,13 @@ function gameAccent(id: string) {
               <footer class="panel-update-actions">
                 <small v-if="panelUpdate.checkedAt">上次检查：{{ formatDateTime(panelUpdate.checkedAt) }}</small>
                 <span v-else></span>
-                <button class="button secondary" :disabled="panelUpdateBusy" @click="checkPanelUpdate">
+                <button class="button secondary" :disabled="panelUpdateBusy || panelUpdate.state === 'checking' || panelUpdate.state === 'preparing'" @click="checkPanelUpdate">
                   <LoaderCircle v-if="panelUpdateBusy && panelUpdate.state !== 'preparing'" class="spin" :size="16" />
                   <RefreshCw v-else :size="16" />检查更新
                 </button>
                 <button
                   class="button primary"
-                  :disabled="panelUpdateBusy || !panelUpdate.updateAvailable || !panelUpdate.canApply"
+                  :disabled="panelUpdateBusy || panelUpdate.state === 'checking' || panelUpdate.state === 'preparing' || !panelUpdate.updateAvailable || !panelUpdate.canApply"
                   @click="applyPanelUpdate"
                 >
                   <LoaderCircle v-if="panelUpdate.state === 'preparing'" class="spin" :size="16" />

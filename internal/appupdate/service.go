@@ -413,10 +413,10 @@ func (s *Service) downloadAndStage(ctx context.Context, rel release, request pan
 	}
 	zipName := "hearth-windows-amd64-v" + rel.Version + ".zip"
 	zipPath := filepath.Join(stage, zipName)
-	if err := s.downloadAsset(ctx, rel.Assets[zipName], zipPath, maxDownloadSize); err != nil {
+	if err := s.downloadAssetWithProgress(ctx, rel.Assets[zipName], zipPath, maxDownloadSize, s.setDownloadProgress); err != nil {
 		return "", err
 	}
-	s.setProgress("校验 SHA-256", 45)
+	s.setProgress("校验 SHA-256", 45, "更新包下载完成，正在核对 GitHub 摘要与随包校验文件")
 	digest, err := fileSHA256(zipPath)
 	if err != nil {
 		return "", err
@@ -437,7 +437,7 @@ func (s *Service) downloadAndStage(ctx context.Context, rel release, request pan
 	if checksum != digest {
 		return "", errors.New("更新包摘要与随包校验文件不一致")
 	}
-	s.setProgress("安全解压更新包", 60)
+	s.setProgress("安全解压更新包", 60, "摘要校验通过，正在安全解压更新文件")
 	if err := extractPackage(zipPath, stage); err != nil {
 		return "", err
 	}
@@ -450,7 +450,7 @@ func (s *Service) downloadAndStage(ctx context.Context, rel release, request pan
 	if err != nil || strings.TrimSpace(string(versionData)) != rel.Version {
 		return "", errors.New("更新包内 VERSION 与 Release 版本不一致")
 	}
-	s.setProgress("生成回滚计划", 78)
+	s.setProgress("生成回滚计划", 78, "更新文件验证通过，正在准备独立更新器与自动回滚")
 	plan, err := s.newPlan(stage, rel.Version, request)
 	if err != nil {
 		return "", err
@@ -462,6 +462,10 @@ func (s *Service) downloadAndStage(ctx context.Context, rel release, request pan
 }
 
 func (s *Service) downloadAsset(ctx context.Context, asset releaseAsset, path string, limit int64) error {
+	return s.downloadAssetWithProgress(ctx, asset, path, limit, nil)
+}
+
+func (s *Service) downloadAssetWithProgress(ctx context.Context, asset releaseAsset, path string, limit int64, progress func(int64, int64)) error {
 	if asset.Size > limit {
 		return fmt.Errorf("release asset %s exceeds the size limit", asset.Name)
 	}
@@ -492,7 +496,11 @@ func (s *Service) downloadAsset(ctx context.Context, asset releaseAsset, path st
 			_ = os.Remove(temporaryPath)
 		}
 	}()
-	written, copyErr := io.Copy(file, io.LimitReader(response.Body, limit+1))
+	reader := io.Reader(io.LimitReader(response.Body, limit+1))
+	if progress != nil {
+		reader = &progressReader{reader: reader, total: asset.Size, progress: progress}
+	}
+	written, copyErr := io.Copy(file, reader)
 	closeErr := file.Close()
 	if copyErr != nil {
 		return safeRequestError("download "+asset.Name, copyErr)
@@ -508,6 +516,22 @@ func (s *Service) downloadAsset(ctx context.Context, asset releaseAsset, path st
 	}
 	completed = true
 	return nil
+}
+
+type progressReader struct {
+	reader   io.Reader
+	total    int64
+	written  int64
+	progress func(int64, int64)
+}
+
+func (r *progressReader) Read(buffer []byte) (int, error) {
+	count, err := r.reader.Read(buffer)
+	if count > 0 {
+		r.written += int64(count)
+		r.progress(r.written, r.total)
+	}
+	return count, err
 }
 
 func safeRequestError(action string, err error) error {
@@ -543,10 +567,28 @@ func (s *Service) token() string {
 	return strings.TrimSpace(strings.TrimPrefix(string(data), "\uFEFF"))
 }
 
-func (s *Service) setProgress(stage string, progress int) {
+func (s *Service) setProgress(stage string, progress int, message string) {
 	s.mu.Lock()
-	s.status.Stage, s.status.Progress = stage, progress
+	s.status.Stage, s.status.Progress, s.status.Message = stage, progress, message
 	s.mu.Unlock()
+}
+
+func (s *Service) setDownloadProgress(written, total int64) {
+	if total <= 0 {
+		return
+	}
+	progress := 15 + int(written*25/total)
+	if progress > 40 {
+		progress = 40
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status.State != "preparing" || progress <= s.status.Progress {
+		return
+	}
+	s.status.Stage = "下载更新包"
+	s.status.Progress = progress
+	s.status.Message = fmt.Sprintf("已下载 %.2f / %.2f MiB；完成后将自动校验并重启 Hearth", float64(written)/(1<<20), float64(total)/(1<<20))
 }
 
 func friendlyCheckError(err error, token bool) string {

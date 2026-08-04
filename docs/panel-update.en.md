@@ -41,6 +41,9 @@ The page displays progress. Start, success, failure, and automatic rollback are 
 audit events. Detailed output is stored in
 `C:\ProgramData\Hearth\updates\panel-update.log`. If rollback also fails, rerun the previous ZIP's
 `install-windows.ps1 -Force`; the existing `config.json` remains preserved.
+Actual downloaded bytes map to 15–40%. The page waits up to 15 minutes and polls backend state every
+second; refreshing or revisiting the page resumes tracking an unfinished update instead of treating
+an old 15% value as the final result.
 
 The 1.2.0 trust boundary is the fixed GitHub repository, GitHub TLS/access control, the Release asset
 digest, and sidecar checksum. A separate project signing key would protect a stronger account-
