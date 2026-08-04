@@ -53,17 +53,9 @@ func NewDemoService() *DemoService {
 				SaveDetection: "GameUserSettings.ini", LastBackupAt: &backup, Tags: []string{"Steam", "REST API"},
 				RESTEnabled: true, RESTAvailable: true,
 			},
-			"dont-starve-together": {
-				ID: "dont-starve-together", Name: "饥荒联机版", ShortName: "DST",
-				State: "stopped", Version: "721347", UpdateAvailable: false,
-				PlayersOnline: 0, PlayersMax: 6, PlayersMaxKnown: true, PlayersAvailable: true,
-				PlayersSource: "演示数据", CPUPercent: 0, MemoryGB: 0,
-				Port: 10999, LastBackupAt: &backup, Tags: []string{"Master", "Caves"},
-			},
 		},
 		activities: []Activity{
 			{ID: "a-1", GameID: "palworld", Title: "自动备份完成", Detail: "世界存档与服务器配置已归档", Status: "success", Stage: "完成", Progress: 100, CreatedAt: backup, UpdatedAt: backup},
-			{ID: "a-2", GameID: "dont-starve-together", Title: "服务器已停止", Detail: "由管理员执行", Status: "neutral", Stage: "完成", Progress: 100, CreatedAt: now.Add(-8 * time.Hour), UpdatedAt: now.Add(-8 * time.Hour)},
 			{ID: "a-3", GameID: "palworld", Title: "检测到新版本", Detail: "1.0.2.77142 可更新", Status: "warning", Stage: "完成", Progress: 100, CreatedAt: now.Add(-26 * time.Minute), UpdatedAt: now.Add(-26 * time.Minute)},
 		},
 		settings: demoPalworldSettings(now),
@@ -76,7 +68,7 @@ func (s *DemoService) Overview() Overview {
 	s.refreshDemoMetricsLocked()
 
 	games := make([]Game, 0, len(s.games))
-	for _, id := range []string{"palworld", "dont-starve-together"} {
+	for _, id := range []string{"palworld"} {
 		game := s.games[id]
 		game.CPUHistory = history(game.CPUPercent, 7.5, 24)
 		game.MemoryHistory = history(game.MemoryGB, .28, 24)
@@ -180,6 +172,60 @@ func (s *DemoService) WorldOption() (WorldOptionDocument, error) {
 
 func (s *DemoService) UpdateWorldOption(WorldOptionDocument) (WorldOptionDocument, error) {
 	return WorldOptionDocument{}, ErrNotFound
+}
+
+func (s *DemoService) Management() Management {
+	return Management{
+		Games: []ManagedGame{
+			{
+				ID: "palworld", Name: "幻兽帕鲁", ShortName: "PAL", Support: "available",
+				State: "managed", Detail: "演示模式中的已管理服务器",
+				InstallDir: `C:\GameServers\PalServer`, SteamCmd: `C:\SteamCMD\steamcmd.exe`,
+			},
+			{
+				ID: "dont-starve-together", Name: "饥荒联机版", ShortName: "DST",
+				Support: "planned", State: "not_installed", Detail: "计划在 1.3.0 提供生产适配器",
+			},
+		},
+		Settings: SystemSettings{
+			Revision: "demo", InstallRoot: `C:\GameServers`, SteamCmdRoot: `C:\SteamCMD`,
+			DiscoveryRoots:      []string{`C:\GameServers`, `C:\SteamCMD`},
+			BackupRetentionDays: 30, BackupMaxTotalGB: 20, ShutdownWaitSeconds: 30,
+			SteamCmdNoProgressMinutes: 30, PalworldPort: 8211,
+			TrustedProxyCIDRs: []string{"127.0.0.0/8", "::1/128"},
+		},
+	}
+}
+
+func (s *DemoService) RefreshDiscovery() (Management, error) {
+	return s.Management(), nil
+}
+
+func (s *DemoService) AdoptGame(string, AdoptGameRequest) (ManagedGame, error) {
+	return ManagedGame{}, ErrInvalid
+}
+
+func (s *DemoService) InstallGame(string, InstallGameRequest) (Activity, error) {
+	return Activity{}, ErrInvalid
+}
+
+func (s *DemoService) UpdateSystemSettings(patch SystemSettingsPatch) (SystemSettings, error) {
+	settings := s.Management().Settings
+	if patch.Revision != settings.Revision {
+		return SystemSettings{}, ErrInvalid
+	}
+	settings.InstallRoot = patch.InstallRoot
+	settings.SteamCmdRoot = patch.SteamCmdRoot
+	settings.DiscoveryRoots = append([]string(nil), patch.DiscoveryRoots...)
+	settings.BackupRetentionDays = patch.BackupRetentionDays
+	settings.BackupMaxTotalGB = patch.BackupMaxTotalGB
+	settings.ShutdownWaitSeconds = patch.ShutdownWaitSeconds
+	settings.SteamCmdNoProgressMinutes = patch.SteamCmdNoProgressMinutes
+	settings.PalworldPort = patch.PalworldPort
+	settings.SecureCookies = patch.SecureCookies
+	settings.TrustedProxyCIDRs = append([]string(nil), patch.TrustedProxyCIDRs...)
+	settings.RestartRequired = true
+	return settings, nil
 }
 
 func (s *DemoService) completeAction(id, action, activityID string) {

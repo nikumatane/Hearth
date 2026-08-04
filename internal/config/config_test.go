@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +21,56 @@ func TestLoadDemoDefaults(t *testing.T) {
 	}
 	if cfg.AdminPassword != "admin" {
 		t.Fatalf("AdminPassword = %q", cfg.AdminPassword)
+	}
+}
+
+func TestRevisionExcludesRuntimeAdminPassword(t *testing.T) {
+	first := Config{Listen: "127.0.0.1:8080", AdminPassword: "first-secret"}
+	second := first
+	second.AdminPassword = "second-secret"
+	firstRevision, err := Revision(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRevision, err := Revision(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstRevision != secondRevision {
+		t.Fatal("runtime administrator password changed the persisted revision")
+	}
+}
+
+func TestSaveRetainsPreviousAndOmitsRuntimeSecrets(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "config.json")
+	if err := os.WriteFile(path, []byte("old-config\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{
+		Listen: "127.0.0.1:8080", AdminPassword: "must-not-be-persisted", LogFile: "runtime.log",
+		Management: ManagementConfig{InstallRoot: filepath.Join(directory, "games")},
+	}
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	previous, err := os.ReadFile(path + ".previous")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(previous) != "old-config\n" {
+		t.Fatalf("previous = %q", previous)
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(current)
+	if strings.Contains(text, "must-not-be-persisted") || strings.Contains(text, "runtime.log") {
+		t.Fatalf("runtime secret was persisted: %s", text)
+	}
+	if !strings.Contains(text, `"installRoot"`) {
+		t.Fatalf("management settings missing: %s", text)
 	}
 }
 

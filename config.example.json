@@ -6,9 +6,15 @@
   "accessFile": "C:\\ProgramData\\Hearth\\member-credentials.json",
   "auditFile": "C:\\ProgramData\\Hearth\\login-audit.jsonl",
   "configAuditFile": "C:\\ProgramData\\Hearth\\config-audit.jsonl",
+  "operationAuditFile": "C:\\ProgramData\\Hearth\\operation-audit.jsonl",
   "ipRulesFile": "C:\\ProgramData\\Hearth\\ip-rules.json",
   "deviceKeyFile": "C:\\ProgramData\\Hearth\\device-cookie.key",
   "trustedProxyCidrs": ["127.0.0.0/8", "::1/128"],
+  "management": {
+    "installRoot": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common",
+    "steamCmdRoot": "C:\\SteamCMD",
+    "discoveryRoots": ["C:\\Users\\YOUR_USER\\Downloads"]
+  },
   "games": {
     "palworld": {
       "enabled": true,
@@ -16,9 +22,9 @@
       "steamCmd": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamcmd.exe",
       "settingsFile": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common\\PalServer\\Pal\\Saved\\Config\\WindowsServer\\PalWorldSettings.ini",
       "defaultSettingsFile": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common\\PalServer\\DefaultPalWorldSettings.ini",
-      "executable": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common\\PalServer\\PalServer.exe",
+      "executable": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common\\PalServer\\Pal\\Binaries\\Win64\\PalServer-Win64-Shipping-Cmd.exe",
       "processName": "PalServer-Win64-Shipping-Cmd.exe",
-      "startArgs": [],
+      "startArgs": ["-useperfthreads", "-NoAsyncLoadingThread", "-UseMultithreadForDS"],
       "backupDir": "C:\\Users\\YOUR_USER\\Downloads\\steamcmd\\steamapps\\common\\PalServer\\panel-backups",
       "backupRetentionDays": 30,
       "backupMaxTotalGB": 20,

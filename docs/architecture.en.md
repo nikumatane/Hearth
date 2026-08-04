@@ -31,6 +31,14 @@ Production is deployed as one Go binary:
 9. The panel log is read on demand and pinned on the log page. Start, update, and version-check logs
    use opaque file IDs linked to exact operations; the API reads only files referenced by current
    activity, while output-free operations such as configuration saves create no log reference.
+10. A shared game-management layer models instances as not installed, detected, managed, installing,
+    or error. Administrator onboarding occupies the dashboard only when no game is managed; later
+    management remains on a separate backend page.
+11. Startup discovery checks known exact locations and administrator-configured roots with depth,
+    directory, and candidate limits. Adoption and installation are separate confirmed administrator
+    actions; DST exposes planned status only until 1.3.0.
+12. Backend settings reject stale revisions, replace through a same-directory temporary file, and
+    retain `.previous`. Installation stages SteamCMD in isolation and never starts Palworld on completion.
 
 Frontend and backend remain separate in source code but merge for deployment. This is a better fit
 for one small ECS than Node SSR, Redis, and a standalone database.
@@ -52,6 +60,9 @@ current small-server use case.
 ## Security boundaries
 
 - Initial deployment listens only on Windows loopback and does not change the firewall.
+- Hearth can start without a game. Automatic discovery does not scan whole volumes, use the network,
+  create directories, or change configuration. Only an explicitly confirmed administrator install
+  may download into selected directories.
 - The panel password is stored in a file readable only by `SYSTEM` and Administrators.
 - The installer password is the sole administrator credential. Member passwords use individual
   random salts and PBKDF2-SHA256 digests in the same protected directory; plaintext is not stored.
@@ -71,8 +82,8 @@ current small-server use case.
 - Login audit records source IP, credential ID, result, reason, attack severity, consecutive failure
   count, and time, but never the submitted password. It contains only login, throttling, and deny-rule
   blocking events.
-- Security-operation audit uses structured actor and target fields for member-credential create,
-  update, and delete operations and IP allow/deny rule changes. `actorIp` identifies the management
+- Security-operation audit uses structured actor and target fields for member credentials, IP rules,
+  game adoption/install starts, and backend-settings saves. `actorIp` identifies the management
   request source; `targetIp` or `targetId` identifies the changed object. Password changes store only
   a boolean marker, never a password, digest, or previous value.
 - Parameter audit runs only after a successful `PalWorldSettings.ini` save and compares structured
@@ -175,3 +186,7 @@ current small-server use case.
 - Common actions work at mobile width.
 - The overview greeting uses the visitor browser's local time and updates while the page remains open.
 - `go test ./...`, frontend type checking, and Windows amd64 cross-compilation pass.
+- With zero games, administrators see onboarding and members have no install entry. With a managed
+  game, onboarding does not displace the dashboard and management stays on a separate backend page.
+- Adoption never overwrites existing settings or saves. Installation requires empty directories,
+  explicit confirmation, traceable stages, and leaves the game stopped when complete.

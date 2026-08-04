@@ -21,14 +21,14 @@
 
 ## Hearth 是什么
 
-Hearth 把前端和 API 合并为一个 Go 二进制，直接管理现有的 SteamCMD 游戏安装，
-不要求 Docker，也不迁移存档。它目前专注于 Windows 上的幻兽帕鲁服务器；饥荒联机版
-保留为后续适配器。
+Hearth 把前端和 API 合并为一个 Go 二进制，可以原地接管现有 SteamCMD 游戏安装，也可
+在管理员明确确认后安装新的 Palworld Dedicated Server。它不要求 Docker，不自动接管、
+启动或迁移存档。当前生产适配器专注于 Windows 帕鲁；饥荒联机版可探测但明确标记为后续适配器。
 
 适合这样的场景：
 
 - 只有几位固定朋友，不需要复杂的托管平台。
-- 游戏已经安装并拥有现有存档。
+- 游戏已经安装并拥有现有存档，或希望从空白 Windows 服务器开始受控安装。
 - 希望朋友能自行更新、重启或备份，不再等待服主远程操作。
 - 需要清楚的权限边界，但不想引入数据库和账号系统。
 
@@ -41,7 +41,7 @@ Hearth 把前端和 API 合并为一个 Go 二进制，直接管理现有的 Ste
 | 状态监控 | CPU、内存、磁盘、进程、版本、低频检查 Palworld public 分支、存档 ID、在线人数与昵称和运行时间 |
 | 访问控制 | 一个管理员密码、最多 20 个无用户名成员密码、权限模板、渐进限流与 IP 黑白名单 |
 | 审计 | 管理员可查看最近任务活动、任务日志、登录/攻击、安全操作和参数审计；不记录密码明文 |
-| 部署 | 单文件 Windows 程序、计划任务自启动、版本化安装包 |
+| 部署 | 单文件 Windows 程序、零游戏首次向导、只读探测/显式接管、管理员触发安装、计划任务自启动 |
 
 ### 权限模型
 
@@ -78,7 +78,7 @@ Hearth 把前端和 API 合并为一个 Go 二进制，直接管理现有的 Ste
 记录时间、操作者、来源 IP、配置版本和参数前后值。敏感参数只记录“已修改”，不写入值。
 记录保存在 `config-audit.jsonl`，达到 5 MiB 后轮转并保留一代；管理员可在“访问权限 →
 参数审计”查看最近 1000 条。`WorldOption.sav` 目前保持管理员专属，但不做逐参数审计。
-登录审计文件同样在 5 MiB 时轮转。成员凭据和 IP 规则的成功变更进入独立的
+登录审计文件同样在 5 MiB 时轮转。成员凭据、IP 规则、游戏接管/安装任务启动和后台设置的成功变更进入独立的
 `operation-audit.jsonl`：明确区分操作者来源 IP 与成员编号或目标 IP，不记录密码及摘要，
 保留最近 1000 条并采用相同的 5 MiB 单代轮转策略。
 
@@ -103,7 +103,7 @@ Hearth 只接受来自 `trustedProxyCidrs` 中代理的 `X-Forwarded-For` 和
 要求：
 
 - Windows Server 2022 或兼容版本
-- 已安装 SteamCMD 和 Palworld Dedicated Server
+- SteamCMD 和 Palworld Dedicated Server 可选；没有游戏时可先只安装 Hearth
 - 管理员 PowerShell
 
 构建安装包：
@@ -118,6 +118,7 @@ make windows-package
 hearth.exe
 install-windows.ps1
 uninstall-windows.ps1
+LICENSE
 VERSION
 THIRD_PARTY_NOTICES.md
 THIRD_PARTY_NOTICES.zh-CN.md
@@ -131,14 +132,19 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```
 
 安装器输入的是 Hearth 管理员密码，与帕鲁的 `AdminPassword` 相互独立。安装器只安装
-Hearth 和启动任务，不会停止、启动、更新或修改正在运行的 Palworld。
+Hearth 和启动任务，不会停止、启动、更新或修改正在运行的 Palworld。启动时的探测仅
+检查受限目录和文件元数据，不下载或接管游戏。
 
-## 第一次接管 Palworld
+## 第一次配置游戏
 
-1. 在现有方式下正常保存并关闭游戏。
-2. 安装 Hearth，在 ECS 内打开 `http://127.0.0.1:8080`。
-3. 从 Hearth 启动服务器；启动本身不依赖 REST API。
-4. 如果需要玩家数据以及运行中的安全停止、重启、更新和备份，再进入 INI 配置来源，
+1. 安装 Hearth，在 ECS 内打开 `http://127.0.0.1:8080`。
+2. 没有任何游戏时，管理员主页显示首次启动向导；已有至少一个游戏后，从独立的
+   “系统设置 → 游戏管理”进入。
+3. 现有 Palworld 请先正常保存并关闭，再选择探测结果并明确确认接管；新服务器只选择
+   SteamCMD 根目录，Palworld 固定安装到其标准 `steamapps\\common\\PalServer` 目录。
+   管理员确认后才开始联网安装，完成后不会自动启动。
+4. 从 Hearth 启动服务器；启动本身不依赖 REST API。
+5. 如果需要玩家数据以及运行中的安全停止、重启、更新和备份，再进入 INI 配置来源，
    设置非空 `AdminPassword`、启用 `RESTAPIEnabled` 并确认 `RESTAPIPort=8212`。
 
 Hearth 固定从 `127.0.0.1` 访问 Palworld REST API。REST 不可用时仍允许启动，
@@ -157,6 +163,8 @@ Palworld 进程。运行中的更新和备份仍要求 REST API，绝不会自�
 `backupMaxTotalGB` 调整。
 
 完整流程见 [Windows 帕鲁部署指南](docs/windows-palworld.md)。
+
+三个已确认的开源迭代边界见 [Hearth 路线图](ROADMAP.md)。
 
 ## 检查 Palworld 新版本
 
@@ -180,7 +188,7 @@ SteamCMD 进程树并提示重试。若 SteamCMD 在自更新后正常退出但�
 
 ## 本地开发
 
-要求 Go 1.26+、Node.js 22+ 和 pnpm 10+。
+要求 Go 1.26.5+、Node.js 22+ 和 pnpm 10+。
 
 ```bash
 pnpm --dir web install
@@ -216,6 +224,10 @@ HEARTH_DEMO=true HEARTH_ADMIN_PASSWORD='replace-me' ./bin/hearth
 
 - [Windows 帕鲁部署与升级](docs/windows-palworld.md)
 - [架构与安全边界](docs/architecture.md)
+- [1.1.0–1.3.0 路线图](ROADMAP.md)
+- [参与贡献](CONTRIBUTING.md)
+- [安全报告策略](SECURITY.md)
+- [MIT 开源许可证](LICENSE)
 - [版本变更记录](CHANGELOG.md)
 - [第三方组件声明](THIRD_PARTY_NOTICES.zh-CN.md)
 

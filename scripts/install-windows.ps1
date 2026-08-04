@@ -44,9 +44,9 @@ $palworldRoot = Join-Path $SteamCmdRoot 'steamapps\common\PalServer'
 $steamCmd = Join-Path $SteamCmdRoot 'steamcmd.exe'
 $settingsFile = Join-Path $palworldRoot 'Pal\Saved\Config\WindowsServer\PalWorldSettings.ini'
 $defaultSettingsFile = Join-Path $palworldRoot 'DefaultPalWorldSettings.ini'
-$palworldExecutable = Join-Path $palworldRoot 'PalServer.exe'
+$palworldExecutable = Join-Path $palworldRoot 'Pal\Binaries\Win64\PalServer-Win64-Shipping-Cmd.exe'
 
-foreach ($requiredPath in @($sourceExecutable, $versionFile, $steamCmd, $settingsFile, $defaultSettingsFile, $palworldExecutable)) {
+foreach ($requiredPath in @($sourceExecutable, $versionFile)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required file was not found: $requiredPath"
     }
@@ -61,6 +61,42 @@ $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyConti
 if ($null -ne $existingTask -and -not $Force) {
     throw "Scheduled task '$taskName' already exists. Re-run with -Force only when intentionally upgrading Hearth."
 }
+
+$preserveConfiguration = $Force -and (Test-Path -LiteralPath $configPath -PathType Leaf)
+$effectivePasswordPath = $passwordPath
+if ($preserveConfiguration) {
+    try {
+        $existingConfiguration = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json
+        $adminPasswordProperty = $existingConfiguration.PSObject.Properties['adminPasswordFile']
+        if ($null -ne $adminPasswordProperty -and -not [string]::IsNullOrWhiteSpace([string]$adminPasswordProperty.Value)) {
+            $effectivePasswordPath = [string]$adminPasswordProperty.Value
+        }
+        $gamesProperty = $existingConfiguration.PSObject.Properties['games']
+        $palworldProperty = if ($null -ne $gamesProperty) { $gamesProperty.Value.PSObject.Properties['palworld'] } else { $null }
+        if ($null -ne $palworldProperty) {
+            $existingPalworld = $palworldProperty.Value
+            $pathMappings = @{
+                installDir = 'palworldRoot'; steamCmd = 'steamCmd'; settingsFile = 'settingsFile'
+                defaultSettingsFile = 'defaultSettingsFile'; executable = 'palworldExecutable'
+            }
+            foreach ($propertyName in $pathMappings.Keys) {
+                $property = $existingPalworld.PSObject.Properties[$propertyName]
+                if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) { continue }
+                Set-Variable -Name $pathMappings[$propertyName] -Value ([string]$property.Value)
+            }
+        }
+    }
+    catch {
+        throw "Existing Hearth configuration is invalid; upgrade stopped without replacing it: $($_.Exception.Message)"
+    }
+}
+
+$palworldReady = @($steamCmd, $settingsFile, $defaultSettingsFile, $palworldExecutable) |
+    ForEach-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Where-Object { -not $_ } |
+    Measure-Object |
+    Select-Object -ExpandProperty Count
+$palworldReady = ($palworldReady -eq 0)
 
 Write-Host 'Set the web panel administrator password. This is separate from the Palworld AdminPassword.'
 $securePassword = Read-Host -AsSecureString 'Panel administrator password'
@@ -109,7 +145,11 @@ try {
     }
 
     $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
-    [IO.File]::WriteAllText($passwordPath, $plainPassword, $utf8WithoutBom)
+    $passwordDirectory = Split-Path -Parent $effectivePasswordPath
+    if (-not [string]::IsNullOrWhiteSpace($passwordDirectory)) {
+        New-Item -ItemType Directory -Path $passwordDirectory -Force | Out-Null
+    }
+    [IO.File]::WriteAllText($effectivePasswordPath, $plainPassword, $utf8WithoutBom)
 
     $configuration = [ordered]@{
         listen            = '127.0.0.1:8080'
@@ -123,16 +163,21 @@ try {
         ipRulesFile       = $ipRulesPath
         deviceKeyFile     = $deviceKeyPath
         trustedProxyCidrs = @('127.0.0.0/8', '::1/128')
+        management        = [ordered]@{
+            installRoot   = (Join-Path $SteamCmdRoot 'steamapps\common')
+            steamCmdRoot  = $SteamCmdRoot
+            discoveryRoots = @($SteamCmdRoot)
+        }
         games             = [ordered]@{
             palworld = [ordered]@{
-                enabled             = $true
+                enabled             = $palworldReady
                 installDir          = $palworldRoot
                 steamCmd            = $steamCmd
                 settingsFile        = $settingsFile
                 defaultSettingsFile = $defaultSettingsFile
                 executable          = $palworldExecutable
                 processName         = 'PalServer-Win64-Shipping-Cmd.exe'
-                startArgs           = @()
+                startArgs           = @('-useperfthreads', '-NoAsyncLoadingThread', '-UseMultithreadForDS')
                 backupDir           = (Join-Path $palworldRoot 'panel-backups')
                 backupRetentionDays = 30
                 backupMaxTotalGB    = 20
@@ -149,7 +194,12 @@ try {
             }
         }
     }
-    [IO.File]::WriteAllText($configPath, ($configuration | ConvertTo-Json -Depth 8), $utf8WithoutBom)
+    if (-not $preserveConfiguration) {
+        [IO.File]::WriteAllText($configPath, ($configuration | ConvertTo-Json -Depth 8), $utf8WithoutBom)
+    }
+    else {
+        Write-Host 'Existing config.json was preserved. New optional fields will use backward-compatible defaults.'
+    }
 }
 finally {
     if ($passwordPointer -ne [IntPtr]::Zero) {
@@ -184,12 +234,17 @@ Register-ScheduledTask `
 
 Start-ScheduledTask -TaskName $taskName
 
-$settingsText = [IO.File]::ReadAllText($settingsFile)
-if ($settingsText -notmatch 'RESTAPIEnabled\s*=\s*True') {
-    Write-Warning 'Palworld RESTAPIEnabled is not True. Safe update and running backup remain locked; stop/restart require an explicit force-stop risk confirmation.'
+if ($palworldReady) {
+    $settingsText = [IO.File]::ReadAllText($settingsFile)
+    if ($settingsText -notmatch 'RESTAPIEnabled\s*=\s*True') {
+        Write-Warning 'Palworld RESTAPIEnabled is not True. Safe update and running backup remain locked; stop/restart require an explicit force-stop risk confirmation.'
+    }
+    if ($settingsText -match 'AdminPassword\s*=\s*""') {
+        Write-Warning 'Palworld AdminPassword is empty. Set it before enabling safe management actions.'
+    }
 }
-if ($settingsText -match 'AdminPassword\s*=\s*""') {
-    Write-Warning 'Palworld AdminPassword is empty. Set it before enabling safe management actions.'
+else {
+    Write-Host 'No ready Palworld installation was found. Sign in as administrator to use the read-only discovery and installation wizard.'
 }
 
 $healthVerified = $false

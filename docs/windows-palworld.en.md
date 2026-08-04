@@ -23,15 +23,17 @@ exit before another update.
 
 ## Recommended first deployment
 
-Two approaches are possible:
+Existing servers have two approaches; a blank server has a third:
 
 1. Let Hearth recognize and take over the currently running process. Status works, but the first
    stop depends on whether that old process already has REST enabled.
 2. Save and stop the game normally using the existing method, then install Hearth, update the
    configuration, and start the server from the panel for the first time.
+3. Install Hearth alone, then let an administrator choose empty directories and confirm a Palworld
+   installation from onboarding.
 
-Use the second approach. It is shorter and avoids uncertainty during the first shutdown. Process
-recognition remains available for recovery.
+Use the second approach for an existing server and the third for a blank host. Hearth performs only
+bounded, read-only discovery at startup; it never downloads, adopts, or starts a game automatically.
 
 Before the formal install:
 
@@ -60,7 +62,7 @@ system-setting or `WorldOption.sav` access.
 
 The installer:
 
-1. Verifies SteamCMD, PalServer, the active settings file, and the default settings file.
+1. Read-only checks SteamCMD, PalServer, and settings files; missing game files do not block Hearth installation.
 2. Copies the panel to `C:\ProgramData\Hearth`.
 3. Creates a separate panel administrator-password file and restricts its ACL.
 4. Configures member-password digests, login, security-operation, and parameter audit, IP rules, and the device-cookie
@@ -87,6 +89,27 @@ The installer does not:
 - Run SteamCMD
 - Open a Windows Firewall port
 - Change RDP or SSH
+
+## First game management
+
+- With no manageable game, administrators see dashboard onboarding; members see only Not configured.
+- After at least one game is managed, subsequent discovery, adoption, and installation live under
+  System Settings → Game Management.
+- Rescan reads paths and metadata only within bounded known locations and administrator-provided
+  roots, with explicit depth, directory, and candidate limits.
+- Adoption requires selecting a stable candidate and confirming again. Hearth does not create or
+  overwrite `PalWorldSettings.ini` during adoption and never moves existing saves.
+- A new installation selects only the SteamCMD root. When `steamcmd.exe` is absent, that root must be
+  empty. Palworld is installed at the standard `steamapps\\common\\PalServer` path, which must also
+  be empty. Only after explicit confirmation does Hearth download SteamCMD from Valve and install
+  App `2394010`; the server remains stopped afterward.
+- SteamCMD is downloaded and extracted into an isolated same-volume staging directory. ZIP paths and
+  expanded size are checked before activation, so an interrupted download is not treated as valid.
+- DST is read-only detected and labeled Planned for 1.3.0; it cannot be installed or adopted yet.
+
+Backend settings use a revision and reject concurrent overwrites. A successful save retains
+`config.json.previous`. Runtime security changes are marked as requiring a Hearth restart and never
+restart a game process.
 
 ## Active-save detection
 
@@ -128,9 +151,9 @@ A unique password or passphrase of 14 characters or more is recommended in pract
 - A login row menu can deny that login source IP for 24 hours or allow it for seven days; complete rules are
   managed on the IP rules page. Deny rules reject before password computation, while allow rules
   still require the correct password.
-- Successful member-credential and IP-rule changes go to a separate Security operation audit with
-  distinct actor-source and target fields. They never appear as login attempts and never store a
-  password or password digest.
+- Successful member, IP-rule, game adoption/install-start, and backend-settings changes go to a
+  separate Security operation audit with distinct actor-source and target fields. They never appear
+  as login attempts and never store a password or password digest.
 - A successful login stores a signed known-device cookie. It receives only a separate throttle lane
   and cannot sign in without a password or access authenticated APIs. Refreshing the page still logs
   out the old session and asks for the password.
@@ -173,7 +196,7 @@ smallest practical network and restart Hearth. Do not trust the entire public In
 removes trusted proxies from the right side of the forwarded chain. A malformed header, a header
 over 1 KiB, or more than eight hops falls back to the TCP peer address.
 
-The official Palworld 1.0 REST API is not required to start `PalServer.exe`; it provides player data,
+The official Palworld 1.0 REST API is not required to start the game server process; it provides player data,
 save, and graceful shutdown. For player data and safe stop/restart/update/backup while running, the
 INI must include at least:
 
@@ -297,10 +320,11 @@ The update sequence is fixed:
 3. Call official `/v1/api/shutdown` and wait for process exit.
 4. Write saves and configuration to a separate ZIP.
 5. Confirm no other SteamCMD process exists.
-6. Run the fixed command:
+6. Run the fixed command and let SteamCMD use its standard
+   `steamapps\common\PalServer` directory:
 
    ```text
-   steamcmd.exe +force_install_dir <install-directory> +login anonymous +app_update 2394010 +quit
+   steamcmd.exe +login anonymous +app_update 2394010 +quit
    ```
 
 7. Wait for SteamCMD to explicitly report success for App ID `2394010`. If the first run only applies

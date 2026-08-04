@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func prepareManagedCommand(command *exec.Cmd) {
@@ -15,6 +16,27 @@ func prepareManagedCommand(command *exec.Cmd) {
 		CreationFlags: createNewProcessGroup,
 		HideWindow:    true,
 	}
+}
+
+func waitForSteamCMDExit(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastInspectErr error
+	for time.Now().Before(deadline) {
+		process, err := sampleProcess("steamcmd.exe")
+		if err != nil {
+			lastInspectErr = err
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		if !process.Running {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if lastInspectErr != nil {
+		return fmt.Errorf("SteamCMD exit could not be confirmed within %s: %w", timeout, lastInspectErr)
+	}
+	return fmt.Errorf("SteamCMD child process did not exit within %s", timeout)
 }
 
 func terminateManagedCommand(command *exec.Cmd) error {

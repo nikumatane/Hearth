@@ -9,7 +9,7 @@ func TestDemoServiceOverview(t *testing.T) {
 	service := NewDemoService()
 	overview := service.Overview()
 
-	if len(overview.Games) != 2 {
+	if len(overview.Games) != 1 {
 		t.Fatalf("len(Games) = %d", len(overview.Games))
 	}
 	if overview.Host.MemoryTotalGB != 8 {
@@ -33,7 +33,7 @@ func TestDemoServiceSerializesActionsPerGame(t *testing.T) {
 	if _, err := service.RunAction("palworld", ActionRequest{Action: "restart"}); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second RunAction() error = %v", err)
 	}
-	if _, err := service.RunAction("dont-starve-together", ActionRequest{Action: "start"}); err != nil {
-		t.Fatalf("other game RunAction() error = %v", err)
+	if _, err := service.RunAction("dont-starve-together", ActionRequest{Action: "start"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unsupported demo game RunAction() error = %v", err)
 	}
 }

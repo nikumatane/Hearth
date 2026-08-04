@@ -111,8 +111,114 @@ func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 	mux.HandleFunc("GET /api/v1/access/ip-rules", s.admin(s.listIPRules))
 	mux.HandleFunc("POST /api/v1/access/ip-rules", s.admin(s.createIPRule))
 	mux.HandleFunc("DELETE /api/v1/access/ip-rules/{id}", s.admin(s.deleteIPRule))
+	mux.HandleFunc("GET /api/v1/system/management", s.admin(s.management))
+	mux.HandleFunc("POST /api/v1/system/discovery", s.admin(s.refreshDiscovery))
+	mux.HandleFunc("POST /api/v1/system/games/{id}/adopt", s.admin(s.adoptGame))
+	mux.HandleFunc("POST /api/v1/system/games/{id}/install", s.admin(s.installGame))
+	mux.HandleFunc("PATCH /api/v1/system/settings", s.admin(s.updateSystemSettings))
 	mux.Handle("/", spaHandler())
 	return securityHeaders(mux), nil
+}
+
+func (s *server) managementService() (panel.ManagementService, error) {
+	manager, ok := s.service.(panel.ManagementService)
+	if !ok {
+		return nil, fmt.Errorf("%w: game management is unavailable", panel.ErrNotFound)
+	}
+	return manager, nil
+}
+
+func (s *server) management(w http.ResponseWriter, _ *http.Request) {
+	manager, err := s.managementService()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, manager.Management())
+}
+
+func (s *server) refreshDiscovery(w http.ResponseWriter, _ *http.Request) {
+	manager, err := s.managementService()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	document, err := manager.RefreshDiscovery()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, document)
+}
+
+func (s *server) adoptGame(w http.ResponseWriter, r *http.Request) {
+	manager, err := s.managementService()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	var request panel.AdoptGameRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "接管请求格式不正确")
+		return
+	}
+	game, err := manager.AdoptGame(r.PathValue("id"), request)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	s.recordManagementOperation(r, operationEventGameAdopted, operationTargetGame, game.ID)
+	writeJSON(w, http.StatusOK, game)
+}
+
+func (s *server) installGame(w http.ResponseWriter, r *http.Request) {
+	manager, err := s.managementService()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	var request panel.InstallGameRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "安装请求格式不正确")
+		return
+	}
+	activity, err := manager.InstallGame(r.PathValue("id"), request)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	s.recordManagementOperation(r, operationEventGameInstall, operationTargetGame, activity.GameID)
+	writeJSON(w, http.StatusAccepted, activity)
+}
+
+func (s *server) updateSystemSettings(w http.ResponseWriter, r *http.Request) {
+	manager, err := s.managementService()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	var patch panel.SystemSettingsPatch
+	if err := decodeJSON(r, &patch); err != nil {
+		writeError(w, http.StatusBadRequest, "后台设置格式不正确")
+		return
+	}
+	settings, err := manager.UpdateSystemSettings(patch)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	s.recordManagementOperation(r, operationEventSystemUpdated, operationTargetSystem, "hearth")
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *server) recordManagementOperation(r *http.Request, event, targetType, targetID string) {
+	identity, _ := principalFromContext(r.Context())
+	recordOperationAudit(s.operationAudits, operationAuditEntry{
+		ID: newAuditID(), Event: event,
+		ActorCredentialID: identity.CredentialID, ActorRole: identity.Role,
+		ActorIP: s.proxy.clientIP(r), TargetType: targetType, TargetID: targetID,
+		Success: true, CreatedAt: time.Now(),
+	})
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
@@ -509,6 +615,11 @@ func (s *server) logFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := filepath.Join(s.config.Games.Palworld.InstallDir, "panel-logs", id)
+	if locator, ok := s.service.(panel.TaskLogLocator); ok {
+		if located, found := locator.TaskLogPath(id); found {
+			path = located
+		}
+	}
 	log, err := readLogTail(id, label, path)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "日志不存在")

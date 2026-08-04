@@ -12,7 +12,9 @@ import {
   CloudCog,
   Cpu,
   DatabaseBackup,
+  Download,
   Flame,
+  FolderSearch,
   Gamepad2,
   HardDrive,
   History,
@@ -49,6 +51,8 @@ import {
   type LoginAuditEntry,
   type LogRef,
   type Logs,
+  type Management,
+  type ManagedGame,
   type MemberCredential,
   type OperationAuditEntry,
   type Overview,
@@ -66,7 +70,7 @@ import {
   type ParsedWorldOption
 } from "./worldOptionCodec";
 
-type Page = "overview" | "game" | "settings" | "logs" | "access";
+type Page = "overview" | "game" | "settings" | "logs" | "access" | "system";
 type ActionName = "start" | "stop" | "restart" | "update" | "backup";
 type SettingsSource = "world" | "ini";
 const minimumPasswordLength = 10;
@@ -162,6 +166,14 @@ const editingMemberId = ref("");
 const editingMemberPassword = ref("");
 const editingMemberPermissions = ref<Permission[]>([]);
 const deletingMemberId = ref("");
+const management = ref<Management | null>(null);
+const managementLoading = ref(false);
+const managementSaving = ref(false);
+const systemTab = ref<"games" | "settings">("games");
+const installSteamCmdRoot = ref("");
+const installConsent = ref(false);
+const discoveryRootsText = ref("");
+const trustedProxyCIDRsText = ref("");
 const currentTime = ref(new Date());
 let pollTimer: number | undefined;
 let toastTimer: number | undefined;
@@ -188,6 +200,15 @@ const runningCount = computed(
 const palworldGame = computed(() =>
   overview.value?.games.find((game) => game.id === "palworld")
 );
+const steamCmdPalworldPath = computed(() => {
+  const root = installSteamCmdRoot.value.trim().replace(/[\\/]+$/, "");
+  return root ? `${root}\\steamapps\\common\\PalServer` : "SteamCMD\\steamapps\\common\\PalServer";
+});
+
+const hasManagedGames = computed(() => (overview.value?.games.length ?? 0) > 0);
+const palworldManagement = computed(() =>
+  management.value?.games.find((game) => game.id === "palworld")
+);
 
 const restAPIEnabled = computed(() => {
   for (const group of iniSettings.value?.groups ?? []) {
@@ -199,6 +220,9 @@ const restAPIEnabled = computed(() => {
 
 const playerSummary = computed(() => {
   const games = overview.value?.games ?? [];
+  if (games.length === 0) {
+    return { online: null as number | null, max: null, source: "尚未接入游戏" };
+  }
   const max = games.reduce((sum, game) => sum + game.playersMax, 0);
   const maxKnown = games.every((game) => game.playersMaxKnown);
   const unavailable = games.some(
@@ -271,6 +295,7 @@ const filteredGroups = computed(() => {
 });
 
 const pageTitle = computed(() => {
+	if (page.value === "system") return "系统设置与游戏管理";
   if (page.value === "settings") return "帕鲁服务器配置";
   if (page.value === "logs") return "任务日志";
   if (page.value === "access") return "访问权限";
@@ -328,6 +353,7 @@ async function login() {
     loggedIn.value = true;
     loginPassword.value = "";
     await refresh();
+    if (session.role === "admin") await loadManagement();
     startPolling();
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : "登录失败";
@@ -349,6 +375,7 @@ async function logout() {
   operationAuditEntries.value = [];
   configAuditEntries.value = [];
   ipRules.value = [];
+  management.value = null;
   if (pollTimer) window.clearTimeout(pollTimer);
   pollTimer = undefined;
 }
@@ -383,6 +410,9 @@ async function refresh(silent = false) {
       games: nextOverview.games ?? [],
       activities: nextOverview.activities ?? []
     };
+    if (isAdmin.value && (page.value === "system" || nextOverview.games.length === 0)) {
+      void loadManagement(true);
+    }
     if (logs.value) {
       logs.value = { ...logs.value, activities: nextOverview.activities ?? [] };
       syncRunningTaskLogs(nextOverview.activities ?? []);
@@ -414,7 +444,7 @@ function navigate(next: Page, gameId?: string) {
     showToast("error", "当前成员密码没有修改帕鲁玩法参数的权限");
     return;
   }
-  if (!isAdmin.value && (next === "logs" || next === "access")) {
+  if (!isAdmin.value && (next === "logs" || next === "access" || next === "system")) {
     showToast("error", "仅管理员可以访问该页面");
     return;
   }
@@ -428,6 +458,93 @@ function navigate(next: Page, gameId?: string) {
   if (next === "settings" && !settings.value) void loadSettings();
   if (next === "logs") void loadLogs(enteringLogs);
   if (next === "access") void loadAccess();
+  if (next === "system") void loadManagement();
+}
+
+function syncManagementInputs(document: Management) {
+  const settings = document.settings;
+  installSteamCmdRoot.value = installSteamCmdRoot.value || settings.steamCmdRoot;
+  discoveryRootsText.value = settings.discoveryRoots.join("\n");
+  trustedProxyCIDRsText.value = settings.trustedProxyCidrs.join("\n");
+}
+
+async function loadManagement(silent = false) {
+  if (!isAdmin.value || managementLoading.value) return;
+  managementLoading.value = true;
+  try {
+    const document = await api.management();
+    management.value = document;
+    syncManagementInputs(document);
+  } catch (error) {
+    if (!silent) showToast("error", error instanceof Error ? error.message : "游戏管理数据加载失败");
+  } finally {
+    managementLoading.value = false;
+  }
+}
+
+async function refreshDiscovery() {
+  managementLoading.value = true;
+  try {
+    const document = await api.refreshDiscovery();
+    management.value = document;
+    syncManagementInputs(document);
+    showToast("success", "只读探测已完成，没有修改游戏文件");
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "探测失败");
+  } finally {
+    managementLoading.value = false;
+  }
+}
+
+async function adoptManagedGame(game: ManagedGame, candidateId: string) {
+  managementSaving.value = true;
+  try {
+    await api.adoptGame(game.id, candidateId);
+    showToast("success", "现有 Palworld 已接管；没有修改存档或游戏配置");
+    await Promise.all([refresh(true), loadManagement(true)]);
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "接管失败");
+  } finally {
+    managementSaving.value = false;
+  }
+}
+
+async function installManagedGame(game: ManagedGame) {
+  if (!installConsent.value) {
+    showToast("error", "请先确认安装会联网下载并写入 SteamCMD 目录");
+    return;
+  }
+  managementSaving.value = true;
+  try {
+    await api.installGame(game.id, installSteamCmdRoot.value);
+    showToast("success", "安装任务已开始；完成后不会自动启动游戏");
+    installConsent.value = false;
+    await Promise.all([refresh(true), loadManagement(true)]);
+    schedulePolling(1000);
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "安装任务提交失败");
+  } finally {
+    managementSaving.value = false;
+  }
+}
+
+async function saveSystemSettings() {
+  if (!management.value) return;
+  managementSaving.value = true;
+  try {
+    const updated = await api.updateSystemSettings({
+      ...management.value.settings,
+      discoveryRoots: discoveryRootsText.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
+      trustedProxyCidrs: trustedProxyCIDRsText.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
+    });
+    management.value = { ...management.value, settings: updated };
+    syncManagementInputs(management.value);
+    showToast("success", updated.restartRequired ? "设置已保存，相关运行参数将在重启 Hearth 后生效" : "设置已保存");
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "后台设置保存失败");
+  } finally {
+    managementSaving.value = false;
+  }
 }
 
 async function loadLogs(resetTabs = false) {
@@ -904,6 +1021,16 @@ function stateLabel(state: Game["state"]) {
   }[state];
 }
 
+function managementStateLabel(state: ManagedGame["state"]) {
+  return {
+    managed: "已管理",
+    detected: "已发现",
+    not_installed: "未安装",
+    installing: "安装中",
+    error: "需要处理"
+  }[state];
+}
+
 function versionCheckLabel(game: Game) {
   if (game.versionCheck === "unchecked") return "等待自动检查服务端版本";
   if (game.versionCheck === "checking") return "正在检查 Palworld 服务端版本";
@@ -1066,11 +1193,17 @@ function operationActionLabel(entry: OperationAuditEntry) {
     case "member_deleted": return "删除成员凭据";
     case "ip_rule_added": return `保存${entry.ruleKind === "deny" ? "黑" : "白"}名单规则`;
     case "ip_rule_removed": return `删除${entry.ruleKind === "deny" ? "黑" : "白"}名单规则`;
+    case "game_adopted": return "接管游戏服务器";
+    case "game_install_started": return "启动游戏安装";
+    case "system_settings_updated": return "保存后台设置";
   }
 }
 
 function operationTargetLabel(entry: OperationAuditEntry) {
-  return entry.targetType === "member" ? entry.targetId || "未知成员" : entry.targetIp || "未知 IP";
+  if (entry.targetType === "member") return entry.targetId || "未知成员";
+  if (entry.targetType === "ip_rule") return entry.targetIp || "未知 IP";
+  if (entry.targetType === "game") return entry.targetId || "未知游戏";
+  return "Hearth";
 }
 
 function operationDetailLabel(entry: OperationAuditEntry) {
@@ -1093,6 +1226,9 @@ function operationDetailLabel(entry: OperationAuditEntry) {
     return entry.expiresAt ? `有效至 ${formatDateTime(entry.expiresAt)}` : "永久生效";
   }
   if (entry.event === "member_deleted") return "成员凭据已删除，原会话已失效";
+  if (entry.event === "game_adopted") return "已保存经确认的现有安装路径";
+  if (entry.event === "game_install_started") return "安装任务已进入队列，完成后不会自动启动";
+  if (entry.event === "system_settings_updated") return "配置已保存；页面会提示是否需要重启 Hearth";
   return "IP 规则已删除";
 }
 
@@ -1214,6 +1350,10 @@ function gameAccent(id: string) {
           <ShieldCheck :size="18" />
           <span>访问权限</span>
         </button>
+        <button v-if="isAdmin" :class="{ active: page === 'system' }" @click="navigate('system')">
+          <Settings2 :size="18" />
+          <span>系统设置</span>
+        </button>
       </nav>
 
       <div class="sidebar-status-wrap">
@@ -1250,7 +1390,7 @@ function gameAccent(id: string) {
             <ArrowLeft :size="17" />
           </button>
           <div>
-            <span>{{ page === "overview" ? "控制台" : "游戏服务器" }}</span>
+            <span>{{ page === "overview" ? "控制台" : page === "system" ? "系统管理" : "游戏服务器" }}</span>
             <strong>{{ pageTitle }}</strong>
           </div>
         </div>
@@ -1285,6 +1425,27 @@ function gameAccent(id: string) {
               <RefreshCw :size="16" :class="{ spin: loading }" />
               刷新状态
             </button>
+          </section>
+
+          <section v-if="!hasManagedGames" class="onboarding-card panel-card">
+            <div class="onboarding-icon"><FolderSearch :size="30" /></div>
+            <div>
+              <span class="eyebrow">FIRST SERVER</span>
+              <h2>{{ isAdmin ? "还没有接入游戏服务器" : "游戏服务器尚未配置" }}</h2>
+              <p v-if="isAdmin">
+                Hearth 只完成了只读探测，没有自动下载、安装或修改任何游戏文件。
+                可以检查发现的现有 Palworld，或者确认目录后开始新安装。
+              </p>
+              <p v-else>请联系管理员完成现有服务器接管或新服务器安装。</p>
+              <div v-if="isAdmin" class="onboarding-actions">
+                <button class="button primary" @click="navigate('system')">
+                  <FolderSearch :size="16" />打开启动向导
+                </button>
+                <span v-if="palworldManagement?.state === 'detected'">
+                  已发现 {{ palworldManagement.candidates?.length ?? 0 }} 个 Palworld 候选
+                </span>
+              </div>
+            </div>
           </section>
 
           <section class="metric-grid">
@@ -1337,11 +1498,11 @@ function gameAccent(id: string) {
               <div :class="['player-data-status', { unavailable: playerSummary.online === null }]">
                 <span></span>{{ playerSummary.source }}
               </div>
-              <footer>任务期间每 1 秒刷新</footer>
+              <footer>{{ hasManagedGames ? "任务期间每 1 秒刷新" : "配置游戏后显示在线数据" }}</footer>
             </article>
           </section>
 
-          <section class="section-block">
+          <section v-if="hasManagedGames" class="section-block">
             <div class="section-heading">
               <div>
                 <h2>游戏服务器</h2>
@@ -1728,6 +1889,137 @@ function gameAccent(id: string) {
           </section>
         </template>
 
+        <template v-else-if="page === 'system' && isAdmin">
+          <section class="settings-header system-header">
+            <div>
+              <span class="eyebrow">HEARTH · ADMIN ONLY</span>
+              <h1>系统设置与游戏管理</h1>
+              <p>探测始终只读；接管和安装只会在管理员明确确认后执行。</p>
+            </div>
+            <button class="button secondary" :disabled="managementLoading" @click="refreshDiscovery">
+              <FolderSearch :size="16" :class="{ spin: managementLoading }" />重新探测
+            </button>
+          </section>
+
+          <section class="access-tabs system-tabs" aria-label="系统设置分页">
+            <button :class="{ active: systemTab === 'games' }" @click="systemTab = 'games'">
+              <Gamepad2 :size="16" />游戏管理
+            </button>
+            <button :class="{ active: systemTab === 'settings' }" @click="systemTab = 'settings'">
+              <Settings2 :size="16" />后台设置
+            </button>
+          </section>
+
+          <div v-if="managementLoading && !management" class="page-loader">
+            <LoaderCircle class="spin" :size="22" />正在读取游戏管理状态…
+          </div>
+
+          <section v-else-if="management && systemTab === 'games'" class="management-grid">
+            <article
+              v-for="game in management.games"
+              :key="game.id"
+              class="panel-card management-game-card"
+            >
+              <header>
+                <div class="management-monogram">{{ game.shortName }}</div>
+                <div>
+                  <span :class="['management-state', game.state]">{{ managementStateLabel(game.state) }}</span>
+                  <h2>{{ game.name }}</h2>
+                  <p>{{ game.detail }}</p>
+                </div>
+                <span v-if="game.support === 'planned'" class="planned-chip">1.3.0</span>
+              </header>
+
+              <div v-if="game.state === 'managed'" class="managed-paths">
+                <label><span>游戏目录</span><code>{{ game.installDir }}</code></label>
+                <label><span>SteamCMD</span><code>{{ game.steamCmd }}</code></label>
+              </div>
+
+              <div v-if="game.candidates?.length" class="candidate-list">
+                <strong>只读探测结果</strong>
+                <div v-for="candidate in game.candidates" :key="candidate.id" class="candidate-row">
+                  <div>
+                    <code>{{ candidate.installDir }}</code>
+                    <span>{{ candidate.detail }}</span>
+                  </div>
+                  <button
+                    v-if="game.support === 'available' && game.state !== 'managed'"
+                    class="button secondary small"
+                    :disabled="managementSaving || !candidate.canAdopt"
+                    :title="!candidate.settingsPresent ? '缺少 PalWorldSettings.ini，不会自动创建' : !candidate.steamCmd ? '未找到 steamcmd.exe' : !candidate.canAdopt ? '仅支持 SteamCMD 标准目录' : '确认后只保存管理路径'"
+                    @click="adoptManagedGame(game, candidate.id)"
+                  >确认接管</button>
+                </div>
+              </div>
+
+              <form
+                v-if="game.support === 'available' && game.state !== 'managed'"
+                class="install-form"
+                @submit.prevent="installManagedGame(game)"
+              >
+                <div class="install-form-head">
+                  <Download :size="18" />
+                  <div><strong>安装新服务器</strong><span>安装完成后保持停止，不会自动开放防火墙。</span></div>
+                </div>
+                <label>
+                  <span>SteamCMD 目录</span>
+                  <input v-model="installSteamCmdRoot" autocomplete="off" placeholder="C:\SteamCMD" />
+                  <small>目录中已有 steamcmd.exe 时直接使用；空目录会从 Valve 官方地址下载。Palworld 固定安装到 <code>{{ steamCmdPalworldPath }}</code>。</small>
+                </label>
+                <label class="install-consent">
+                  <input v-model="installConsent" type="checkbox" />
+                  <span>我确认联网下载，并向 SteamCMD 目录及其 steamapps 子目录写入文件。</span>
+                </label>
+                <button
+                  class="button primary"
+                  :disabled="managementSaving || game.state === 'installing' || !installSteamCmdRoot || !installConsent"
+                >
+                  <LoaderCircle v-if="game.state === 'installing'" class="spin" :size="16" />
+                  <Download v-else :size="16" />
+                  {{ game.state === "installing" ? "安装中…" : "确认并开始安装" }}
+                </button>
+              </form>
+
+              <div v-if="game.support === 'planned'" class="planned-note">
+                <Clock3 :size="17" />当前只展示探测结果，不提供安装或接管，避免产生无法管理的半成品服务器。
+              </div>
+            </article>
+          </section>
+
+          <form
+            v-else-if="management && systemTab === 'settings'"
+            class="panel-card system-settings-form"
+            @submit.prevent="saveSystemSettings"
+          >
+            <div class="system-settings-section">
+              <div><h2>安装与探测</h2><p>启动时只读取这些有边界的目录，不扫描整块磁盘。</p></div>
+              <label><span>默认游戏探测根目录</span><input v-model="management.settings.installRoot" autocomplete="off" /><small>用于发现已有游戏；新安装仍使用 SteamCMD 的标准 steamapps 目录。</small></label>
+              <label><span>默认 SteamCMD 目录</span><input v-model="management.settings.steamCmdRoot" autocomplete="off" /></label>
+              <label class="wide"><span>额外探测根目录</span><textarea v-model="discoveryRootsText" rows="4"></textarea><small>每行一个绝对路径，最多向下探测 5 层。</small></label>
+            </div>
+            <div class="system-settings-section">
+              <div><h2>Palworld 运维</h2><p>保存后需要重启 Hearth，正在运行的游戏不会被自动重启。</p></div>
+              <label><span>备份保留天数</span><input v-model.number="management.settings.backupRetentionDays" type="number" min="1" max="36500" /></label>
+              <label><span>备份容量上限 GiB</span><input v-model.number="management.settings.backupMaxTotalGB" type="number" min="1" max="1000000" /></label>
+              <label><span>安全关闭等待秒数</span><input v-model.number="management.settings.shutdownWaitSeconds" type="number" min="5" max="600" /></label>
+              <label><span>SteamCMD 无进展超时</span><input v-model.number="management.settings.steamCmdNoProgressMinutes" type="number" min="1" max="10080" /></label>
+              <label><span>Palworld 游戏端口</span><input v-model.number="management.settings.palworldPort" type="number" min="1" max="65535" /></label>
+            </div>
+            <div class="system-settings-section">
+              <div><h2>面板网络边界</h2><p>修改后需要重启 Hearth；错误代理范围可能影响登录来源判断。</p></div>
+              <label class="toggle-setting"><input v-model="management.settings.secureCookies" type="checkbox" /><span>强制 Secure Cookie</span></label>
+              <label class="wide"><span>可信代理 CIDR</span><textarea v-model="trustedProxyCIDRsText" rows="4"></textarea><small>每行一个最小范围；不要使用 0.0.0.0/0。</small></label>
+            </div>
+            <footer class="system-settings-actions">
+              <div><AlertTriangle :size="16" />保存会保留一份 <code>config.json.previous</code>，不会自动重启面板或游戏。</div>
+              <button class="button primary" :disabled="managementSaving">
+                <LoaderCircle v-if="managementSaving" class="spin" :size="16" />
+                <Save v-else :size="16" />保存后台设置
+              </button>
+            </footer>
+          </form>
+        </template>
+
         <template v-else-if="page === 'access' && isAdmin">
           <section class="access-header settings-header">
             <div>
@@ -2066,7 +2358,7 @@ function gameAccent(id: string) {
             <div v-else class="access-empty">
               <ShieldCheck :size="24" />
               <strong>还没有安全操作记录</strong>
-              <span>下一次成功修改成员凭据或 IP 规则后会显示在这里。</span>
+              <span>下一次成功修改成员凭据、IP 规则、游戏接管/安装或后台设置后会显示在这里。</span>
             </div>
           </section>
 

@@ -81,6 +81,59 @@ func TestOverviewExposesOnlyOnlinePlayerDisplayNames(t *testing.T) {
 	}
 }
 
+func TestGameManagementIsAdminAuthenticatedAndShowsPlannedDST(t *testing.T) {
+	handler := newTestHandler(t, config.Config{AdminPassword: "correct"})
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/system/management", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", unauthorized.Code)
+	}
+	cookie := loginTestHandler(t, handler)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/system/management", nil)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("management status = %d body = %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"id":"palworld"`) ||
+		!strings.Contains(body, `"id":"dont-starve-together"`) ||
+		!strings.Contains(body, `"support":"planned"`) {
+		t.Fatalf("management body = %s", body)
+	}
+}
+
+func TestSystemSettingsSaveIsStrictAndAudited(t *testing.T) {
+	handler := newTestHandler(t, config.Config{AdminPassword: "correct"})
+	cookie := loginTestHandler(t, handler)
+	patch := panel.SystemSettingsPatch{
+		Revision: "demo", InstallRoot: `C:\GameServers`, SteamCmdRoot: `C:\SteamCMD`,
+		DiscoveryRoots: []string{`C:\GameServers`}, BackupRetentionDays: 30,
+		BackupMaxTotalGB: 20, ShutdownWaitSeconds: 30, SteamCmdNoProgressMinutes: 30,
+		PalworldPort: 8211, TrustedProxyCIDRs: []string{"127.0.0.0/8", "::1/128"},
+	}
+	body, err := json.Marshal(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := requestForTest(t, handler, http.MethodPatch, "/api/v1/system/settings", string(body), cookie)
+	if response.Code != http.StatusOK {
+		t.Fatalf("settings response = %d %s", response.Code, response.Body.String())
+	}
+	audit := requestForTest(t, handler, http.MethodGet, "/api/v1/access/operation-audit", "", cookie)
+	var document struct {
+		Entries []operationAuditEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(audit.Body.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Entries) != 1 || document.Entries[0].Event != operationEventSystemUpdated ||
+		document.Entries[0].TargetType != operationTargetSystem {
+		t.Fatalf("settings operation audit = %#v", document.Entries)
+	}
+}
+
 func TestLoginRejectsWrongPassword(t *testing.T) {
 	handler := newTestHandler(t, config.Config{AdminPassword: "correct"})
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/session", bytes.NewBufferString(`{"password":"wrong"}`))

@@ -302,7 +302,11 @@ func (s *Service) runAutomaticVersionChecks() {
 	timer := time.NewTimer(automaticVersionCheckInitialDelay)
 	defer timer.Stop()
 	for {
-		<-timer.C
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-timer.C:
+		}
 		if s.versionCheckDue() {
 			if _, err := s.RunAction(palworldID, panel.ActionRequest{Action: "check-update"}); err != nil &&
 				!errors.Is(err, panel.ErrBusy) && !errors.Is(err, panel.ErrUnsafe) {
