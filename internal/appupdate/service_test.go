@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hearth/internal/buildinfo"
 	"hearth/internal/config"
@@ -150,6 +151,47 @@ func TestSafeRequestErrorDoesNotExposeSignedURL(t *testing.T) {
 	err := safeRequestError("download package", &url.Error{Op: "Get", URL: "https://example.invalid/file?jwt=secret", Err: context.DeadlineExceeded})
 	if strings.Contains(err.Error(), "jwt=") || !strings.Contains(err.Error(), "deadline") {
 		t.Fatalf("unsafe request error: %s", err)
+	}
+}
+
+func TestDefaultHTTPClientsSeparateMetadataAndDownloadTimeouts(t *testing.T) {
+	service, err := New(
+		config.Config{Update: config.UpdateConfig{Channel: "stable"}},
+		"",
+		Options{Executable: filepath.Join(t.TempDir(), "hearth.exe")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if service.client == service.downloadClient {
+		t.Fatal("metadata and asset downloads share one HTTP client")
+	}
+	if service.client.Timeout != metadataTimeout || service.downloadClient.Timeout != downloadTimeout {
+		t.Fatalf("timeouts = %s, %s", service.client.Timeout, service.downloadClient.Timeout)
+	}
+	for name, client := range map[string]*http.Client{"metadata": service.client, "download": service.downloadClient} {
+		transport, ok := client.Transport.(*http.Transport)
+		if !ok || transport.ResponseHeaderTimeout != 30*time.Second {
+			t.Fatalf("%s response header timeout is not bounded", name)
+		}
+	}
+}
+
+func TestDownloadAssetRemovesIncompleteTemporaryFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("short"))
+	}))
+	defer server.Close()
+	service := &Service{downloadClient: server.Client()}
+	path := filepath.Join(t.TempDir(), "package.zip")
+	err := service.downloadAsset(context.Background(), releaseAsset{Name: "package.zip", URL: server.URL, Size: 10}, path, 20)
+	if err == nil {
+		t.Fatal("downloadAsset() accepted a truncated response")
+	}
+	for _, candidate := range []string{path, path + ".part"} {
+		if _, statErr := os.Stat(candidate); !os.IsNotExist(statErr) {
+			t.Fatalf("incomplete download remains at %s: %v", candidate, statErr)
+		}
 	}
 }
 

@@ -27,6 +27,9 @@ Unreleased and moves to a version section when a formal package is built.
   explicitly saved empty list now means trust no proxy and retains that security boundary after restart.
 - Backend settings now return JSON arrays for empty discovery-root and trusted-proxy lists, while the
   UI also tolerates `null` from older versions instead of reporting a post-save `join` error.
+- GitHub Release asset downloads now have a separate ten-minute total timeout instead of sharing the
+  30-second metadata limit, while retaining short connection/header and artifact-size bounds and
+  immediately removing failed `.part` files.
 
 ## 1.1.0 - 2026-08-04
 

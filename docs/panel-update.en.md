@@ -26,7 +26,10 @@ returns the token. Delete the file once the repository is public to use anonymou
 
 1. Query only GitHub Releases for `nikumatane/Hearth`; the page cannot supply a repository or URL.
 2. Require exact `hearth-windows-amd64-v<version>.zip` and `.sha256` assets and reject drafts.
-3. Verify the GitHub asset SHA256 digest, sidecar SHA256, and packaged `VERSION`.
+3. Verify the GitHub asset SHA256 digest, sidecar SHA256, and packaged `VERSION`. Release metadata
+   keeps a 30-second total timeout. Asset bodies use a separate ten-minute total timeout and a
+   30-second response-header timeout for slow links without hanging indefinitely; failed `.part`
+   files are removed immediately.
 4. Safely extract into `C:\ProgramData\Hearth\updates` with path and size limits.
 5. Start the staged independent `hearth-updater.exe`; Hearth exits gracefully only after responding.
 6. Replace only `hearth.exe` and `hearth-updater.exe`, start the existing `Hearth` scheduled task,

@@ -37,32 +37,37 @@ const (
 	updateLogName    = "panel-update.log"
 	githubTokenEnv   = "HEARTH_GITHUB_TOKEN"
 	requestUserAgent = "Hearth-panel-updater/1"
+	metadataTimeout  = 30 * time.Second
+	downloadTimeout  = 10 * time.Minute
+	headerTimeout    = 30 * time.Second
 )
 
 type Options struct {
-	APIBase     string
-	HTTPClient  *http.Client
-	Executable  string
-	Shutdown    func()
-	RuntimeGOOS string
-	Now         func() time.Time
-	Launch      func(string) error
+	APIBase            string
+	HTTPClient         *http.Client
+	DownloadHTTPClient *http.Client
+	Executable         string
+	Shutdown           func()
+	RuntimeGOOS        string
+	Now                func() time.Time
+	Launch             func(string) error
 }
 
 type Service struct {
-	mu            sync.RWMutex
-	config        config.Config
-	client        *http.Client
-	apiBase       string
-	executable    string
-	shutdown      func()
-	runtimeOS     string
-	now           func() time.Time
-	launch        func(string) error
-	status        panel.PanelUpdateStatus
-	release       *release
-	lastResult    *Result
-	resultClaimed bool
+	mu             sync.RWMutex
+	config         config.Config
+	client         *http.Client
+	downloadClient *http.Client
+	apiBase        string
+	executable     string
+	shutdown       func()
+	runtimeOS      string
+	now            func() time.Time
+	launch         func(string) error
+	status         panel.PanelUpdateStatus
+	release        *release
+	lastResult     *Result
+	resultClaimed  bool
 }
 
 type release struct {
@@ -107,16 +112,11 @@ func New(cfg config.Config, _ string, options Options) (*Service, error) {
 	}
 	client := options.HTTPClient
 	if client == nil {
-		client = &http.Client{
-			Timeout: 30 * time.Second,
-			CheckRedirect: func(request *http.Request, _ []*http.Request) error {
-				host := strings.ToLower(request.URL.Hostname())
-				if request.URL.Scheme != "https" || (host != "github.com" && host != "api.github.com" && !strings.HasSuffix(host, ".githubusercontent.com")) {
-					return errors.New("GitHub asset redirect left the trusted HTTPS origins")
-				}
-				return nil
-			},
-		}
+		client = newHTTPClient(metadataTimeout)
+	}
+	downloadClient := options.DownloadHTTPClient
+	if downloadClient == nil {
+		downloadClient = newHTTPClient(downloadTimeout)
 	}
 	runtimeOS := options.RuntimeGOOS
 	if runtimeOS == "" {
@@ -131,7 +131,7 @@ func New(cfg config.Config, _ string, options Options) (*Service, error) {
 		launch = launchUpdateHelper
 	}
 	s := &Service{
-		config: cfg, client: client, apiBase: apiBase,
+		config: cfg, client: client, downloadClient: downloadClient, apiBase: apiBase,
 		executable: executable, shutdown: options.Shutdown, runtimeOS: runtimeOS,
 		now: now, launch: launch,
 	}
@@ -155,6 +155,20 @@ func New(cfg config.Config, _ string, options Options) (*Service, error) {
 		s.status.Message = err.Error()
 	}
 	return s, nil
+}
+
+func newHTTPClient(timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = headerTimeout
+	return &http.Client{Timeout: timeout, Transport: transport, CheckRedirect: validateGitHubRedirect}
+}
+
+func validateGitHubRedirect(request *http.Request, _ []*http.Request) error {
+	host := strings.ToLower(request.URL.Hostname())
+	if request.URL.Scheme != "https" || (host != "github.com" && host != "api.github.com" && !strings.HasSuffix(host, ".githubusercontent.com")) {
+		return errors.New("GitHub asset redirect left the trusted HTTPS origins")
+	}
+	return nil
 }
 
 func (s *Service) ConsumeUpdateResult() *panel.PanelUpdateResult {
@@ -457,7 +471,7 @@ func (s *Service) downloadAsset(ctx context.Context, asset releaseAsset, path st
 	}
 	request.Header.Set("Accept", "application/octet-stream")
 	s.authorize(request)
-	response, err := s.client.Do(request)
+	response, err := s.downloadClient.Do(request)
 	if err != nil {
 		return safeRequestError("download "+asset.Name, err)
 	}
@@ -465,14 +479,23 @@ func (s *Service) downloadAsset(ctx context.Context, asset releaseAsset, path st
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("download %s returned HTTP %d", asset.Name, response.StatusCode)
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	temporaryPath := path + ".part"
+	_ = os.Remove(temporaryPath)
+	file, err := os.OpenFile(temporaryPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
+	completed := false
+	defer func() {
+		_ = file.Close()
+		if !completed {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
 	written, copyErr := io.Copy(file, io.LimitReader(response.Body, limit+1))
 	closeErr := file.Close()
 	if copyErr != nil {
-		return copyErr
+		return safeRequestError("download "+asset.Name, copyErr)
 	}
 	if closeErr != nil {
 		return closeErr
@@ -480,6 +503,10 @@ func (s *Service) downloadAsset(ctx context.Context, asset releaseAsset, path st
 	if written > limit || written != asset.Size {
 		return fmt.Errorf("downloaded size for %s is invalid", asset.Name)
 	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("activate downloaded asset %s: %w", asset.Name, err)
+	}
+	completed = true
 	return nil
 }
 

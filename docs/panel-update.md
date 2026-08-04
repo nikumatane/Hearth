@@ -26,6 +26,8 @@ C:\ProgramData\Hearth\github-token.txt
 1. 固定查询 `nikumatane/Hearth` 的 GitHub Release，不接受页面传入仓库地址或下载 URL。
 2. 要求精确匹配 `hearth-windows-amd64-v<版本>.zip` 及其 `.sha256`，并拒绝草稿发布。
 3. 校验 GitHub Release 返回的 SHA256 制品摘要，再校验随包 SHA256 和包内 `VERSION`。
+   Release 元数据请求保持 30 秒总时限；附件正文使用独立 10 分钟总时限和 30 秒响应头
+   时限，兼容较慢链路但不会无限挂起。失败的 `.part` 临时文件会立即清理。
 4. 以路径、单文件和总体积限制安全解压到 `C:\ProgramData\Hearth\updates`。
 5. 从暂存目录启动独立 `hearth-updater.exe`，面板返回请求后再优雅退出。
 6. 更新器只替换 `hearth.exe` 与 `hearth-updater.exe`，启动既有 `Hearth` 计划任务，并要求
