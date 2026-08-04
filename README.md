@@ -118,6 +118,7 @@ make windows-package
 hearth.exe
 install-windows.ps1
 uninstall-windows.ps1
+LICENSE
 VERSION
 THIRD_PARTY_NOTICES.md
 THIRD_PARTY_NOTICES.zh-CN.md
@@ -139,8 +140,9 @@ Hearth 和启动任务，不会停止、启动、更新或修改正在运行的 
 1. 安装 Hearth，在 ECS 内打开 `http://127.0.0.1:8080`。
 2. 没有任何游戏时，管理员主页显示首次启动向导；已有至少一个游戏后，从独立的
    “系统设置 → 游戏管理”进入。
-3. 现有 Palworld 请先正常保存并关闭，再选择探测结果并明确确认接管；新服务器选择独立的
-   空游戏目录和 SteamCMD 目录，确认后才开始联网安装，完成后不会自动启动。
+3. 现有 Palworld 请先正常保存并关闭，再选择探测结果并明确确认接管；新服务器只选择
+   SteamCMD 根目录，Palworld 固定安装到其标准 `steamapps\\common\\PalServer` 目录。
+   管理员确认后才开始联网安装，完成后不会自动启动。
 4. 从 Hearth 启动服务器；启动本身不依赖 REST API。
 5. 如果需要玩家数据以及运行中的安全停止、重启、更新和备份，再进入 INI 配置来源，
    设置非空 `AdminPassword`、启用 `RESTAPIEnabled` 并确认 `RESTAPIPort=8212`。
@@ -186,7 +188,7 @@ SteamCMD 进程树并提示重试。若 SteamCMD 在自更新后正常退出但�
 
 ## 本地开发
 
-要求 Go 1.26+、Node.js 22+ 和 pnpm 10+。
+要求 Go 1.26.5+、Node.js 22+ 和 pnpm 10+。
 
 ```bash
 pnpm --dir web install

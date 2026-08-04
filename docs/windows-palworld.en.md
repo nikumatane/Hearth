@@ -99,9 +99,10 @@ The installer does not:
   roots, with explicit depth, directory, and candidate limits.
 - Adoption requires selecting a stable candidate and confirming again. Hearth does not create or
   overwrite `PalWorldSettings.ini` during adoption and never moves existing saves.
-- A new installation requires an empty game directory and a separate SteamCMD directory. Only after
-  explicit confirmation does Hearth download SteamCMD from Valve and install App `2394010`; the
-  server remains stopped afterward.
+- A new installation selects only the SteamCMD root. When `steamcmd.exe` is absent, that root must be
+  empty. Palworld is installed at the standard `steamapps\\common\\PalServer` path, which must also
+  be empty. Only after explicit confirmation does Hearth download SteamCMD from Valve and install
+  App `2394010`; the server remains stopped afterward.
 - SteamCMD is downloaded and extracted into an isolated same-volume staging directory. ZIP paths and
   expanded size are checked before activation, so an interrupted download is not treated as valid.
 - DST is read-only detected and labeled Planned for 1.3.0; it cannot be installed or adopted yet.
@@ -195,7 +196,7 @@ smallest practical network and restart Hearth. Do not trust the entire public In
 removes trusted proxies from the right side of the forwarded chain. A malformed header, a header
 over 1 KiB, or more than eight hops falls back to the TCP peer address.
 
-The official Palworld 1.0 REST API is not required to start `PalServer.exe`; it provides player data,
+The official Palworld 1.0 REST API is not required to start the game server process; it provides player data,
 save, and graceful shutdown. For player data and safe stop/restart/update/backup while running, the
 INI must include at least:
 
@@ -319,10 +320,11 @@ The update sequence is fixed:
 3. Call official `/v1/api/shutdown` and wait for process exit.
 4. Write saves and configuration to a separate ZIP.
 5. Confirm no other SteamCMD process exists.
-6. Run the fixed command:
+6. Run the fixed command and let SteamCMD use its standard
+   `steamapps\common\PalServer` directory:
 
    ```text
-   steamcmd.exe +force_install_dir <install-directory> +login anonymous +app_update 2394010 +quit
+   steamcmd.exe +login anonymous +app_update 2394010 +quit
    ```
 
 7. Wait for SteamCMD to explicitly report success for App ID `2394010`. If the first run only applies

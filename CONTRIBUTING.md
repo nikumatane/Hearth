@@ -17,7 +17,7 @@
 
 ## 本地开发
 
-需要 Go 1.26+、Node.js 22+ 和 pnpm 10+：
+需要 Go 1.26.5+、Node.js 22+ 和 pnpm 10+：
 
 ```bash
 pnpm --dir web install --frozen-lockfile

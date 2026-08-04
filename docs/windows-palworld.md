@@ -93,8 +93,9 @@ Set-ExecutionPolicy -Scope Process Bypass
   文件路径和元数据。
 - 接管要求管理员选择稳定的探测候选并再次确认。Hearth 不会在接管时自动创建或覆盖
   `PalWorldSettings.ini`，也不会移动已有存档。
-- 新安装要求游戏目录为空、SteamCMD 与游戏目录彼此独立。管理员明确确认后才从 Valve
-  官方地址下载 SteamCMD 并安装 App `2394010`；完成后服务器保持停止。
+- 新安装只选择 SteamCMD 根目录；若其中没有 `steamcmd.exe`，该目录必须为空。Palworld
+  固定安装到其标准 `steamapps\\common\\PalServer` 目录且该目录必须为空。管理员明确
+  确认后才从 Valve 官方地址下载 SteamCMD 并安装 App `2394010`；完成后服务器保持停止。
 - SteamCMD 先下载到同磁盘隔离暂存目录，校验 ZIP 路径与体积后再切换到目标目录。下载或
   解压中断不会把半成品目录当作有效安装。
 - DST 目前只做只读识别并显示“计划在 1.3.0 支持”，不能安装或接管。
@@ -174,7 +175,7 @@ device-cookie.key
 地址或最小网段，并重启 Hearth；不要信任公网全网段。Hearth 从转发链右侧开始剥离可信
 代理，格式异常、头部超过 1 KiB 或超过 8 跳时直接使用 TCP 对端地址。
 
-Palworld 官方 1.0 REST API 不是启动 PalServer.exe 的前提；它用于玩家数据、保存和优雅停服。
+Palworld 官方 1.0 REST API 不是启动游戏服务端进程的前提；它用于玩家数据、保存和优雅停服。
 如需玩家数据、运行中的安全停止/重启、更新和备份，INI 配置至少需要：
 
 ```text
@@ -287,10 +288,10 @@ Palworld 下载进度。
 3. 调用官方 `/v1/api/shutdown` 并等待进程退出。
 4. 将存档和配置写入独立 ZIP。
 5. 确认没有其他 SteamCMD 进程。
-6. 执行固定命令：
+6. 执行固定命令，由 SteamCMD 使用自身的 `steamapps\common\PalServer` 标准目录：
 
    ```text
-   steamcmd.exe +force_install_dir <安装目录> +login anonymous +app_update 2394010 +quit
+   steamcmd.exe +login anonymous +app_update 2394010 +quit
    ```
 
 7. 等待 SteamCMD 明确输出 App ID `2394010` 更新成功。首次运行如果只完成了 SteamCMD

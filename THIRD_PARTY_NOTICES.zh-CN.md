@@ -31,3 +31,44 @@ Copyright (c) 2024 Bluefissure
 适用性和不侵权保证。在任何情况下，作者或版权持有人均不对因软件或软件的使用及其他
 交易而产生、引起或与之相关的任何索赔、损害或其他责任负责，无论该责任源于合同、侵权
 或其他行为。
+
+## Vue.js 3.5.40
+
+Hearth 内嵌网页界面使用 [Vue.js](https://github.com/vuejs/core)。
+
+Copyright (c) 2018-present, Yuxi (Evan) You
+
+许可证：MIT License。完整英文许可证原文见
+[英文第三方组件声明](THIRD_PARTY_NOTICES.md#vuejs-3540)。
+
+## Lucide Vue 1.27.0
+
+Hearth 内嵌网页界面的图标来自
+[Lucide](https://github.com/lucide-icons/lucide)，其中部分图标派生自 Feather。
+
+- Copyright (c) 2026 Lucide Icons and Contributors
+- Copyright (c) 2013-present Cole Bemis
+
+许可证：ISC License；派生自 Feather 的图标使用 MIT License。完整英文许可证原文见
+[英文第三方组件声明](THIRD_PARTY_NOTICES.md#lucide-vue-1270)。
+
+## lossless-json 4.2.0
+
+Hearth 内嵌的 `WorldOption.sav` 编辑器使用
+[lossless-json](https://github.com/josdejong/lossless-json)。
+
+Copyright (c) 2016-2023 Jos de Jong
+
+许可证：MIT License。完整英文许可证原文见
+[英文第三方组件声明](THIRD_PARTY_NOTICES.md#lossless-json-420)。
+
+## pako 2.1.0 与 zlib
+
+Hearth 内嵌的 `WorldOption.sav` 编辑器使用
+[pako](https://github.com/nodeca/pako) 及其基于 zlib 的代码。
+
+- Copyright (C) 2014-2017 Vitaly Puzrin and Andrei Tuputcyn
+- Copyright (C) 1995-2013 Jean-loup Gailly and Mark Adler
+
+许可证：MIT License 与 zlib License。完整英文许可证原文见
+[英文第三方组件声明](THIRD_PARTY_NOTICES.md#pako-210-and-zlib)。

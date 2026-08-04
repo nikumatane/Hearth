@@ -130,6 +130,7 @@ Extract `hearth-windows-amd64-v<version>.zip` and keep these files together:
 hearth.exe
 install-windows.ps1
 uninstall-windows.ps1
+LICENSE
 VERSION
 THIRD_PARTY_NOTICES.md
 THIRD_PARTY_NOTICES.zh-CN.md
@@ -153,8 +154,9 @@ it neither downloads nor adopts a game.
 2. With no game configured, administrators see dashboard onboarding. Once at least one game is
    managed, use the separate System Settings → Game Management page.
 3. For an existing Palworld server, save and stop it normally, select a discovery candidate, and
-   explicitly confirm adoption. For a new server, select separate empty game and SteamCMD directories;
-   installation starts only after confirmation and does not start the server when complete.
+   explicitly confirm adoption. For a new server, select only the SteamCMD root; Palworld is installed
+   at its standard `steamapps\\common\\PalServer` path. Installation starts only after confirmation
+   and does not start the server when complete.
 4. Start the server from Hearth; starting does not depend on the REST API.
 5. If you need player data and safe stop/restart/update/backup while the server is running, open
    the INI source, set a non-empty `AdminPassword`, enable `RESTAPIEnabled`, and confirm
@@ -207,7 +209,7 @@ An `already up to date` marker is reported as Server already current and clears 
 
 ## Local development
 
-Requires Go 1.26+, Node.js 22+, and pnpm 10+.
+Requires Go 1.26.5+, Node.js 22+, and pnpm 10+.
 
 ```bash
 pnpm --dir web install

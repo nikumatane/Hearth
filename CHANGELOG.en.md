@@ -9,12 +9,22 @@ Unreleased and moves to a version section when a formal package is built.
 
 ## Unreleased
 
+No changes yet.
+
+## 1.1.0 - 2026-08-04
+
 - Hearth can now start with zero configured games. Startup discovery is bounded and read-only, and
   missing Palworld files no longer terminate the panel.
 - Added administrator onboarding to the zero-game dashboard. Discovery, adoption, installation, and
   backend parameters move to a separate System Settings page once a game is managed; members cannot access it.
 - Added explicitly confirmed adoption and fresh installation for Palworld. New installs stage the
-  SteamCMD download, validate ZIP paths and size, require an empty game directory, and never auto-start the server.
+  SteamCMD download, validate ZIP paths and size, and use SteamCMD's standard
+  `steamapps\\common\\PalServer` location; the server is never started automatically.
+- Windows launches `PalServer-Win64-Shipping-Cmd.exe` directly with the documented multithreading
+  arguments, avoiding SteamCMD installations where the `PalServer.exe` wrapper does not spawn the
+  real server. Installation and update wait for SteamCMD child processes to exit before continuing.
+- Installation progress maps SteamCMD self-update and Palworld download percentages into the existing
+  task stages without regressing or adding unreliable speed and remaining-time estimates.
 - DST is detected read-only and labeled as planned for 1.3.0, without premature install or adoption actions.
 - Added backend settings for management paths, backup retention, SteamCMD no-progress timeout, port,
   cookies, and trusted proxies, with revision checks, atomic replacement, and a previous configuration.

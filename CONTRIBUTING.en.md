@@ -17,7 +17,7 @@ servers take priority over feature count.
 
 ## Local development
 
-Go 1.26+, Node.js 22+, and pnpm 10+ are required:
+Go 1.26.5+, Node.js 22+, and pnpm 10+ are required:
 
 ```bash
 pnpm --dir web install --frozen-lockfile
