@@ -220,7 +220,7 @@ func (s *DemoService) UpdateSystemSettings(patch SystemSettingsPatch) (SystemSet
 	}
 	settings.InstallRoot = patch.InstallRoot
 	settings.SteamCmdRoot = patch.SteamCmdRoot
-	settings.DiscoveryRoots = append([]string(nil), patch.DiscoveryRoots...)
+	settings.DiscoveryRoots = append([]string{}, patch.DiscoveryRoots...)
 	settings.BackupRetentionDays = patch.BackupRetentionDays
 	settings.BackupMaxTotalGB = patch.BackupMaxTotalGB
 	settings.ShutdownWaitSeconds = patch.ShutdownWaitSeconds

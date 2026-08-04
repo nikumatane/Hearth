@@ -1,7 +1,7 @@
 {
   "name": "hearth-web",
   "private": true,
-  "version": "1.2.0-rc.3",
+  "version": "1.2.0-rc.4",
   "license": "MIT",
   "packageManager": "pnpm@10.28.2",
   "type": "module",

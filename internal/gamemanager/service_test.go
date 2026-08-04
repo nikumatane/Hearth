@@ -187,6 +187,9 @@ func TestSystemSettingsRejectStaleRevisionAndGlobalProxy(t *testing.T) {
 	if updated.TrustedProxyCIDRs == nil || len(updated.TrustedProxyCIDRs) != 0 {
 		t.Fatalf("TrustedProxyCIDRs = %#v; want explicit empty list", updated.TrustedProxyCIDRs)
 	}
+	if updated.DiscoveryRoots == nil || len(updated.DiscoveryRoots) != 0 {
+		t.Fatalf("DiscoveryRoots = %#v; want empty JSON array", updated.DiscoveryRoots)
+	}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)

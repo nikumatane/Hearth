@@ -25,6 +25,8 @@ Unreleased and moves to a version section when a formal package is built.
   atomic configuration replacement; the selection takes effect after restarting Hearth.
 - Fixed update-channel saves being rejected when a legacy configuration has no trusted proxies. An
   explicitly saved empty list now means trust no proxy and retains that security boundary after restart.
+- Backend settings now return JSON arrays for empty discovery-root and trusted-proxy lists, while the
+  UI also tolerates `null` from older versions instead of reporting a post-save `join` error.
 
 ## 1.1.0 - 2026-08-04
 

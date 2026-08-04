@@ -539,8 +539,8 @@ async function waitForPanelUpdate(target: string) {
 function syncManagementInputs(document: Management) {
   const settings = document.settings;
   installSteamCmdRoot.value = installSteamCmdRoot.value || settings.steamCmdRoot;
-  discoveryRootsText.value = settings.discoveryRoots.join("\n");
-  trustedProxyCIDRsText.value = settings.trustedProxyCidrs.join("\n");
+  discoveryRootsText.value = (settings.discoveryRoots ?? []).join("\n");
+  trustedProxyCIDRsText.value = (settings.trustedProxyCidrs ?? []).join("\n");
 }
 
 async function loadManagement(silent = false) {

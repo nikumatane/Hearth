@@ -224,7 +224,7 @@ func (s *Service) systemSettingsLocked(restartRequired bool) panel.SystemSetting
 		Revision:                  revision,
 		InstallRoot:               s.config.Management.InstallRoot,
 		SteamCmdRoot:              s.config.Management.SteamCmdRoot,
-		DiscoveryRoots:            append([]string(nil), s.config.Management.DiscoveryRoots...),
+		DiscoveryRoots:            append([]string{}, s.config.Management.DiscoveryRoots...),
 		BackupRetentionDays:       defaultInt(game.BackupRetentionDays, 30),
 		BackupMaxTotalGB:          defaultInt64(game.BackupMaxTotalGB, 20),
 		ShutdownWaitSeconds:       defaultInt(game.ShutdownWaitSeconds, 30),
