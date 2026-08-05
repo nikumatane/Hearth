@@ -36,6 +36,9 @@ Unreleased and moves to a version section when a formal package is built.
 - Fixed stale progress when the new panel becomes healthy just before the updater writes its result.
   The backend imports an unconsumed terminal result only when it matches the running version, and the
   page stops tracking only after an explicit success, failure, or rollback result.
+- Fixed stale update progress surviving a new login after a panel restart invalidates the in-memory
+  session. An updating page now stores only a non-sensitive resume marker, reloads the SPA, returns to
+  Panel Update after login, fetches authoritative status, and cancels polling from the old page.
 
 ## 1.1.0 - 2026-08-04
 

@@ -77,6 +77,7 @@ type SettingsSource = "world" | "ini";
 const minimumPasswordLength = 10;
 const panelUpdateWaitTimeoutMs = 15 * 60_000;
 const panelHealthRequestTimeoutMs = 5_000;
+const panelUpdateResumeKey = "hearth.resume-panel-update";
 
 function passwordCharacterCount(password: string) {
   return Array.from(password).length;
@@ -185,6 +186,8 @@ let toastTimer: number | undefined;
 let clockTimer: number | undefined;
 let refreshInFlight = false;
 let dismissedLogIds = new Set<string>();
+let panelUpdateTrackingEpoch = 0;
+let sessionRecoveryReloading = false;
 
 const selectedGame = computed(() =>
   overview.value?.games.find((game) => game.id === selectedGameId.value)
@@ -346,6 +349,59 @@ onBeforeUnmount(() => {
   if (clockTimer) window.clearInterval(clockTimer);
 });
 
+function stopOverviewPolling() {
+  if (pollTimer) window.clearTimeout(pollTimer);
+  pollTimer = undefined;
+}
+
+function clearAuthenticatedState() {
+  loggedIn.value = false;
+  overview.value = null;
+  currentRole.value = "";
+  credentialId.value = "";
+  currentPermissions.value = [];
+  members.value = [];
+  auditEntries.value = [];
+  operationAuditEntries.value = [];
+  configAuditEntries.value = [];
+  ipRules.value = [];
+  management.value = null;
+  panelUpdate.value = null;
+  panelUpdateBusy.value = false;
+  panelUpdateTrackingEpoch += 1;
+  stopOverviewPolling();
+}
+
+function rememberPanelUpdateResume(target?: string) {
+  try {
+    const safeTarget = target && /^[0-9A-Za-z.-]{1,64}$/.test(target) ? target : "";
+    window.sessionStorage.setItem(panelUpdateResumeKey, safeTarget);
+  } catch {
+    // A blocked sessionStorage must not prevent a safe reload.
+  }
+}
+
+function consumePanelUpdateResume() {
+  try {
+    const stored = window.sessionStorage.getItem(panelUpdateResumeKey);
+    window.sessionStorage.removeItem(panelUpdateResumeKey);
+    return { requested: stored !== null, target: stored && /^[0-9A-Za-z.-]{1,64}$/.test(stored) ? stored : "" };
+  } catch {
+    return { requested: false, target: "" };
+  }
+}
+
+function handleSessionExpired() {
+  const resumePanelUpdate = panelUpdateBusy.value ||
+    panelUpdate.value?.state === "checking" || panelUpdate.value?.state === "preparing";
+  if (resumePanelUpdate) rememberPanelUpdateResume(panelUpdate.value?.latestVersion);
+  clearAuthenticatedState();
+  if (resumePanelUpdate && !sessionRecoveryReloading) {
+    sessionRecoveryReloading = true;
+    window.location.reload();
+  }
+}
+
 async function login() {
   loginError.value = "";
   loggingIn.value = true;
@@ -356,9 +412,23 @@ async function login() {
     credentialId.value = session.credentialId ?? "";
     currentPermissions.value = session.permissions ?? [];
     loggedIn.value = true;
+    sessionRecoveryReloading = false;
     loginPassword.value = "";
     await refresh();
-    if (session.role === "admin") await loadManagement();
+    const resumePanelUpdate = consumePanelUpdateResume();
+    if (session.role === "admin") {
+      await loadManagement();
+      if (resumePanelUpdate.requested) {
+        page.value = "system";
+        systemTab.value = "updates";
+      }
+      if (page.value === "system" && systemTab.value === "updates") await refreshPanelUpdateOnEntry();
+      if (resumePanelUpdate.target &&
+        !(panelUpdate.value?.state === "succeeded" && panelUpdate.value.currentVersion === resumePanelUpdate.target) &&
+        panelUpdate.value?.state !== "failed" && panelUpdate.value?.state !== "rolled_back") {
+        resumePanelUpdateWait(resumePanelUpdate.target, false);
+      }
+    }
     startPolling();
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : "登录失败";
@@ -369,20 +439,8 @@ async function login() {
 
 async function logout() {
   await api.logout().catch(() => undefined);
-  loggedIn.value = false;
-  overview.value = null;
+  clearAuthenticatedState();
   page.value = "overview";
-  currentRole.value = "";
-  credentialId.value = "";
-  currentPermissions.value = [];
-  members.value = [];
-  auditEntries.value = [];
-  operationAuditEntries.value = [];
-  configAuditEntries.value = [];
-  ipRules.value = [];
-  management.value = null;
-  if (pollTimer) window.clearTimeout(pollTimer);
-  pollTimer = undefined;
 }
 
 function startPolling() {
@@ -432,9 +490,7 @@ async function refresh(silent = false) {
     loadError.value = "";
   } catch (error) {
     if (isUnauthorized(error)) {
-      loggedIn.value = false;
-      if (pollTimer) window.clearTimeout(pollTimer);
-      pollTimer = undefined;
+      handleSessionExpired();
     } else if (!silent) {
       loadError.value = error instanceof Error ? error.message : "无法加载服务器状态";
     }
@@ -481,6 +537,10 @@ async function loadPanelUpdate(silent = false): Promise<boolean> {
     }
     return true;
   } catch (error) {
+    if (isUnauthorized(error)) {
+      handleSessionExpired();
+      return false;
+    }
     if (!silent) showToast("error", error instanceof Error ? error.message : "面板更新状态读取失败");
     return false;
   } finally {
@@ -495,21 +555,23 @@ async function refreshPanelUpdateOnEntry() {
   }
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (await loadPanelUpdate(true)) return;
+    if (!isAdmin.value) return;
     if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 1000));
   }
   showToast("error", "面板刚刚重启，更新状态暂时无法读取，请稍后重试");
 }
 
-function resumePanelUpdateWait(target: string) {
+function resumePanelUpdateWait(target: string, reloadOnSuccess = true) {
   if (panelUpdateBusy.value) return;
   panelUpdateBusy.value = true;
-  void waitForPanelUpdate(target)
+  const trackingEpoch = ++panelUpdateTrackingEpoch;
+  void waitForPanelUpdate(target, trackingEpoch, reloadOnSuccess)
     .catch(async (error) => {
       await loadPanelUpdate(true);
       showToast("error", error instanceof Error ? error.message : "面板更新状态跟踪失败");
     })
     .finally(() => {
-      panelUpdateBusy.value = false;
+      if (trackingEpoch === panelUpdateTrackingEpoch) panelUpdateBusy.value = false;
     });
 }
 
@@ -531,23 +593,26 @@ async function applyPanelUpdate() {
   if (!target || !panelUpdate.value?.updateAvailable) return;
   if (!window.confirm(`确认将 Hearth 更新到 ${target}？面板会短暂离线；游戏服务器和存档不会停止或修改。`)) return;
   panelUpdateBusy.value = true;
+  const trackingEpoch = ++panelUpdateTrackingEpoch;
   try {
     panelUpdate.value = await api.applyPanelUpdate(target);
     showToast("success", "更新包正在校验；完成后面板会自动重启并执行健康检查");
-    await waitForPanelUpdate(target);
+    await waitForPanelUpdate(target, trackingEpoch);
   } catch (error) {
     await loadPanelUpdate(true);
     showToast("error", error instanceof Error ? error.message : "面板更新启动失败");
   } finally {
-    panelUpdateBusy.value = false;
+    if (trackingEpoch === panelUpdateTrackingEpoch) panelUpdateBusy.value = false;
   }
 }
 
-async function waitForPanelUpdate(target: string) {
+async function waitForPanelUpdate(target: string, trackingEpoch: number, reloadOnSuccess = true) {
   const deadline = Date.now() + panelUpdateWaitTimeoutMs;
   while (Date.now() < deadline) {
+    if (trackingEpoch !== panelUpdateTrackingEpoch) return;
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
     const statusLoaded = await loadPanelUpdate(true);
+    if (trackingEpoch !== panelUpdateTrackingEpoch) return;
     const status = panelUpdate.value;
     if (statusLoaded && status?.state === "failed") {
       throw new Error(`更新失败：${status.message || status.stage}`);
@@ -557,8 +622,10 @@ async function waitForPanelUpdate(target: string) {
     }
     if (statusLoaded && status?.state === "succeeded" && status.currentVersion === target) {
       showToast("success", `Hearth ${target} 更新完成`);
-      await new Promise((resolve) => window.setTimeout(resolve, 300));
-      window.location.reload();
+      if (reloadOnSuccess) {
+        await new Promise((resolve) => window.setTimeout(resolve, 300));
+        window.location.reload();
+      }
       return;
     }
 

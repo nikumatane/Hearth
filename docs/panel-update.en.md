@@ -46,6 +46,9 @@ second; refreshing or revisiting the page resumes tracking an unfinished update 
 an old 15% value as the final result. Target-version health means only that the new process has
 started. Tracking ends after the independent updater publishes an explicit matching success,
 failure, or rollback result; the new process also imports an unconsumed result written after startup.
+Panel login sessions remain process-memory only, so an update restart requires the password again.
+An updating page stores a credential-free resume marker and reloads when that session expires; after
+login it returns to Panel Update and fetches terminal status instead of reusing old in-memory progress.
 
 The 1.2.0 trust boundary is the fixed GitHub repository, GitHub TLS/access control, the Release asset
 digest, and sidecar checksum. A separate project signing key would protect a stronger account-
