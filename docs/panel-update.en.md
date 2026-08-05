@@ -25,6 +25,8 @@ returns the token. Delete the file once the repository is public to use anonymou
 ## Verification and replacement order
 
 1. Query only GitHub Releases for `nikumatane/Hearth`; the page cannot supply a repository or URL.
+   The prerelease channel ignores drafts and invalid tags, then selects the highest semantic version
+   from the latest 100 releases instead of trusting GitHub's page or API ordering.
 2. Require exact `hearth-windows-amd64-v<version>.zip` and `.sha256` assets and reject drafts.
 3. Verify the GitHub asset SHA256 digest, sidecar SHA256, and packaged `VERSION`. Release metadata
    keeps a 30-second total timeout. Asset bodies use a separate ten-minute total timeout and a

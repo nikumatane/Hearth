@@ -362,7 +362,7 @@ func (s *Service) prepareAndLaunch(rel release, request panel.PanelUpdateRequest
 func (s *Service) fetchRelease(ctx context.Context) (*release, error) {
 	path := "/repos/" + Repository + "/releases/latest"
 	if s.config.Update.Channel == "prerelease" {
-		path = "/repos/" + Repository + "/releases?per_page=20"
+		path = "/repos/" + Repository + "/releases?per_page=100"
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, s.apiBase+path, nil)
 	if err != nil {
@@ -393,14 +393,23 @@ func (s *Service) fetchRelease(ctx context.Context) (*release, error) {
 			return nil, fmt.Errorf("decode GitHub releases: %w", err)
 		}
 		found := false
+		selectedVersion := ""
 		for _, candidate := range releases {
-			if !candidate.Draft {
-				document, found = candidate, true
-				break
+			if candidate.Draft {
+				continue
+			}
+			version, ok := parseVersion(candidate.TagName)
+			if !ok {
+				continue
+			}
+			if !found || compareVersions(version, selectedVersion) > 0 {
+				document = candidate
+				selectedVersion = version
+				found = true
 			}
 		}
 		if !found {
-			return nil, errors.New("no published release found")
+			return nil, errors.New("no published semantic release found")
 		}
 	} else if err := json.Unmarshal(data, &document); err != nil {
 		return nil, fmt.Errorf("decode GitHub release: %w", err)

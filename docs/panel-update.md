@@ -24,6 +24,8 @@ C:\ProgramData\Hearth\github-token.txt
 ## 校验与替换顺序
 
 1. 固定查询 `nikumatane/Hearth` 的 GitHub Release，不接受页面传入仓库地址或下载 URL。
+   prerelease 通道会忽略草稿和无效标签，并从最近 100 个发布中按语义版本选择最高版本，
+   不依赖 GitHub 页面或 API 的返回顺序。
 2. 要求精确匹配 `hearth-windows-amd64-v<版本>.zip` 及其 `.sha256`，并拒绝草稿发布。
 3. 校验 GitHub Release 返回的 SHA256 制品摘要，再校验随包 SHA256 和包内 `VERSION`。
    Release 元数据请求保持 30 秒总时限；附件正文使用独立 10 分钟总时限和 30 秒响应头

@@ -39,6 +39,9 @@ Unreleased and moves to a version section when a formal package is built.
 - Fixed stale update progress surviving a new login after a panel restart invalidates the in-memory
   session. An updating page now stores only a non-sensitive resume marker, reloads the SPA, returns to
   Panel Update after login, fetches authoritative status, and cancels polling from the old page.
+- Fixed prerelease checks trusting GitHub's release-list order, which could make `rc.10` appear older
+  than `rc.9`. Hearth now ignores drafts and invalid tags and selects the highest semantic version
+  from the latest 100 releases.
 
 ## 1.1.0 - 2026-08-04
 

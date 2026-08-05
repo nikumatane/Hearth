@@ -99,6 +99,52 @@ func TestServiceChecksStagesAndLaunchesVerifiedRelease(t *testing.T) {
 	}
 }
 
+func TestPrereleaseCheckSelectsHighestSemanticVersionRegardlessOfAPIOrder(t *testing.T) {
+	previousVersion := buildinfo.Version
+	buildinfo.Version = "1.2.0-rc.9"
+	t.Cleanup(func() { buildinfo.Version = previousVersion })
+
+	packageData := testPackage(t, "1.2.0-rc.10")
+	digestBytes := sha256.Sum256(packageData)
+	digest := hex.EncodeToString(digestBytes[:])
+	zipName := "hearth-windows-amd64-v1.2.0-rc.10.zip"
+	checksumSize := int64(len(digest + "  " + zipName + "\n"))
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/nikumatane/Hearth/releases" || r.URL.Query().Get("per_page") != "100" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]githubRelease{
+			{TagName: "v9.9.9", Draft: true},
+			{TagName: "v1.2.0-rc.9", Prerelease: true},
+			{TagName: "v1.2.0-rc.10", Prerelease: true, Assets: []githubAsset{
+				{Name: zipName, URL: server.URL + "/assets/package", Size: int64(len(packageData)), Digest: "sha256:" + digest},
+				{Name: zipName + ".sha256", URL: server.URL + "/assets/checksum", Size: checksumSize},
+			}},
+			{TagName: "nightly", Prerelease: true},
+			{TagName: "v1.2.0-rc.8", Prerelease: true},
+		})
+	}))
+	defer server.Close()
+
+	service, err := New(
+		config.Config{Listen: "127.0.0.1:8080", Update: config.UpdateConfig{Channel: "prerelease", StagingDir: t.TempDir()}},
+		"",
+		Options{APIBase: server.URL, Executable: filepath.Join(t.TempDir(), "hearth.exe")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := service.CheckForUpdate(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.UpdateAvailable || status.LatestVersion != "1.2.0-rc.10" {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+}
+
 func TestServiceRejectsReleaseWithoutGitHubDigest(t *testing.T) {
 	previousVersion := buildinfo.Version
 	buildinfo.Version = "1.1.0"
