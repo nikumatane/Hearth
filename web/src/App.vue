@@ -59,6 +59,7 @@ import {
   type PalworldSettings,
   type PanelUpdateStatus,
   type Permission,
+  type Session,
   type Setting
 } from "./api";
 import Sparkline from "./components/Sparkline.vue";
@@ -332,7 +333,9 @@ onMounted(async () => {
     const session = await api.session();
     buildVersion.value = session.version || "未知";
     if (session.authenticated) {
-      await api.logout().catch(() => undefined);
+      // This resumes a session that already passed password authentication.
+      // The separate known-device cookie can never make this response authenticated.
+      await enterAuthenticatedSession(session);
     }
   } catch (error) {
     if (!isUnauthorized(error)) {
@@ -402,34 +405,41 @@ function handleSessionExpired() {
   }
 }
 
+async function enterAuthenticatedSession(session: Session) {
+  if (!session.authenticated || !session.role) return;
+  buildVersion.value = session.version || buildVersion.value;
+  currentRole.value = session.role;
+  credentialId.value = session.credentialId ?? "";
+  currentPermissions.value = session.permissions ?? [];
+  loggedIn.value = true;
+  sessionRecoveryReloading = false;
+  await refresh();
+  if (!loggedIn.value) return;
+
+  const resumePanelUpdate = consumePanelUpdateResume();
+  if (session.role === "admin") {
+    await loadManagement();
+    if (resumePanelUpdate.requested) {
+      page.value = "system";
+      systemTab.value = "updates";
+    }
+    if (page.value === "system" && systemTab.value === "updates") await refreshPanelUpdateOnEntry();
+    if (resumePanelUpdate.target &&
+      !(panelUpdate.value?.state === "succeeded" && panelUpdate.value.currentVersion === resumePanelUpdate.target) &&
+      panelUpdate.value?.state !== "failed" && panelUpdate.value?.state !== "rolled_back") {
+      resumePanelUpdateWait(resumePanelUpdate.target, false);
+    }
+  }
+  startPolling();
+}
+
 async function login() {
   loginError.value = "";
   loggingIn.value = true;
   try {
     const session = await api.login(loginPassword.value);
-    buildVersion.value = session.version || buildVersion.value;
-    currentRole.value = session.role ?? "";
-    credentialId.value = session.credentialId ?? "";
-    currentPermissions.value = session.permissions ?? [];
-    loggedIn.value = true;
-    sessionRecoveryReloading = false;
     loginPassword.value = "";
-    await refresh();
-    const resumePanelUpdate = consumePanelUpdateResume();
-    if (session.role === "admin") {
-      await loadManagement();
-      if (resumePanelUpdate.requested) {
-        page.value = "system";
-        systemTab.value = "updates";
-      }
-      if (page.value === "system" && systemTab.value === "updates") await refreshPanelUpdateOnEntry();
-      if (resumePanelUpdate.target &&
-        !(panelUpdate.value?.state === "succeeded" && panelUpdate.value.currentVersion === resumePanelUpdate.target) &&
-        panelUpdate.value?.state !== "failed" && panelUpdate.value?.state !== "rolled_back") {
-        resumePanelUpdateWait(resumePanelUpdate.target, false);
-      }
-    }
-    startPolling();
+    await enterAuthenticatedSession(session);
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : "登录失败";
   } finally {
@@ -533,7 +543,9 @@ async function loadPanelUpdate(silent = false): Promise<boolean> {
     const status = await api.panelUpdate(controller.signal);
     panelUpdate.value = status;
     if (status.state === "preparing" && status.latestVersion && !panelUpdateBusy.value) {
-      resumePanelUpdateWait(status.latestVersion);
+      // Re-entry already loads the current frontend bundle; a terminal result
+      // should update this page in place instead of forcing another login flow.
+      resumePanelUpdateWait(status.latestVersion, false);
     }
     return true;
   } catch (error) {

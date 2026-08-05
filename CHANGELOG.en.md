@@ -42,6 +42,10 @@ Unreleased and moves to a version section when a formal package is built.
 - Fixed prerelease checks trusting GitHub's release-list order, which could make `rc.10` appear older
   than `rc.9`. Hearth now ignores drafts and invalid tags and selects the highest semantic version
   from the latest 100 releases.
+- Fixed page reloads actively deleting a valid session and update recovery issuing another hard
+  reload after completion. A password-authenticated session now survives page reloads within the
+  same Hearth process; an update restart still requires one login, and the known-device cookie still
+  cannot create a session or bypass the password.
 
 ## 1.1.0 - 2026-08-04
 

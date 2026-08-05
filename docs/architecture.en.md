@@ -126,8 +126,10 @@ current small-server use case.
   Login JSONL rotates at 5 MiB with one previous generation.
 - JSON API requests have explicit size limits, accept exactly one complete object, and reject trailing
   values or truncated oversized input.
-- Every web-page load logs out the old browser session and asks for a password again. Deleting a
-  member or changing its password or permissions immediately revokes existing sessions.
+- A password-authenticated session lasts at most 12 hours and exists only in the Hearth process.
+  Browser reloads restore a still-valid active session, while restarting Hearth requires the
+  password again. Deleting a member or changing its password or permissions immediately revokes
+  that member's sessions. The known-device cookie cannot create or restore an active session.
 - The frontend cannot submit executable paths or arbitrary command arguments.
 - Game IDs map to process names, installation directories, and Steam App IDs only through server
   configuration.

@@ -152,8 +152,9 @@ A unique password or passphrase of 14 characters or more is recommended in pract
   `WorldOption.sav` remain administrator-only.
 - Task logs, member management, login and attack, security-operation, parameter audit, and IP rules remain
   administrator-only.
-- Changing a member password or permissions logs out its existing sessions. Opening or refreshing
-  the page still requires another login.
+- Changing a member password or permissions logs out its existing sessions. A password-authenticated
+  active session survives page reloads in the same Hearth process for at most 12 hours; restarting
+  Hearth still requires another login.
 - Login audit shows source IP, administrator/member credential ID, result, suspected-attack severity,
   and time without storing the submitted password.
 - A login row menu can deny that login source IP for 24 hours or allow it for seven days; complete rules are
@@ -163,8 +164,7 @@ A unique password or passphrase of 14 characters or more is recommended in pract
   separate Security operation audit with distinct actor-source and target fields. They never appear
   as login attempts and never store a password or password digest.
 - A successful login stores a signed known-device cookie. It receives only a separate throttle lane
-  and cannot sign in without a password or access authenticated APIs. Refreshing the page still logs
-  out the old session and asks for the password.
+  and cannot sign in without a password, restore an active session, or access authenticated APIs.
 
 Related files are under `C:\ProgramData\Hearth` and inherit an ACL that allows only `SYSTEM` and
 Administrators:
