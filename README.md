@@ -165,7 +165,7 @@ Palworld 进程。运行中的更新和备份仍要求 REST API，绝不会自�
 
 完整流程见 [Windows 帕鲁部署指南](docs/windows-palworld.md)。
 
-面板自身更新的校验、私有仓库 Token、健康检查和回滚说明见
+面板自身更新的校验、健康检查和回滚说明见
 [面板安全更新指南](docs/panel-update.md)。
 
 三个已确认的开源迭代边界见 [Hearth 路线图](ROADMAP.md)。

@@ -22,7 +22,7 @@ Status: complete. Repository publication is a separate maintainer decision and d
 
 ## 1.2.0 · Safe panel self-update
 
-Status: in development.
+Status: complete.
 
 - Administrators can check stable or prerelease updates in the panel; updates are never installed silently.
 - Hearth downloads a versioned Windows GitHub Release asset and verifies its digest and provenance before upgrading.

@@ -8,20 +8,6 @@ Starting with Hearth 1.2.0, administrators can check and explicitly install a pa
 System Settings → Panel Update. Stable and prerelease channels are available, but neither installs
 silently. Installation is enabled only on Windows; other platforms return check status only.
 
-## While the repository is private
-
-Create a fine-grained GitHub token restricted to `nikumatane/Hearth` with **Contents: Read** only,
-then store the plain token at:
-
-```text
-C:\ProgramData\Hearth\github-token.txt
-```
-
-The installer ACL allows only `SYSTEM` and Administrators to read this directory. A development
-environment may instead use `HEARTH_GITHUB_TOKEN`. Never put the token in `config.json`, logs,
-screenshots, or a release package. The page reports only configured/not configured; the API never
-returns the token. Delete the file once the repository is public to use anonymous access.
-
 ## Verification and replacement order
 
 1. Query only GitHub Releases for `nikumatane/Hearth`; the page cannot supply a repository or URL.

@@ -181,7 +181,6 @@ try {
         }
         update            = [ordered]@{
             channel    = 'stable'
-            tokenFile  = (Join-Path $installRoot 'github-token.txt')
             stagingDir = (Join-Path $installRoot 'updates')
         }
         games             = [ordered]@{

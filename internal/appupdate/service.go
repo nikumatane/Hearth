@@ -35,7 +35,6 @@ const (
 	updateResultName = "panel-update-result.json"
 	updatePlanName   = "panel-update-plan.json"
 	updateLogName    = "panel-update.log"
-	githubTokenEnv   = "HEARTH_GITHUB_TOKEN"
 	requestUserAgent = "Hearth-panel-updater/1"
 	metadataTimeout  = 30 * time.Second
 	downloadTimeout  = 10 * time.Minute
@@ -136,12 +135,11 @@ func New(cfg config.Config, _ string, options Options) (*Service, error) {
 		now: now, launch: launch,
 	}
 	s.status = panel.PanelUpdateStatus{
-		CurrentVersion:  buildinfo.Version,
-		Channel:         cfg.Update.Channel,
-		State:           "idle",
-		Stage:           "等待检查",
-		CanApply:        runtimeOS == "windows",
-		TokenConfigured: s.tokenConfigured(),
+		CurrentVersion: buildinfo.Version,
+		Channel:        cfg.Update.Channel,
+		State:          "idle",
+		Stage:          "等待检查",
+		CanApply:       runtimeOS == "windows",
 	}
 	if err := s.refreshResultLocked(); err != nil {
 		s.status.State = "failed"
@@ -211,7 +209,6 @@ func (s *Service) UpdateStatus() panel.PanelUpdateStatus {
 	}
 	status := s.status
 	s.mu.Unlock()
-	status.TokenConfigured = s.tokenConfigured()
 	return status
 }
 
@@ -280,7 +277,7 @@ func (s *Service) CheckForUpdate(ctx context.Context) (panel.PanelUpdateStatus, 
 	s.status.CheckedAt = &now
 	if err != nil {
 		s.status.State, s.status.Stage, s.status.Progress = "failed", "版本检查失败", 0
-		s.status.Message = friendlyCheckError(err, s.tokenConfigured())
+		s.status.Message = friendlyCheckError(err)
 		return s.status, errors.New(s.status.Message)
 	}
 	s.release = rel
@@ -602,26 +599,6 @@ func safeRequestError(action string, err error) error {
 func (s *Service) authorize(request *http.Request) {
 	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	request.Header.Set("User-Agent", requestUserAgent)
-	if token := s.token(); token != "" {
-		request.Header.Set("Authorization", "Bearer "+token)
-	}
-}
-
-func (s *Service) tokenConfigured() bool { return s.token() != "" }
-
-func (s *Service) token() string {
-	if token := strings.TrimSpace(os.Getenv(githubTokenEnv)); token != "" {
-		return token
-	}
-	path := strings.TrimSpace(s.config.Update.TokenFile)
-	if path == "" {
-		return ""
-	}
-	data, err := os.ReadFile(path)
-	if err != nil || len(data) > 4096 {
-		return ""
-	}
-	return strings.TrimSpace(strings.TrimPrefix(string(data), "\uFEFF"))
 }
 
 func (s *Service) setProgress(stage string, progress int, message string) {
@@ -648,10 +625,7 @@ func (s *Service) setDownloadProgress(written, total int64) {
 	s.status.Message = fmt.Sprintf("已下载 %.2f / %.2f MiB；完成后将自动校验并重启 Hearth", float64(written)/(1<<20), float64(total)/(1<<20))
 }
 
-func friendlyCheckError(err error, token bool) string {
-	if !token && strings.Contains(err.Error(), "HTTP 404") {
-		return "当前仓库仍为私有仓库，请在 github-token.txt 中配置仅 Contents: Read 的 GitHub Token"
-	}
+func friendlyCheckError(err error) string {
 	return err.Error()
 }
 

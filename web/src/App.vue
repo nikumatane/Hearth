@@ -2265,7 +2265,6 @@ function gameAccent(id: string) {
                 <label><span>当前版本</span><strong>v{{ panelUpdate.currentVersion }}</strong></label>
                 <label><span>最新版本</span><strong>{{ panelUpdate.latestVersion ? `v${panelUpdate.latestVersion}` : "尚未检查" }}</strong></label>
                 <label><span>更新通道</span><strong>{{ panelUpdate.channel === "prerelease" ? "Prerelease" : "Stable" }}</strong></label>
-                <label><span>私有仓库凭据</span><strong>{{ panelUpdate.tokenConfigured ? "已配置只读 Token" : "未配置" }}</strong></label>
               </div>
 
               <div v-if="panelUpdate.state === 'checking' || panelUpdate.state === 'preparing'" class="panel-update-progress">
@@ -2279,8 +2278,7 @@ function gameAccent(id: string) {
                 <CloudCog v-else :size="18" />
                 <span>
                   <strong>{{ panelUpdate.message || "更新由管理员手动检查和确认，不会静默安装。" }}</strong>
-                  <small v-if="!panelUpdate.tokenConfigured">仓库保持私有期间，默认在 <code>C:\ProgramData\Hearth\github-token.txt</code> 写入仅授予 Contents: Read 的 fine-grained Token；仓库公开后无需 Token。</small>
-                  <small v-else>下载源固定为 <code>nikumatane/Hearth</code>，安装前校验 Release 摘要、SHA256 与包内版本。</small>
+                  <small>下载源固定为 <code>nikumatane/Hearth</code>，安装前校验 Release 摘要、SHA256 与包内版本。</small>
                   <small v-if="!panelUpdate.canApply">当前系统只支持检查版本；面板内安装与自动回滚目前仅支持 Windows。</small>
                 </span>
               </div>

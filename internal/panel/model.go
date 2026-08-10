@@ -272,7 +272,6 @@ type PanelUpdateStatus struct {
 	Progress        int        `json:"progress"`
 	UpdateAvailable bool       `json:"updateAvailable"`
 	CanApply        bool       `json:"canApply"`
-	TokenConfigured bool       `json:"tokenConfigured"`
 	CheckedAt       *time.Time `json:"checkedAt,omitempty"`
 	Message         string     `json:"message,omitempty"`
 }

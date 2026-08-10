@@ -126,9 +126,7 @@ func TestLoadFileAndEnvironmentOverride(t *testing.T) {
 		cfg.TrustedProxyCIDRs[1] != "::1/128" {
 		t.Fatalf("TrustedProxyCIDRs = %#v", cfg.TrustedProxyCIDRs)
 	}
-	if cfg.Update.Channel != "stable" ||
-		cfg.Update.TokenFile != filepath.Join(directory, "github-token.txt") ||
-		cfg.Update.StagingDir != filepath.Join(directory, "updates") {
+	if cfg.Update.Channel != "stable" || cfg.Update.StagingDir != filepath.Join(directory, "updates") {
 		t.Fatalf("Update = %#v", cfg.Update)
 	}
 }

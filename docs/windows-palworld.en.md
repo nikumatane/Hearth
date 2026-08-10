@@ -113,11 +113,10 @@ restart a game process.
 
 ## Updating the Hearth panel
 
-Administrators check and explicitly install from System Settings → Panel Update. While the repository
-is private, store a Contents: Read GitHub token in
-`C:\ProgramData\Hearth\github-token.txt`; no token is needed once it is public. The independent updater
-replaces only Hearth and restores the old program when the new health check fails. It does not stop
-Palworld. See the [panel safe-update guide](panel-update.en.md) for the complete boundary and manual recovery.
+Administrators check and explicitly install from System Settings → Panel Update. Public Release assets
+are read anonymously. The independent updater replaces only Hearth and restores the old program when
+the new health check fails. It does not stop Palworld. See the [panel safe-update guide](panel-update.en.md)
+for the complete boundary and manual recovery.
 
 ## Active-save detection
 

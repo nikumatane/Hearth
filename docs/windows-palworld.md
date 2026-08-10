@@ -105,9 +105,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 ## 更新 Hearth 面板
 
-管理员从“系统设置 → 面板更新”手动检查并确认安装。私有仓库阶段需把仅
-Contents: Read 的 GitHub Token 写入 `C:\ProgramData\Hearth\github-token.txt`；公开后
-无需 Token。独立更新器只替换 Hearth，在新版本健康检查失败时恢复旧程序，不停止 Palworld。
+管理员从“系统设置 → 面板更新”手动检查并确认安装。公开仓库的 Release 可匿名读取；独立
+更新器只替换 Hearth，在新版本健康检查失败时恢复旧程序，不停止 Palworld。
 完整边界和人工恢复方式见 [面板安全更新指南](panel-update.md)。
 
 ## 当前存档识别

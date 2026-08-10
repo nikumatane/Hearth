@@ -47,7 +47,6 @@ type ManagementConfig struct {
 
 type UpdateConfig struct {
 	Channel    string `json:"channel,omitempty"`
-	TokenFile  string `json:"tokenFile,omitempty"`
 	StagingDir string `json:"stagingDir,omitempty"`
 }
 
@@ -148,15 +147,9 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("resolve Hearth state directory: %w", err)
 		}
 		stateDirectory = absoluteStateDirectory
-		if cfg.Update.TokenFile == "" {
-			cfg.Update.TokenFile = filepath.Join(stateDirectory, "github-token.txt")
-		}
 		if cfg.Update.StagingDir == "" {
 			cfg.Update.StagingDir = filepath.Join(stateDirectory, "updates")
 		}
-	}
-	if cfg.Update.TokenFile != "" && !filepath.IsAbs(cfg.Update.TokenFile) {
-		return Config{}, errors.New("update tokenFile must be an absolute path")
 	}
 	if cfg.Update.StagingDir != "" && !filepath.IsAbs(cfg.Update.StagingDir) {
 		return Config{}, errors.New("update stagingDir must be an absolute path")

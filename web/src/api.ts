@@ -277,7 +277,6 @@ export type PanelUpdateStatus = {
   progress: number;
   updateAvailable: boolean;
   canApply: boolean;
-  tokenConfigured: boolean;
   checkedAt?: string;
   message?: string;
 };

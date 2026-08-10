@@ -7,12 +7,11 @@
 本文件从 `0.8.0` 开始记录面向使用者的变化。开发分支中尚未发布的内容放在
 “未发布”一节，构建正式安装包时再归入对应版本。
 
-## 未发布
+## 1.2.0 - 2026-08-10
 
 - 管理员“系统设置 → 面板更新”新增 stable / prerelease 版本检查与手动确认安装；不会静默更新。
-- 面板更新固定从 `nikumatane/Hearth` GitHub Release 下载版本化 Windows 包，依次校验
-  Release 制品摘要、随包 SHA256、文件名与包内 `VERSION`。私有仓库阶段支持仅从受保护
-  文件或环境变量读取 Contents: Read Token，API 与页面不返回明文。
+- 面板更新固定从公开的 `nikumatane/Hearth` GitHub Release 匿名下载版本化 Windows 包，依次
+  校验 Release 制品摘要、随包 SHA256、文件名与包内 `VERSION`；不再需要或读取 GitHub Token。
 - 新增随包独立 `hearth-updater.exe`：等待旧面板退出后替换程序、重新运行 `Hearth` 计划
   任务并检查新版本健康状态；失败时自动恢复旧程序。游戏进程、存档和游戏配置不参与替换。
 - 更新检查、开始、成功、失败和自动回滚进入管理员安全操作审计；跨面板重启的结果通过

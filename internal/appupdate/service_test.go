@@ -23,7 +23,6 @@ import (
 )
 
 func TestServiceChecksStagesAndLaunchesVerifiedRelease(t *testing.T) {
-	t.Setenv(githubTokenEnv, "test-read-token")
 	previousVersion := buildinfo.Version
 	buildinfo.Version = "1.1.0"
 	t.Cleanup(func() { buildinfo.Version = previousVersion })
@@ -35,8 +34,8 @@ func TestServiceChecksStagesAndLaunchesVerifiedRelease(t *testing.T) {
 	checksum := []byte(digest + "  " + zipName + "\n")
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer test-read-token" {
-			t.Fatalf("missing private repository authorization")
+		if authorization := r.Header.Get("Authorization"); authorization != "" {
+			t.Fatalf("anonymous release request sent authorization header: %q", authorization)
 		}
 		switch r.URL.Path {
 		case "/repos/nikumatane/Hearth/releases/latest":

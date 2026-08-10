@@ -8,19 +8,6 @@ Hearth 1.2.0 起，管理员可以在“系统设置 → 面板更新”检查�
 stable 或 prerelease 通道，但任何通道都不会静默安装。当前只在 Windows 安装环境开放
 “确认并安装”；其他系统只返回版本检查状态。
 
-## 私有仓库阶段
-
-仓库保持 Private 时，创建仅限 `nikumatane/Hearth`、只授予 **Contents: Read** 的
-fine-grained GitHub Token，并以纯文本写入：
-
-```text
-C:\ProgramData\Hearth\github-token.txt
-```
-
-该目录由安装器限制为 `SYSTEM` 与 Administrators 可读。也可在人工开发环境设置
-`HEARTH_GITHUB_TOKEN`。不要把 Token 写进 `config.json`、日志、截图或发布包。页面只显示
-“已配置/未配置”，API 不返回路径内容或 Token。仓库公开后删除该文件即可匿名检查和下载。
-
 ## 校验与替换顺序
 
 1. 固定查询 `nikumatane/Hearth` 的 GitHub Release，不接受页面传入仓库地址或下载 URL。
