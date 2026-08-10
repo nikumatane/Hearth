@@ -27,6 +27,6 @@ func terminateCommand(command *exec.Cmd) error {
 }
 
 func processRunning(name string) bool {
-	output, err := exec.Command("tasklist.exe", "/FI", "IMAGENAME eq "+name, "/NH").Output()
+	output, err := exec.Command("tasklist.exe", "/FI", "IMAGENAME eq "+name, "/FO", "CSV", "/NH").Output()
 	return err == nil && strings.Contains(strings.ToLower(string(output)), strings.ToLower(name))
 }
