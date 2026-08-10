@@ -124,14 +124,22 @@ func TestManagementMarksAdoptionPerCandidate(t *testing.T) {
 	}
 }
 
-func TestDiscoveryShowsDSTAsPlannedOnly(t *testing.T) {
+func TestDiscoverySupportsDSTAdoptionCandidate(t *testing.T) {
 	root := t.TempDir()
-	executable := filepath.Join(root, "DST", "bin64", "dontstarve_dedicated_server_nullrenderer_x64.exe")
-	if err := os.MkdirAll(filepath.Dir(executable), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(executable, []byte("test"), 0o600); err != nil {
-		t.Fatal(err)
+	steamRoot := filepath.Join(root, "steamcmd")
+	installDir := filepath.Join(steamRoot, "steamapps", "common", "Don't Starve Together Dedicated Server")
+	clusterDir := filepath.Join(root, "Documents", "Klei", "DoNotStarveTogether", "MyCluster")
+	for _, path := range []string{
+		filepath.Join(installDir, "bin64", "dontstarve_dedicated_server_nullrenderer_x64.exe"),
+		filepath.Join(steamRoot, "steamcmd.exe"), filepath.Join(clusterDir, "cluster.ini"),
+		filepath.Join(clusterDir, "Master", "server.ini"), filepath.Join(clusterDir, "Caves", "server.ini"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("server_port=11000\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	manager, err := New(config.Config{
 		Management: config.ManagementConfig{
@@ -143,8 +151,11 @@ func TestDiscoveryShowsDSTAsPlannedOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := manager.Management().Games[1]
-	if dst.Support != "planned" || dst.State != "detected" || dst.CanInstall || dst.CanAdopt {
+	if dst.Support != "available" || dst.State != "detected" || dst.CanInstall || !dst.CanAdopt || len(dst.Candidates) != 1 {
 		t.Fatalf("dst = %#v", dst)
+	}
+	if dst.Candidates[0].ClusterDir != clusterDir || !dst.Candidates[0].CanAdopt {
+		t.Fatalf("dst candidate = %#v", dst.Candidates[0])
 	}
 }
 

@@ -182,12 +182,14 @@ type Logs struct {
 }
 
 type GameCandidate struct {
-	ID              string `json:"id"`
-	InstallDir      string `json:"installDir"`
-	SteamCmd        string `json:"steamCmd,omitempty"`
-	SettingsPresent bool   `json:"settingsPresent"`
-	CanAdopt        bool   `json:"canAdopt"`
-	Detail          string `json:"detail"`
+	ID                  string `json:"id"`
+	InstallDir          string `json:"installDir"`
+	ClusterDir          string `json:"clusterDir,omitempty"`
+	ClusterTokenPresent bool   `json:"clusterTokenPresent"`
+	SteamCmd            string `json:"steamCmd,omitempty"`
+	SettingsPresent     bool   `json:"settingsPresent"`
+	CanAdopt            bool   `json:"canAdopt"`
+	Detail              string `json:"detail"`
 }
 
 type ManagedGame struct {
@@ -198,6 +200,7 @@ type ManagedGame struct {
 	State        string          `json:"state"`
 	Detail       string          `json:"detail"`
 	InstallDir   string          `json:"installDir,omitempty"`
+	ClusterDir   string          `json:"clusterDir,omitempty"`
 	SteamCmd     string          `json:"steamCmd,omitempty"`
 	CanInstall   bool            `json:"canInstall"`
 	CanAdopt     bool            `json:"canAdopt"`

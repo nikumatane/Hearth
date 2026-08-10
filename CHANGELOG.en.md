@@ -7,6 +7,12 @@
 This file records user-facing changes beginning with `0.8.0`. Work not yet released stays under
 Unreleased and moves to a version section when a formal package is built.
 
+## Unreleased
+
+- The first 1.3.0 phase adds read-only discovery and administrator adoption for an existing DST
+  Dedicated Server and cluster, plus Master/Caves start/stop/restart. Cluster token plaintext is never
+  read back; stopping or restarting requires explicit confirmation to terminate shard processes.
+
 ## 1.2.0 - 2026-08-10
 
 - Added administrator-only stable/prerelease checks and explicitly confirmed installation under

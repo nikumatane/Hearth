@@ -153,7 +153,7 @@ func TestOverviewExposesOnlyOnlinePlayerDisplayNames(t *testing.T) {
 	}
 }
 
-func TestGameManagementIsAdminAuthenticatedAndShowsPlannedDST(t *testing.T) {
+func TestGameManagementIsAdminAuthenticatedAndShowsDST(t *testing.T) {
 	handler := newTestHandler(t, config.Config{AdminPassword: "correct"})
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/v1/system/management", nil))
@@ -171,7 +171,7 @@ func TestGameManagementIsAdminAuthenticatedAndShowsPlannedDST(t *testing.T) {
 	body := response.Body.String()
 	if !strings.Contains(body, `"id":"palworld"`) ||
 		!strings.Contains(body, `"id":"dont-starve-together"`) ||
-		!strings.Contains(body, `"support":"planned"`) {
+		!strings.Contains(body, `"support":"available"`) {
 		t.Fatalf("management body = %s", body)
 	}
 }

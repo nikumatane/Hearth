@@ -36,7 +36,8 @@ Production is deployed as one Go binary:
     management remains on a separate backend page.
 11. Startup discovery checks known exact locations and administrator-configured roots with depth,
     directory, and candidate limits. Adoption and installation are separate confirmed administrator
-    actions; DST exposes planned status only until 1.3.0.
+    actions; the first 1.3.0 DST phase supports adopting an existing Dedicated Server/cluster and
+    Master/Caves lifecycle, while installation, mods, and backup/restore remain disabled.
 12. Backend settings reject stale revisions, replace through a same-directory temporary file, and
     retain `.previous`. Installation stages SteamCMD in isolation and never starts Palworld on completion.
 13. The panel-update layer queries only the fixed official GitHub Release. It verifies the asset

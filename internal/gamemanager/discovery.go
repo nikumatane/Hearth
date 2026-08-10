@@ -91,13 +91,40 @@ func (s *Service) discoverLocked() {
 		}
 		s.candidates[palworldID] = append(s.candidates[palworldID], candidate)
 	}
-	s.candidates[dstID] = make([]panel.GameCandidate, 0, len(dstDirectories))
+	dstClusters := discoverDSTClusters(roots)
+	s.candidates[dstID] = make([]panel.GameCandidate, 0, len(dstDirectories)*max(1, len(dstClusters)))
 	for _, directory := range dstDirectories {
-		s.candidates[dstID] = append(s.candidates[dstID], panel.GameCandidate{
-			ID: candidateID(dstID, directory), InstallDir: directory,
-			SteamCmd: closestSteamCommand(directory, steamCommands),
-			Detail:   "已识别 DST Dedicated Server；1.3.0 才开放接管",
-		})
+		steamCmd := closestSteamCommand(directory, steamCommands)
+		if len(dstClusters) == 0 {
+			s.candidates[dstID] = append(s.candidates[dstID], panel.GameCandidate{
+				ID: candidateID(dstID, directory), InstallDir: directory, SteamCmd: steamCmd,
+				Detail: "已识别 DST Dedicated Server；未发现有效 cluster 目录",
+			})
+			continue
+		}
+		for _, clusterDir := range dstClusters {
+			validCluster := validDSTCluster(clusterDir)
+			canAdopt := validCluster && dstUsesSteamCMDDefaultLayout(directory, steamCmd)
+			tokenPresent := dstClusterTokenPresent(clusterDir)
+			detail := "已识别 DST Dedicated Server 与 cluster 配置"
+			if !validCluster {
+				detail += "；cluster.ini、Master/server.ini 或 Caves/server.ini 不完整"
+			} else if !canAdopt {
+				detail += "；不在 SteamCMD 标准目录，暂不接管"
+			} else {
+				detail += "；可确认接管"
+			}
+			if tokenPresent {
+				detail += "；cluster token 已配置"
+			} else {
+				detail += "；缺少 cluster token，接管后暂不能启动"
+			}
+			s.candidates[dstID] = append(s.candidates[dstID], panel.GameCandidate{
+				ID: candidateID(dstID, directory+"\x00"+clusterDir), InstallDir: directory,
+				ClusterDir: clusterDir, ClusterTokenPresent: tokenPresent, SteamCmd: steamCmd, SettingsPresent: validCluster,
+				CanAdopt: canAdopt, Detail: detail,
+			})
+		}
 	}
 	for id := range s.candidates {
 		sort.Slice(s.candidates[id], func(left, right int) bool {
@@ -120,6 +147,7 @@ func (s *Service) discoveryRootsLocked() []string {
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		roots = append(roots, filepath.Join(home, "Downloads", "steamcmd"))
+		roots = append(roots, filepath.Join(home, "Documents", "Klei", "DoNotStarveTogether"))
 	}
 	if runtime.GOOS == "windows" {
 		for _, drive := range []string{"C:", "D:", "E:"} {
@@ -136,6 +164,65 @@ func (s *Service) discoveryRootsLocked() []string {
 		}
 	}
 	return filtered
+}
+
+func discoverDSTClusters(roots []string) []string {
+	clusters := make(map[string]string)
+	add := func(path string) {
+		path = filepath.Clean(path)
+		if validDSTCluster(path) {
+			clusters[strings.ToLower(path)] = path
+		}
+	}
+	for _, root := range roots {
+		add(root)
+		walkDiscoveryRoot(root, func(path string, entry fs.DirEntry) bool {
+			if strings.EqualFold(entry.Name(), "cluster.ini") {
+				add(filepath.Dir(path))
+			}
+			return true
+		})
+	}
+	result := make([]string, 0, len(clusters))
+	for _, path := range clusters {
+		result = append(result, path)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func validDSTCluster(directory string) bool {
+	if strings.TrimSpace(directory) == "" || !filepath.IsAbs(directory) {
+		return false
+	}
+	for _, path := range []string{
+		filepath.Join(directory, "cluster.ini"),
+		filepath.Join(directory, "Master", "server.ini"),
+		filepath.Join(directory, "Caves", "server.ini"),
+	} {
+		if !fileExists(path) {
+			return false
+		}
+	}
+	return true
+}
+
+func dstClusterTokenPresent(directory string) bool {
+	return fileExists(filepath.Join(directory, "cluster_token.txt"))
+}
+
+func dstUsesSteamCMDDefaultLayout(installDir, steamCmd string) bool {
+	if strings.TrimSpace(steamCmd) == "" {
+		return false
+	}
+	steamRoot := filepath.Dir(steamCmd)
+	for _, name := range []string{"Don't Starve Together Dedicated Server", "DontStarveTogetherDedicatedServer"} {
+		expected := filepath.Join(steamRoot, "steamapps", "common", name)
+		if strings.EqualFold(filepath.Clean(installDir), expected) {
+			return true
+		}
+	}
+	return false
 }
 
 func discoverSteamCommands(roots []string, configuredRoot, configuredExecutable string) []string {

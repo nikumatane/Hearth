@@ -24,7 +24,8 @@
 Hearth embeds its frontend and API in one Go binary. It can adopt an existing SteamCMD game in
 place or install a new Palworld Dedicated Server after explicit administrator confirmation. It
 does not require Docker and never adopts, starts, or moves saves automatically. The production
-adapter focuses on Windows Palworld; Don't Starve Together is detectable but remains explicitly planned.
+adapter focuses on Windows Palworld. The first 1.3.0 DST phase can adopt an existing Dedicated Server
+and cluster and manage the Master/Caves lifecycle; installation, mods, and backups remain in development.
 
 Hearth is intended for setups where:
 

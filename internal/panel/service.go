@@ -184,7 +184,7 @@ func (s *DemoService) Management() Management {
 			},
 			{
 				ID: "dont-starve-together", Name: "饥荒联机版", ShortName: "DST",
-				Support: "planned", State: "not_installed", Detail: "计划在 1.3.0 提供生产适配器",
+				Support: "available", State: "not_installed", Detail: "1.3.0 第一阶段支持现有安装接管与 Master/Caves 生命周期",
 			},
 		},
 		Settings: SystemSettings{

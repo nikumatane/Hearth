@@ -226,6 +226,8 @@ export type Logs = {
 export type GameCandidate = {
   id: string;
   installDir: string;
+  clusterDir?: string;
+  clusterTokenPresent: boolean;
   steamCmd?: string;
   settingsPresent: boolean;
   canAdopt: boolean;
@@ -240,6 +242,7 @@ export type ManagedGame = {
   state: "managed" | "detected" | "not_installed" | "installing" | "error";
   detail: string;
   installDir?: string;
+  clusterDir?: string;
   steamCmd?: string;
   canInstall: boolean;
   canAdopt: boolean;

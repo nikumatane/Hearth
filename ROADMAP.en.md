@@ -32,11 +32,15 @@ Status: complete.
 
 ## 1.3.0 · Production DST adapter
 
-Status: planned.
+Status: in development.
 
-- Add production discovery, adoption, and administrator-triggered installation for Don't Starve Together Dedicated Server.
+- The first phase supports read-only discovery and administrator adoption of an existing Don't Starve
+  Together Dedicated Server and cluster, plus Master/Caves start, stop, and restart. Installation,
+  mods, and backups remain later phases.
 - Manage Master and Caves processes, ports, logs, and lifecycle as one logical game instance.
 - Define cluster configuration, token state, mod updates, safe shutdown, backup, and restore boundaries.
+  The first phase never reads or returns the cluster token plaintext; stop/restart requires explicit
+  confirmation to terminate the shard processes.
 - Reuse the 1.1.0 game catalog, installation task, and backend settings framework instead of creating a side path.
 
 ## Versioning rules

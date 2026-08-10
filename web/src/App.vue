@@ -2155,6 +2155,7 @@ function gameAccent(id: string) {
 
               <div v-if="game.state === 'managed'" class="managed-paths">
                 <label><span>游戏目录</span><code>{{ game.installDir }}</code></label>
+                <label v-if="game.clusterDir"><span>Cluster 目录</span><code>{{ game.clusterDir }}</code></label>
                 <label><span>SteamCMD</span><code>{{ game.steamCmd }}</code></label>
               </div>
 
@@ -2163,20 +2164,21 @@ function gameAccent(id: string) {
                 <div v-for="candidate in game.candidates" :key="candidate.id" class="candidate-row">
                   <div>
                     <code>{{ candidate.installDir }}</code>
+                    <code v-if="candidate.clusterDir">Cluster：{{ candidate.clusterDir }}</code>
                     <span>{{ candidate.detail }}</span>
                   </div>
                   <button
                     v-if="game.support === 'available' && game.state !== 'managed'"
                     class="button secondary small"
                     :disabled="managementSaving || !candidate.canAdopt"
-                    :title="!candidate.settingsPresent ? '缺少 PalWorldSettings.ini，不会自动创建' : !candidate.steamCmd ? '未找到 steamcmd.exe' : !candidate.canAdopt ? '仅支持 SteamCMD 标准目录' : '确认后只保存管理路径'"
+                    :title="game.id === 'dont-starve-together' ? (!candidate.clusterDir ? '缺少有效 cluster 目录（cluster.ini、Master/Caves server.ini）' : !candidate.canAdopt ? '需要完整 DST 服务端和 cluster 配置' : '确认后只保存管理路径') : (!candidate.settingsPresent ? '缺少 PalWorldSettings.ini，不会自动创建' : !candidate.steamCmd ? '未找到 steamcmd.exe' : !candidate.canAdopt ? '仅支持 SteamCMD 标准目录' : '确认后只保存管理路径')"
                     @click="adoptManagedGame(game, candidate.id)"
                   >确认接管</button>
                 </div>
               </div>
 
               <form
-                v-if="game.support === 'available' && game.state !== 'managed'"
+                v-if="game.canInstall && game.state !== 'managed'"
                 class="install-form"
                 @submit.prevent="installManagedGame(game)"
               >
@@ -2205,6 +2207,9 @@ function gameAccent(id: string) {
 
               <div v-if="game.support === 'planned'" class="planned-note">
                 <Clock3 :size="17" />当前只展示探测结果，不提供安装或接管，避免产生无法管理的半成品服务器。
+              </div>
+              <div v-else-if="game.id === 'dont-starve-together' && !game.canInstall" class="planned-note">
+                <Clock3 :size="17" />当前支持接管现有 cluster 与 Master/Caves 生命周期；自动安装、模组和备份恢复将在后续阶段开放。
               </div>
             </article>
           </section>

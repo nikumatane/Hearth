@@ -105,7 +105,9 @@ The installer does not:
   App `2394010`; the server remains stopped afterward.
 - SteamCMD is downloaded and extracted into an isolated same-volume staging directory. ZIP paths and
   expanded size are checked before activation, so an interrupted download is not treated as valid.
-- DST is read-only detected and labeled Planned for 1.3.0; it cannot be installed or adopted yet.
+- The first 1.3.0 DST phase discovers and explicitly adopts an existing Dedicated Server and cluster,
+  and manages Master/Caves lifecycle. It does not install, update mods, or back up/restore yet; cluster
+  token plaintext is never read back or returned.
 
 Backend settings use a revision and reject concurrent overwrites. A successful save retains
 `config.json.previous`. Runtime security changes are marked as requiring a Hearth restart and never
