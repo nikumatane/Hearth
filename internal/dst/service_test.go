@@ -75,6 +75,9 @@ func TestStartRefusesMissingClusterToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(activity.Logs) != 2 || filepath.Ext(activity.Logs[0].ID) != ".log" || filepath.Ext(activity.Logs[1].ID) != ".log" {
+		t.Fatalf("DST log refs = %#v", activity.Logs)
+	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		activities := service.Overview().Activities

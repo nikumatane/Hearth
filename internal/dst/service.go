@@ -155,7 +155,7 @@ func (s *Service) RunAction(id string, request panel.ActionRequest) (panel.Activ
 		Action: request.Action, Title: actionTitle(request.Action),
 		Detail: "DST Master/Caves 任务已进入执行队列", Status: "running",
 		Stage: "排队", Progress: 5, CreatedAt: now, UpdatedAt: now,
-		Logs: []panel.LogRef{{ID: fmt.Sprintf("dst-%d-master", now.UnixNano()), Label: "DST Master 日志"}, {ID: fmt.Sprintf("dst-%d-caves", now.UnixNano()), Label: "DST Caves 日志"}},
+		Logs: []panel.LogRef{{ID: fmt.Sprintf("dst-%d-master.log", now.UnixNano()), Label: "DST Master 日志"}, {ID: fmt.Sprintf("dst-%d-caves.log", now.UnixNano()), Label: "DST Caves 日志"}},
 	}
 	if request.AllowUnsafe {
 		activity.Detail = "已确认：DST 没有 REST 安全关闭通道，将按分片终止进程"
