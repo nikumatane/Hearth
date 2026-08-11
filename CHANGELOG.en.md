@@ -9,6 +9,9 @@ Unreleased and moves to a version section when a formal package is built.
 
 ## Unreleased
 
+- Fixed Windows service-account discovery of the interactive user's default
+  `Documents\\Klei\\DoNotStarveTogether` cluster path; bounded OneDrive document roots are included,
+  while unusual locations still use the extra discovery-root setting.
 - The first 1.3.0 phase adds read-only discovery and administrator adoption for an existing DST
   Dedicated Server and cluster, plus Master/Caves start/stop/restart. Administrators can write the DST
   token from Game Management; it is written only to `cluster_token.txt`, never returned or persisted in

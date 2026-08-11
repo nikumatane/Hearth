@@ -185,6 +185,23 @@ func TestDiscoverySupportsDSTAdoptionCandidate(t *testing.T) {
 	}
 }
 
+func TestDSTProfileRootsIncludeDocumentsAndOneDrive(t *testing.T) {
+	profile := filepath.Join("profiles", "Administrator")
+	roots := dstProfileRoots(profile, []string{filepath.Join(profile, "OneDrive - Hearth")})
+	want := []string{
+		filepath.Join(profile, "Documents", "Klei", "DoNotStarveTogether"),
+		filepath.Join(profile, "OneDrive - Hearth", "Documents", "Klei", "DoNotStarveTogether"),
+	}
+	if len(roots) != len(want) {
+		t.Fatalf("DST profile roots = %#v, want %#v", roots, want)
+	}
+	for index := range want {
+		if roots[index] != want[index] {
+			t.Fatalf("DST profile root %d = %q, want %q", index, roots[index], want[index])
+		}
+	}
+}
+
 func TestSystemSettingsRejectStaleRevisionAndGlobalProxy(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")

@@ -150,6 +150,10 @@ func (s *Service) discoveryRootsLocked() []string {
 		roots = append(roots, filepath.Join(home, "Documents", "Klei", "DoNotStarveTogether"))
 	}
 	if runtime.GOOS == "windows" {
+		// Hearth commonly runs as SYSTEM, so its profile is not the interactive
+		// user's profile where DST stores clusters by default. Enumerate only
+		// the well-known per-user DST roots; custom locations remain opt-in.
+		roots = append(roots, discoverWindowsDSTRoots()...)
 		for _, drive := range []string{"C:", "D:", "E:"} {
 			for _, leaf := range []string{"steamcmd", "SteamCMD", "Games", "GameServers"} {
 				roots = append(roots, filepath.Join(drive+string(filepath.Separator), leaf))
@@ -164,6 +168,16 @@ func (s *Service) discoveryRootsLocked() []string {
 		}
 	}
 	return filtered
+}
+
+func dstProfileRoots(profile string, oneDriveProfiles []string) []string {
+	roots := []string{
+		filepath.Join(profile, "Documents", "Klei", "DoNotStarveTogether"),
+	}
+	for _, oneDrive := range oneDriveProfiles {
+		roots = append(roots, filepath.Join(oneDrive, "Documents", "Klei", "DoNotStarveTogether"))
+	}
+	return roots
 }
 
 func discoverDSTClusters(roots []string) []string {
