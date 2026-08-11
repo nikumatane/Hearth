@@ -10,8 +10,9 @@ Unreleased and moves to a version section when a formal package is built.
 ## Unreleased
 
 - The first 1.3.0 phase adds read-only discovery and administrator adoption for an existing DST
-  Dedicated Server and cluster, plus Master/Caves start/stop/restart. Cluster token plaintext is never
-  read back; stopping or restarting requires explicit confirmation to terminate shard processes.
+  Dedicated Server and cluster, plus Master/Caves start/stop/restart. Administrators can write the DST
+  token from Game Management; it is written only to `cluster_token.txt`, never returned or persisted in
+  Hearth configuration or audit data. Stop/restart and token replacement require the documented safety boundary.
 
 ## 1.2.0 - 2026-08-10
 

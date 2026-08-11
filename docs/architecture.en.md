@@ -37,7 +37,8 @@ Production is deployed as one Go binary:
 11. Startup discovery checks known exact locations and administrator-configured roots with depth,
     directory, and candidate limits. Adoption and installation are separate confirmed administrator
     actions; the first 1.3.0 DST phase supports adopting an existing Dedicated Server/cluster and
-    Master/Caves lifecycle, while installation, mods, and backup/restore remain disabled.
+    Master/Caves lifecycle, and lets an administrator write the cluster token from Game Management;
+    installation, mods, and backup/restore remain disabled.
 12. Backend settings reject stale revisions, replace through a same-directory temporary file, and
     retain `.previous`. Installation stages SteamCMD in isolation and never starts Palworld on completion.
 13. The panel-update layer queries only the fixed official GitHub Release. It verifies the asset
@@ -94,7 +95,8 @@ current small-server use case.
 - Security-operation audit uses structured actor and target fields for member credentials, IP rules,
   game adoption/install starts, and backend-settings saves. `actorIp` identifies the management
   request source; `targetIp` or `targetId` identifies the changed object. Password changes store only
-  a boolean marker, never a password, digest, or previous value.
+  a boolean marker, never a password, digest, or previous value. DST token updates store only a safe
+  “updated” event and never the token content.
 - Parameter audit runs only after a successful `PalWorldSettings.ini` save and compares structured
   values before and after the write. It records actor, source IP, configuration revision, and actual
   changes. Sensitive values are marked as changed without recording their contents.
@@ -169,6 +171,9 @@ current small-server use case.
   the frontend masks sensitive values after parsing. Neither source writes a password back unless it
   was explicitly entered.
 - The Palworld REST API target is fixed at `127.0.0.1`; the frontend cannot control its address.
+- DST cluster tokens are accepted only from the administrator panel. Master/Caves must be stopped first;
+  the token file is atomically replaced with restricted permissions, and plaintext never enters Hearth
+  configuration, API responses, or audit data.
 - Player-list responses are reduced inside the game adapter to sanitized display names. Platform
   accounts, Player IDs, and User IDs never enter the shared panel model or reach the browser.
 

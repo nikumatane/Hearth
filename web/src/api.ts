@@ -149,7 +149,7 @@ export type LoginAuditEntry = {
 export type OperationAuditEntry = {
   id: string;
   event: "member_created" | "member_updated" | "member_deleted" | "ip_rule_added" | "ip_rule_removed" |
-    "game_adopted" | "game_install_started" | "system_settings_updated" |
+    "game_adopted" | "game_install_started" | "dst_token_updated" | "system_settings_updated" |
     "panel_update_checked" | "panel_update_started" | "panel_update_succeeded" |
     "panel_update_rolled_back" | "panel_update_failed";
   actorCredentialId: string;
@@ -244,6 +244,7 @@ export type ManagedGame = {
   installDir?: string;
   clusterDir?: string;
   steamCmd?: string;
+  clusterTokenConfigured: boolean;
   canInstall: boolean;
   canAdopt: boolean;
   candidates?: GameCandidate[];
@@ -400,6 +401,11 @@ export const api = {
     request<Activity>(`/api/v1/system/games/${encodeURIComponent(id)}/install`, {
       method: "POST",
       body: JSON.stringify({ steamCmdRoot, confirm: true })
+    }),
+  updateDSTToken: (token: string) =>
+    request<ManagedGame>("/api/v1/system/games/dont-starve-together/cluster-token", {
+      method: "PUT",
+      body: JSON.stringify({ token })
     }),
   updateSystemSettings: (settings: SystemSettings) =>
     request<SystemSettings>("/api/v1/system/settings", {

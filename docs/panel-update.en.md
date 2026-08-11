@@ -44,3 +44,18 @@ The 1.2.0 trust boundary is the fixed GitHub repository, GitHub TLS/access contr
 digest, and sidecar checksum. A separate project signing key would protect a stronger account-
 compromise scenario, but it also requires offline key custody, CI signing, and rotation and is not
 part of the 1.2.0 operating cost.
+
+## Updating a test package
+
+The panel updater consumes public GitHub Releases anonymously and does not read a GitHub token. To
+make a test package available from the panel:
+
+1. Create a public prerelease for the target version (for example `v1.3.0-rc.1`) and upload exactly
+   `hearth-windows-amd64-v1.3.0-rc.1.zip` plus its `.sha256` sidecar. The ZIP's `VERSION` must match.
+2. Select `Prerelease` under System Settings → Backend Settings, save, and restart Hearth when prompted.
+3. Open System Settings → Panel Update, check for updates, verify the version and checksums, then
+   explicitly prepare the update.
+
+An unpublished local branch or ZIP is not read directly by the panel. Install it manually with the
+ installer/remote copy, or publish it as a prerelease first. Validate prereleases on a test machine;
+ keep production on Stable.

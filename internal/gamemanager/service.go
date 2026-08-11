@@ -23,6 +23,10 @@ const (
 
 type serviceFactory func(config.GameConfig) (panel.Service, error)
 
+type dstTokenUpdater interface {
+	UpdateClusterToken(string) error
+}
+
 type Service struct {
 	mu           sync.RWMutex
 	config       config.Config
@@ -248,10 +252,11 @@ func (s *Service) managementLocked() panel.Management {
 			{
 				ID: dstID, Name: "饥荒联机版", ShortName: "DST", Support: "available",
 				State: dstState, Detail: dstDetailText, Candidates: cloneCandidates(s.candidates[dstID]),
-				InstallDir: s.config.Games.DontStarveTogether.InstallDir,
-				ClusterDir: s.config.Games.DontStarveTogether.ClusterDir,
-				SteamCmd:   s.config.Games.DontStarveTogether.SteamCmd,
-				CanAdopt:   s.dstDelegate == nil && hasAdoptableCandidate(s.candidates[dstID]),
+				InstallDir:             s.config.Games.DontStarveTogether.InstallDir,
+				ClusterDir:             s.config.Games.DontStarveTogether.ClusterDir,
+				SteamCmd:               s.config.Games.DontStarveTogether.SteamCmd,
+				ClusterTokenConfigured: dstClusterTokenPresent(s.config.Games.DontStarveTogether.ClusterDir),
+				CanAdopt:               s.dstDelegate == nil && hasAdoptableCandidate(s.candidates[dstID]),
 			},
 		},
 		Settings: settings,
@@ -356,6 +361,30 @@ func (s *Service) adoptDST(request panel.AdoptGameRequest) (panel.ManagedGame, e
 	}
 	s.config, s.dstDelegate, s.dstInitError = next, delegate, nil
 	return s.managementLocked().Games[1], nil
+}
+
+func (s *Service) UpdateDSTToken(token string) (panel.ManagedGame, error) {
+	s.mu.RLock()
+	delegate := s.dstDelegate
+	s.mu.RUnlock()
+	if delegate == nil {
+		return panel.ManagedGame{}, panel.ErrNotFound
+	}
+	updater, ok := delegate.(dstTokenUpdater)
+	if !ok {
+		return panel.ManagedGame{}, fmt.Errorf("%w: DST Token 配置不可用", panel.ErrInvalid)
+	}
+	if err := updater.UpdateClusterToken(token); err != nil {
+		return panel.ManagedGame{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, game := range s.managementLocked().Games {
+		if game.ID == dstID {
+			return game, nil
+		}
+	}
+	return panel.ManagedGame{}, panel.ErrNotFound
 }
 
 func (s *Service) UpdateSystemSettings(patch panel.SystemSettingsPatch) (panel.SystemSettings, error) {

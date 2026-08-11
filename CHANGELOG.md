@@ -10,7 +10,8 @@
 ## 未发布
 
 - 1.3.0 第一阶段新增 DST Dedicated Server 与 cluster 的只读探测、管理员接管，以及 Master/Caves
-  双分片启停/重启；不读取或回显 cluster token，停止/重启需要明确确认强制终止。
+  双分片启停/重启；管理员可在游戏管理页写入 DST Token。Token 只写入 cluster_token.txt，
+  不读取或回显明文；停止/重启和 Token 更新需要明确的安全边界。
 
 ## 1.2.0 - 2026-08-10
 

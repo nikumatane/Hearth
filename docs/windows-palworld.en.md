@@ -106,8 +106,9 @@ The installer does not:
 - SteamCMD is downloaded and extracted into an isolated same-volume staging directory. ZIP paths and
   expanded size are checked before activation, so an interrupted download is not treated as valid.
 - The first 1.3.0 DST phase discovers and explicitly adopts an existing Dedicated Server and cluster,
-  and manages Master/Caves lifecycle. It does not install, update mods, or back up/restore yet; cluster
-  token plaintext is never read back or returned.
+  and manages Master/Caves lifecycle. Administrators can write the token from Game Management; it is
+  written only to `cluster_token.txt`, never persisted in Hearth configuration, API responses, or audit
+  data. Installation, mod updates, and backup/restore remain later phases.
 
 Backend settings use a revision and reject concurrent overwrites. A successful save retains
 `config.json.previous`. Runtime security changes are marked as requiring a Hearth restart and never

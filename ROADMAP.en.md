@@ -39,8 +39,8 @@ Status: in development.
   mods, and backups remain later phases.
 - Manage Master and Caves processes, ports, logs, and lifecycle as one logical game instance.
 - Define cluster configuration, token state, mod updates, safe shutdown, backup, and restore boundaries.
-  The first phase never reads or returns the cluster token plaintext; stop/restart requires explicit
-  confirmation to terminate the shard processes.
+  Administrators can write the DST token from Game Management. The first phase never reads or returns
+  the cluster token plaintext; stop/restart and token replacement require the documented safety boundary.
 - Reuse the 1.1.0 game catalog, installation task, and backend settings framework instead of creating a side path.
 
 ## Versioning rules

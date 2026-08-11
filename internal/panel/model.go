@@ -193,19 +193,20 @@ type GameCandidate struct {
 }
 
 type ManagedGame struct {
-	ID           string          `json:"id"`
-	Name         string          `json:"name"`
-	ShortName    string          `json:"shortName"`
-	Support      string          `json:"support"`
-	State        string          `json:"state"`
-	Detail       string          `json:"detail"`
-	InstallDir   string          `json:"installDir,omitempty"`
-	ClusterDir   string          `json:"clusterDir,omitempty"`
-	SteamCmd     string          `json:"steamCmd,omitempty"`
-	CanInstall   bool            `json:"canInstall"`
-	CanAdopt     bool            `json:"canAdopt"`
-	Candidates   []GameCandidate `json:"candidates,omitempty"`
-	ActiveTaskID string          `json:"activeTaskId,omitempty"`
+	ID                     string          `json:"id"`
+	Name                   string          `json:"name"`
+	ShortName              string          `json:"shortName"`
+	Support                string          `json:"support"`
+	State                  string          `json:"state"`
+	Detail                 string          `json:"detail"`
+	InstallDir             string          `json:"installDir,omitempty"`
+	ClusterDir             string          `json:"clusterDir,omitempty"`
+	SteamCmd               string          `json:"steamCmd,omitempty"`
+	ClusterTokenConfigured bool            `json:"clusterTokenConfigured"`
+	CanInstall             bool            `json:"canInstall"`
+	CanAdopt               bool            `json:"canAdopt"`
+	Candidates             []GameCandidate `json:"candidates,omitempty"`
+	ActiveTaskID           string          `json:"activeTaskId,omitempty"`
 }
 
 type SystemSettings struct {
@@ -239,6 +240,12 @@ type InstallGameRequest struct {
 	Confirm      bool   `json:"confirm"`
 }
 
+// DSTTokenPatch replaces the Klei cluster token without persisting it in
+// Hearth configuration or returning it from the API.
+type DSTTokenPatch struct {
+	Token string `json:"token"`
+}
+
 type SystemSettingsPatch struct {
 	Revision                  string   `json:"revision"`
 	InstallRoot               string   `json:"installRoot"`
@@ -259,6 +266,7 @@ type ManagementService interface {
 	RefreshDiscovery() (Management, error)
 	AdoptGame(id string, request AdoptGameRequest) (ManagedGame, error)
 	InstallGame(id string, request InstallGameRequest) (Activity, error)
+	UpdateDSTToken(token string) (ManagedGame, error)
 	UpdateSystemSettings(patch SystemSettingsPatch) (SystemSettings, error)
 }
 

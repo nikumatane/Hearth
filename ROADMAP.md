@@ -38,8 +38,8 @@
 - 第一阶段已支持现有 Don't Starve Together Dedicated Server 与 cluster 的只读探测、管理员接管，
   以及 Master/Caves 双分片的启动、停止和重启；安装、模组和备份能力仍在后续阶段。
 - 以一个逻辑游戏实例管理 Master / Caves 分片的进程、端口、日志和生命周期。
-- 管理 cluster 配置、token 状态、模组更新、安全关闭、备份和恢复边界；第一阶段不读取或回显
-  cluster token 明文，且停止/重启必须明确确认强制终止。
+- 管理 cluster 配置、token 状态、模组更新、安全关闭、备份和恢复边界；管理员可在游戏管理页
+  写入 DST Token，第一阶段不读取或回显 cluster token 明文，且停止/重启必须明确确认强制终止。
 - 复用 1.1.0 的游戏目录、安装任务和后台设置能力，不为 DST 建立旁路实现。
 
 ## 版本规则

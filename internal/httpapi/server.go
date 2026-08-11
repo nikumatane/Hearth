@@ -122,6 +122,7 @@ func NewWithUpdates(cfg config.Config, service panel.Service, updates panel.Pane
 	mux.HandleFunc("POST /api/v1/system/discovery", s.admin(s.refreshDiscovery))
 	mux.HandleFunc("POST /api/v1/system/games/{id}/adopt", s.admin(s.adoptGame))
 	mux.HandleFunc("POST /api/v1/system/games/{id}/install", s.admin(s.installGame))
+	mux.HandleFunc("PUT /api/v1/system/games/{id}/cluster-token", s.admin(s.updateDSTToken))
 	mux.HandleFunc("PATCH /api/v1/system/settings", s.admin(s.updateSystemSettings))
 	mux.HandleFunc("GET /api/v1/system/update", s.admin(s.panelUpdateStatus))
 	mux.HandleFunc("POST /api/v1/system/update/check", s.admin(s.checkPanelUpdate))
@@ -280,6 +281,30 @@ func (s *server) installGame(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordManagementOperation(r, operationEventGameInstall, operationTargetGame, activity.GameID)
 	writeJSON(w, http.StatusAccepted, activity)
+}
+
+func (s *server) updateDSTToken(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("id") != "dont-starve-together" {
+		writeServiceError(w, panel.ErrNotFound)
+		return
+	}
+	manager, err := s.managementService()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	var patch panel.DSTTokenPatch
+	if err := decodeJSONLimit(r, &patch, 16<<10); err != nil {
+		writeError(w, http.StatusBadRequest, "DST Token 请求格式不正确")
+		return
+	}
+	game, err := manager.UpdateDSTToken(patch.Token)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	s.recordManagementOperation(r, operationEventDSTTokenUpdated, operationTargetGame, game.ID)
+	writeJSON(w, http.StatusOK, game)
 }
 
 func (s *server) updateSystemSettings(w http.ResponseWriter, r *http.Request) {

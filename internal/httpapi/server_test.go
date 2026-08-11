@@ -87,6 +87,26 @@ func TestPanelUpdateResultIsImportedAndAcknowledged(t *testing.T) {
 	}
 }
 
+func TestDSTTokenRouteIsAdminOnlyAndScoped(t *testing.T) {
+	handler, err := New(config.Config{AdminPassword: "correct"}, panel.NewDemoService())
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthorized := requestForTest(t, handler, http.MethodPut, "/api/v1/system/games/dont-starve-together/cluster-token", `{"token":"secret"}`, nil)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous token update status = %d", unauthorized.Code)
+	}
+	cookie := loginTestHandler(t, handler)
+	wrongGame := requestForTest(t, handler, http.MethodPut, "/api/v1/system/games/palworld/cluster-token", `{"token":"secret"}`, cookie)
+	if wrongGame.Code != http.StatusNotFound {
+		t.Fatalf("wrong game token update status = %d", wrongGame.Code)
+	}
+	unsupported := requestForTest(t, handler, http.MethodPut, "/api/v1/system/games/dont-starve-together/cluster-token", `{"token":"secret"}`, cookie)
+	if unsupported.Code != http.StatusBadRequest || strings.Contains(unsupported.Body.String(), "secret") {
+		t.Fatalf("unsupported token update = %d %s", unsupported.Code, unsupported.Body.String())
+	}
+}
+
 func TestLoginAndAuthenticatedOverview(t *testing.T) {
 	handler := newTestHandler(t, config.Config{AdminPassword: "correct"})
 

@@ -92,6 +92,55 @@ func TestStartRefusesMissingClusterToken(t *testing.T) {
 	t.Fatalf("start activity did not fail: %#v", service.Overview().Activities)
 }
 
+func TestUpdateClusterTokenWritesOnlyTokenFile(t *testing.T) {
+	gameConfig := testConfig(t)
+	service, err := NewService(gameConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	if service.ClusterTokenConfigured() {
+		t.Fatal("token should initially be absent")
+	}
+	const token = "test-cluster-token-123"
+	if err := service.UpdateClusterToken(token); err != nil {
+		t.Fatal(err)
+	}
+	tokenPath := filepath.Join(gameConfig.ClusterDir, "cluster_token.txt")
+	data, err := os.ReadFile(tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(tokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("token file permissions = %o", info.Mode().Perm())
+	}
+	if string(data) != token || !service.ClusterTokenConfigured() {
+		t.Fatalf("token file = %q, configured = %v", string(data), service.ClusterTokenConfigured())
+	}
+}
+
+func TestUpdateClusterTokenRejectsInvalidOrRunning(t *testing.T) {
+	service, err := NewService(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	for _, token := range []string{"", "bad\nvalue", "bad\x00value"} {
+		if err := service.UpdateClusterToken(token); !errors.Is(err, panel.ErrInvalid) {
+			t.Fatalf("token %q error = %v", token, err)
+		}
+	}
+	service.masterRunning = true
+	if err := service.UpdateClusterToken("valid-token"); !errors.Is(err, panel.ErrUnsafe) {
+		t.Fatalf("running update error = %v", err)
+	}
+}
+
 func TestReadINIIntFallback(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.ini")
 	if err := os.WriteFile(path, []byte("[NETWORK]\nserver_port = 11001\n"), 0o600); err != nil {

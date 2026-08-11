@@ -22,6 +22,7 @@ const (
 	operationEventIPRuleRemoved         = "ip_rule_removed"
 	operationEventGameAdopted           = "game_adopted"
 	operationEventGameInstall           = "game_install_started"
+	operationEventDSTTokenUpdated       = "dst_token_updated"
 	operationEventSystemUpdated         = "system_settings_updated"
 	operationEventPanelUpdateChecked    = "panel_update_checked"
 	operationEventPanelUpdateStarted    = "panel_update_started"
@@ -191,6 +192,8 @@ func validOperationAuditEntry(entry operationAuditEntry) bool {
 			(entry.RuleKind == ipRuleAllow || entry.RuleKind == ipRuleDeny)
 	case operationEventGameAdopted, operationEventGameInstall:
 		return entry.TargetType == operationTargetGame && entry.TargetID != ""
+	case operationEventDSTTokenUpdated:
+		return entry.ActorRole == roleAdmin && entry.TargetType == operationTargetGame && entry.TargetID == "dont-starve-together"
 	case operationEventSystemUpdated, operationEventPanelUpdateChecked, operationEventPanelUpdateStarted:
 		return entry.TargetType == operationTargetSystem && entry.TargetID == "hearth"
 	case operationEventPanelUpdateSucceeded, operationEventPanelUpdateRolledBack, operationEventPanelUpdateFailed:

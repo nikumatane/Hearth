@@ -210,6 +210,10 @@ func (s *DemoService) InstallGame(string, InstallGameRequest) (Activity, error) 
 	return Activity{}, ErrInvalid
 }
 
+func (s *DemoService) UpdateDSTToken(string) (ManagedGame, error) {
+	return ManagedGame{}, ErrInvalid
+}
+
 func (s *DemoService) UpdateSystemSettings(patch SystemSettingsPatch) (SystemSettings, error) {
 	settings := s.Management().Settings
 	if patch.Revision != settings.Revision {

@@ -157,6 +157,32 @@ func TestDiscoverySupportsDSTAdoptionCandidate(t *testing.T) {
 	if dst.Candidates[0].ClusterDir != clusterDir || !dst.Candidates[0].CanAdopt {
 		t.Fatalf("dst candidate = %#v", dst.Candidates[0])
 	}
+	managed, err := manager.AdoptGame(dstID, panel.AdoptGameRequest{CandidateID: dst.Candidates[0].ID, Confirm: true})
+	if err != nil {
+		t.Fatalf("DST adoption error = %v", err)
+	}
+	if managed.ClusterTokenConfigured {
+		t.Fatal("DST token should initially be absent")
+	}
+	const token = "manager-test-token"
+	updated, err := manager.UpdateDSTToken(token)
+	if err != nil {
+		t.Fatalf("DST token update error = %v", err)
+	}
+	if !updated.ClusterTokenConfigured {
+		t.Fatal("DST token was not reflected in management state")
+	}
+	data, err := os.ReadFile(filepath.Join(clusterDir, "cluster_token.txt"))
+	if err != nil || string(data) != token {
+		t.Fatalf("DST token file = %q, error = %v", string(data), err)
+	}
+	persisted, err := os.ReadFile(filepath.Join(root, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(persisted, []byte(token)) {
+		t.Fatal("DST token leaked into Hearth config")
+	}
 }
 
 func TestSystemSettingsRejectStaleRevisionAndGlobalProxy(t *testing.T) {

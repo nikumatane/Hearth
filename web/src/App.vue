@@ -174,6 +174,7 @@ const deletingMemberId = ref("");
 const management = ref<Management | null>(null);
 const managementLoading = ref(false);
 const managementSaving = ref(false);
+const dstTokenInput = ref("");
 const systemTab = ref<"games" | "settings" | "updates">("games");
 const panelUpdate = ref<PanelUpdateStatus | null>(null);
 const panelUpdateBusy = ref(false);
@@ -734,6 +735,25 @@ async function installManagedGame(game: ManagedGame) {
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "安装任务提交失败");
   } finally {
+    managementSaving.value = false;
+  }
+}
+
+async function saveDSTToken(game: ManagedGame) {
+  const token = dstTokenInput.value.trim();
+  if (game.id !== "dont-starve-together" || !token) {
+    showToast("error", "请输入 DST Cluster Token");
+    return;
+  }
+  managementSaving.value = true;
+  try {
+    await api.updateDSTToken(token);
+    showToast("success", "DST Cluster Token 已更新；可启动 Master/Caves");
+    await Promise.all([refresh(true), loadManagement(true)]);
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "DST Token 更新失败");
+  } finally {
+    dstTokenInput.value = "";
     managementSaving.value = false;
   }
 }
@@ -1405,6 +1425,7 @@ function operationActionLabel(entry: OperationAuditEntry) {
     case "ip_rule_removed": return `删除${entry.ruleKind === "deny" ? "黑" : "白"}名单规则`;
     case "game_adopted": return "接管游戏服务器";
     case "game_install_started": return "启动游戏安装";
+    case "dst_token_updated": return "更新 DST Cluster Token";
     case "system_settings_updated": return "保存后台设置";
     case "panel_update_checked": return "检查面板更新";
     case "panel_update_started": return "启动面板更新";
@@ -1443,6 +1464,7 @@ function operationDetailLabel(entry: OperationAuditEntry) {
   if (entry.event === "member_deleted") return "成员凭据已删除，原会话已失效";
   if (entry.event === "game_adopted") return "已保存经确认的现有安装路径";
   if (entry.event === "game_install_started") return "安装任务已进入队列，完成后不会自动启动";
+  if (entry.event === "dst_token_updated") return "Token 已写入 DST cluster_token.txt；审计不保存 Token 内容";
   if (entry.event === "system_settings_updated") return "配置已保存；页面会提示是否需要重启 Hearth";
   if (entry.event === "panel_update_checked") return "已查询固定官方仓库的 Release 元数据";
   if (entry.event === "panel_update_started") return "已确认下载、校验并由独立更新器执行健康检查与回滚";
@@ -2158,6 +2180,27 @@ function gameAccent(id: string) {
                 <label v-if="game.clusterDir"><span>Cluster 目录</span><code>{{ game.clusterDir }}</code></label>
                 <label><span>SteamCMD</span><code>{{ game.steamCmd }}</code></label>
               </div>
+
+              <form
+                v-if="game.id === 'dont-starve-together' && game.state === 'managed'"
+                class="install-form token-form"
+                @submit.prevent="saveDSTToken(game)"
+              >
+                <div class="install-form-head">
+                  <KeyRound :size="18" />
+                  <div><strong>DST 集群 Token</strong><span>{{ game.clusterTokenConfigured ? "已配置（内容不会回显）" : "尚未配置，启动前必须写入" }}</span></div>
+                </div>
+                <label>
+                  <span>Cluster Token</span>
+                  <input v-model="dstTokenInput" type="password" autocomplete="new-password" placeholder="输入 Klei cluster_token" />
+                  <small>仅管理员可操作；Hearth 只写入 <code>cluster_token.txt</code>，不会保存到面板配置、接口响应或审计记录。更新前请先停止 DST。</small>
+                </label>
+                <button class="button secondary" :disabled="managementSaving || !dstTokenInput.trim()">
+                  <LoaderCircle v-if="managementSaving" class="spin" :size="16" />
+                  <Save v-else :size="16" />
+                  保存 Token
+                </button>
+              </form>
 
               <div v-if="game.candidates?.length" class="candidate-list">
                 <strong>只读探测结果</strong>
