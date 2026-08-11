@@ -156,3 +156,56 @@ func TestReadINIIntFallback(t *testing.T) {
 		t.Fatalf("fallback port = %d", got)
 	}
 }
+
+func TestDSTConfigRevisionAndAtomicUpdate(t *testing.T) {
+	gameConfig := testConfig(t)
+	service, err := NewService(gameConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	document, err := service.DSTConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Files) != 3 || document.Revision == "" {
+		t.Fatalf("DST config = %#v", document)
+	}
+	updated, err := service.UpdateDSTConfig(panel.DSTConfigPatch{
+		Revision: document.Revision,
+		Files:    map[string]string{"master": "server_port=11002\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision == document.Revision || updated.Files[1].Content != "server_port=11002\n" {
+		t.Fatalf("updated DST config = %#v", updated)
+	}
+	if _, err := service.UpdateDSTConfig(panel.DSTConfigPatch{Revision: document.Revision, Files: map[string]string{"master": "stale"}}); !errors.Is(err, panel.ErrInvalid) {
+		t.Fatalf("stale revision error = %v", err)
+	}
+}
+
+func TestDSTConfigRejectsRunningAndUnsafeContent(t *testing.T) {
+	service, err := NewService(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	document, err := service.DSTConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, content := range []string{"bad\x00value", "not-an-ini-line", strings.Repeat("x", maxDSTConfigFileSize+1)} {
+		_, err := service.UpdateDSTConfig(panel.DSTConfigPatch{Revision: document.Revision, Files: map[string]string{"cluster": content}})
+		if !errors.Is(err, panel.ErrInvalid) {
+			t.Fatalf("content error = %v", err)
+		}
+	}
+	service.masterRunning = true
+	_, err = service.UpdateDSTConfig(panel.DSTConfigPatch{Revision: document.Revision, Files: map[string]string{"cluster": "safe"}})
+	if !errors.Is(err, panel.ErrUnsafe) {
+		t.Fatalf("running update error = %v", err)
+	}
+}

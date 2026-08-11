@@ -45,7 +45,7 @@ Status: complete on Windows (DST automatic installation, mods, and backup/restor
 
 ## 1.3.1 · Game management and DST configuration
 
-Status: planned.
+Status: in development (current branch: `release/1.3.1`).
 
 - Show Palworld and DST configuration navigation only when the game is installed locally and managed by Hearth; discovery alone is not enough.
 - Add administrator-only, revision-checked views and constrained editing for `cluster.ini`, `Master/server.ini`, and `Caves/server.ini`, with stopped-server writes and audit boundaries.

@@ -2122,6 +2122,24 @@ textarea:focus-visible {
   min-width: 0;
 }
 
+.dst-config-editor {
+  display: block;
+  width: 100%;
+  min-height: 520px;
+  padding: 18px 20px;
+  border: 0;
+  border-radius: 0 0 12px 12px;
+  resize: vertical;
+  background: #0b1019;
+  color: #cbd5e1;
+  font: 13px/1.65 "DM Mono", ui-monospace, monospace;
+  outline: none;
+}
+
+.dst-config-editor:focus {
+  box-shadow: inset 0 0 0 1px rgba(118, 151, 255, .55);
+}
+
 .settings-group + .settings-group {
   margin-top: 14px;
 }

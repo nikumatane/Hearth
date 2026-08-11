@@ -23,6 +23,7 @@ const (
 	operationEventGameAdopted           = "game_adopted"
 	operationEventGameInstall           = "game_install_started"
 	operationEventDSTTokenUpdated       = "dst_token_updated"
+	operationEventDSTConfigUpdated      = "dst_config_updated"
 	operationEventSystemUpdated         = "system_settings_updated"
 	operationEventPanelUpdateChecked    = "panel_update_checked"
 	operationEventPanelUpdateStarted    = "panel_update_started"

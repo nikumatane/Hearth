@@ -168,6 +168,27 @@ type WorldOptionDocument struct {
 	Data         []byte    `json:"data"`
 }
 
+// DSTConfigFile is one of the fixed, server-side configuration files managed
+// by the DST adapter. Content is returned only to an authenticated admin.
+type DSTConfigFile struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Revision     string    `json:"revision"`
+	LastModified time.Time `json:"lastModified"`
+	Content      string    `json:"content"`
+}
+
+type DSTConfigDocument struct {
+	Revision     string          `json:"revision"`
+	LastModified time.Time       `json:"lastModified"`
+	Files        []DSTConfigFile `json:"files"`
+}
+
+type DSTConfigPatch struct {
+	Revision string            `json:"revision"`
+	Files    map[string]string `json:"files"`
+}
+
 type LogFile struct {
 	ID        string    `json:"id"`
 	Label     string    `json:"label"`

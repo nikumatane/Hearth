@@ -210,6 +210,20 @@ export type WorldOptionDocument = {
   data: string;
 };
 
+export type DSTConfigFile = {
+  id: "cluster" | "master" | "caves";
+  name: string;
+  revision: string;
+  lastModified: string;
+  content: string;
+};
+
+export type DSTConfigDocument = {
+  revision: string;
+  lastModified: string;
+  files: DSTConfigFile[];
+};
+
 export type LogFile = {
   id: string;
   label: string;
@@ -341,6 +355,13 @@ export const api = {
     request<WorldOptionDocument>("/api/v1/games/palworld/world-option", {
       method: "PUT",
       body: JSON.stringify(document)
+    }),
+  dstConfig: () =>
+    request<DSTConfigDocument>("/api/v1/games/dont-starve-together/config"),
+  updateDSTConfig: (patch: { revision: string; files: Record<string, string> }) =>
+    request<DSTConfigDocument>("/api/v1/games/dont-starve-together/config", {
+      method: "PUT",
+      body: JSON.stringify(patch)
     }),
   logs: () => request<Logs>("/api/v1/logs"),
   log: (id: string) => request<LogFile>(`/api/v1/logs/${encodeURIComponent(id)}`),

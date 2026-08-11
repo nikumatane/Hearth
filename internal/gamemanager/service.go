@@ -183,6 +183,26 @@ func (s *Service) UpdateWorldOption(document panel.WorldOptionDocument) (panel.W
 	return delegate.UpdateWorldOption(document)
 }
 
+func (s *Service) DSTConfig() (panel.DSTConfigDocument, error) {
+	s.mu.RLock()
+	delegate := s.dstDelegate
+	s.mu.RUnlock()
+	if delegate == nil {
+		return panel.DSTConfigDocument{}, panel.ErrNotFound
+	}
+	return delegate.DSTConfig()
+}
+
+func (s *Service) UpdateDSTConfig(patch panel.DSTConfigPatch) (panel.DSTConfigDocument, error) {
+	s.mu.RLock()
+	delegate := s.dstDelegate
+	s.mu.RUnlock()
+	if delegate == nil {
+		return panel.DSTConfigDocument{}, panel.ErrNotFound
+	}
+	return delegate.UpdateDSTConfig(patch)
+}
+
 func (s *Service) Management() panel.Management {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

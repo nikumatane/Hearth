@@ -24,6 +24,8 @@ type Service interface {
 	UpdatePalworldSettings(patch PalworldSettingsPatch) (PalworldSettings, error)
 	WorldOption() (WorldOptionDocument, error)
 	UpdateWorldOption(document WorldOptionDocument) (WorldOptionDocument, error)
+	DSTConfig() (DSTConfigDocument, error)
+	UpdateDSTConfig(patch DSTConfigPatch) (DSTConfigDocument, error)
 }
 
 type DemoService struct {
@@ -172,6 +174,14 @@ func (s *DemoService) WorldOption() (WorldOptionDocument, error) {
 
 func (s *DemoService) UpdateWorldOption(WorldOptionDocument) (WorldOptionDocument, error) {
 	return WorldOptionDocument{}, ErrNotFound
+}
+
+func (s *DemoService) DSTConfig() (DSTConfigDocument, error) {
+	return DSTConfigDocument{}, ErrNotFound
+}
+
+func (s *DemoService) UpdateDSTConfig(DSTConfigPatch) (DSTConfigDocument, error) {
+	return DSTConfigDocument{}, ErrNotFound
 }
 
 func (s *DemoService) Management() Management {

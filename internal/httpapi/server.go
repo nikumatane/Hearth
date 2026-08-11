@@ -106,6 +106,14 @@ func NewWithUpdates(cfg config.Config, service panel.Service, updates panel.Pane
 		"PUT /api/v1/games/palworld/world-option",
 		s.admin(s.updateWorldOption),
 	)
+	mux.HandleFunc(
+		"GET /api/v1/games/dont-starve-together/config",
+		s.admin(s.dstConfig),
+	)
+	mux.HandleFunc(
+		"PUT /api/v1/games/dont-starve-together/config",
+		s.admin(s.updateDSTConfig),
+	)
 	mux.HandleFunc("GET /api/v1/logs", s.admin(s.logs))
 	mux.HandleFunc("GET /api/v1/logs/{id}", s.admin(s.logFile))
 	mux.HandleFunc("GET /api/v1/access/members", s.admin(s.members))
@@ -678,6 +686,30 @@ func (s *server) updateWorldOption(w http.ResponseWriter, r *http.Request) {
 		writeServiceError(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (s *server) dstConfig(w http.ResponseWriter, _ *http.Request) {
+	document, err := s.service.DSTConfig()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, document)
+}
+
+func (s *server) updateDSTConfig(w http.ResponseWriter, r *http.Request) {
+	var patch panel.DSTConfigPatch
+	if err := decodeJSONLimit(r, &patch, 2<<20); err != nil {
+		writeError(w, http.StatusBadRequest, "DST 配置请求格式不正确")
+		return
+	}
+	updated, err := s.service.UpdateDSTConfig(patch)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	s.recordManagementOperation(r, operationEventDSTConfigUpdated, operationTargetGame, "dont-starve-together")
 	writeJSON(w, http.StatusOK, updated)
 }
 

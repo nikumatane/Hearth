@@ -11,6 +11,13 @@ Unreleased and moves to a version section when a formal package is built.
 
 Future 1.3.x work is tracked in the [roadmap](ROADMAP.en.md).
 
+### 1.3.1 in development
+
+- Show Palworld and DST configuration navigation only when the corresponding game is installed and managed by Hearth.
+- Add an administrator-only DST configuration page for the fixed `cluster.ini`, `Master/server.ini`, and
+  `Caves/server.ini` files, with server-side path/UTF-8/size validation, revision checks, stopped-server
+  protection, and an auditable save operation.
+
 ## 1.3.0 - 2026-08-11
 
 - Fixed Windows service-account discovery of the interactive user's default

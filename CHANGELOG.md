@@ -11,6 +11,12 @@
 
 后续 1.3.x 计划见 [路线图](ROADMAP.md)。
 
+### 1.3.1 开发中
+
+- 帕鲁和饥荒联机版的配置导航只在对应游戏已安装并由 Hearth 接管时显示。
+- 新增管理员专属 DST 配置页，固定管理 `cluster.ini`、`Master/server.ini` 和 `Caves/server.ini`；
+  服务端执行路径白名单、UTF-8/大小校验、修订号并发校验和停服写入保护，保存动作进入安全操作审计。
+
 ## 1.3.0 - 2026-08-11
 
 - 修复 Windows 服务账户运行 Hearth 时无法自动发现交互用户 `Documents\\Klei\\DoNotStarveTogether`

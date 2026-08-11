@@ -46,6 +46,7 @@ import {
   isUnauthorized,
   type ConfigAuditChange,
   type ConfigAuditEntry,
+  type DSTConfigDocument,
   type Game,
   type IPRule,
   type LoginAuditEntry,
@@ -117,6 +118,7 @@ const loggingIn = ref(false);
 const overview = ref<Overview | null>(null);
 const page = ref<Page>("overview");
 const selectedGameId = ref("palworld");
+const settingsGameId = ref<"palworld" | "dont-starve-together">("palworld");
 const mobileNavOpen = ref(false);
 const loading = ref(false);
 const loadError = ref("");
@@ -141,6 +143,12 @@ const parsedWorldOption = ref<ParsedWorldOption | null>(null);
 const worldRoundTripError = ref("");
 const worldSourceError = ref("");
 const iniSourceError = ref("");
+const dstConfig = ref<DSTConfigDocument | null>(null);
+const dstConfigActiveFile = ref<"cluster" | "master" | "caves">("cluster");
+const dstConfigDrafts = ref<Record<string, string>>({});
+const dstConfigDirty = ref(false);
+const dstConfigLoading = ref(false);
+const dstConfigSaving = ref(false);
 const logs = ref<Logs | null>(null);
 const logsLoading = ref(false);
 const selectedLogId = ref("");
@@ -209,6 +217,9 @@ const runningCount = computed(
 
 const palworldGame = computed(() =>
   overview.value?.games.find((game) => game.id === "palworld")
+);
+const dstGame = computed(() =>
+  overview.value?.games.find((game) => game.id === "dont-starve-together")
 );
 const steamCmdPalworldPath = computed(() => {
   const root = installSteamCmdRoot.value.trim().replace(/[\\/]+$/, "");
@@ -306,7 +317,7 @@ const filteredGroups = computed(() => {
 
 const pageTitle = computed(() => {
 	if (page.value === "system") return "系统设置与游戏管理";
-  if (page.value === "settings") return "帕鲁服务器配置";
+  if (page.value === "settings") return settingsGameId.value === "dont-starve-together" ? "饥荒联机版配置" : "帕鲁服务器配置";
   if (page.value === "logs") return "任务日志";
   if (page.value === "access") return "访问权限";
   if (page.value === "game") return selectedGame.value?.name ?? "游戏详情";
@@ -325,6 +336,8 @@ function updateTaskRunning(gameId: string) {
 
 const isAdmin = computed(() => currentRole.value === "admin");
 const canManageSettings = computed(() => hasPermission("palworld.settings.gameplay"));
+const canOpenPalworldSettings = computed(() => canManageSettings.value && !!palworldGame.value);
+const canOpenDSTSettings = computed(() => isAdmin.value && !!dstGame.value);
 
 onMounted(async () => {
   clockTimer = window.setInterval(() => {
@@ -512,9 +525,17 @@ async function refresh(silent = false) {
 }
 
 function navigate(next: Page, gameId?: string) {
-  if (next === "settings" && !canManageSettings.value) {
-    showToast("error", "当前成员密码没有修改帕鲁玩法参数的权限");
-    return;
+  if (next === "settings") {
+    const target = gameId === "dont-starve-together" ? "dont-starve-together" : "palworld";
+    if (target === "dont-starve-together" && !canOpenDSTSettings.value) {
+      showToast("error", "饥荒联机版配置仅对已托管的管理员开放");
+      return;
+    }
+    if (target === "palworld" && !canOpenPalworldSettings.value) {
+      showToast("error", "帕鲁配置仅对已托管且有权限的服务器开放");
+      return;
+    }
+    settingsGameId.value = target;
   }
   if (!isAdmin.value && (next === "logs" || next === "access" || next === "system")) {
     showToast("error", "仅管理员可以访问该页面");
@@ -527,7 +548,10 @@ function navigate(next: Page, gameId?: string) {
   nodeMenuOpen.value = false;
   gameMenuOpen.value = false;
   window.scrollTo({ top: 0, behavior: "smooth" });
-  if (next === "settings" && !settings.value) void loadSettings();
+  if (next === "settings") {
+    if (settingsGameId.value === "dont-starve-together") void loadDSTConfig();
+    else if (!settings.value) void loadSettings();
+  }
   if (next === "logs") void loadLogs(enteringLogs);
   if (next === "access") void loadAccess();
   if (next === "system") {
@@ -1018,6 +1042,47 @@ async function loadSettings() {
     showToast("error", error instanceof Error ? error.message : "配置加载失败");
   } finally {
     settingsLoading.value = false;
+  }
+}
+
+async function loadDSTConfig() {
+  dstConfigLoading.value = true;
+  try {
+    const document = await api.dstConfig();
+    dstConfig.value = document;
+    dstConfigDrafts.value = Object.fromEntries(document.files.map((file) => [file.id, file.content]));
+    if (!document.files.some((file) => file.id === dstConfigActiveFile.value)) {
+      dstConfigActiveFile.value = document.files[0]?.id ?? "cluster";
+    }
+    dstConfigDirty.value = false;
+  } catch (error) {
+    dstConfig.value = null;
+    showToast("error", error instanceof Error ? error.message : "DST 配置加载失败");
+  } finally {
+    dstConfigLoading.value = false;
+  }
+}
+
+function updateDSTConfigDraft(value: string) {
+  dstConfigDrafts.value = { ...dstConfigDrafts.value, [dstConfigActiveFile.value]: value };
+  dstConfigDirty.value = true;
+}
+
+async function saveDSTConfig() {
+  if (!dstConfig.value || !dstConfigDirty.value) return;
+  dstConfigSaving.value = true;
+  try {
+    dstConfig.value = await api.updateDSTConfig({
+      revision: dstConfig.value.revision,
+      files: dstConfigDrafts.value
+    });
+    dstConfigDrafts.value = Object.fromEntries(dstConfig.value.files.map((file) => [file.id, file.content]));
+    dstConfigDirty.value = false;
+    showToast("success", "DST 配置已保存；请重新启动 Master/Caves 使其生效");
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "DST 配置保存失败");
+  } finally {
+    dstConfigSaving.value = false;
   }
 }
 
@@ -1579,10 +1644,14 @@ function gameAccent(id: string) {
           <i :class="['nav-state', game.state]"></i>
         </button>
 
-        <span v-if="isAdmin || canManageSettings" class="nav-label nav-section">管理</span>
-        <button v-if="canManageSettings" :class="{ active: page === 'settings' }" @click="navigate('settings', 'palworld')">
+        <span v-if="canOpenPalworldSettings || canOpenDSTSettings || isAdmin" class="nav-label nav-section">管理</span>
+        <button v-if="canOpenPalworldSettings" :class="{ active: page === 'settings' && settingsGameId === 'palworld' }" @click="navigate('settings', 'palworld')">
           <SlidersHorizontal :size="18" />
           <span>帕鲁配置</span>
+        </button>
+        <button v-if="canOpenDSTSettings" :class="{ active: page === 'settings' && settingsGameId === 'dont-starve-together' }" @click="navigate('settings', 'dont-starve-together')">
+          <SlidersHorizontal :size="18" />
+          <span>饥荒配置</span>
         </button>
         <button v-if="isAdmin" :class="{ active: page === 'logs' }" @click="navigate('logs')">
           <TerminalSquare :size="18" />
@@ -1955,7 +2024,10 @@ function gameAccent(id: string) {
                   >
                     <DatabaseBackup :size="15" />创建备份
                   </button>
-                  <button v-if="canManageSettings" @click="navigate('settings', 'palworld')">
+                  <button v-if="selectedGame.id === 'palworld' && canOpenPalworldSettings" @click="navigate('settings', 'palworld')">
+                    <Settings2 :size="15" />编辑配置
+                  </button>
+                  <button v-if="selectedGame.id === 'dont-starve-together' && canOpenDSTSettings" @click="navigate('settings', 'dont-starve-together')">
                     <Settings2 :size="15" />编辑配置
                   </button>
                   <button v-if="isAdmin" @click="navigate('logs')">
@@ -2115,11 +2187,19 @@ function gameAccent(id: string) {
                 <ChevronRight :size="17" />
               </button>
               <button
-                v-if="canManageSettings && selectedGame.id === 'palworld'"
+                v-if="canOpenPalworldSettings && selectedGame.id === 'palworld'"
                 @click="navigate('settings', 'palworld')"
               >
                 <Settings2 :size="18" />
                 <span><strong>编辑服务器配置</strong><small>Palworld 1.0 参数</small></span>
+                <ChevronRight :size="17" />
+              </button>
+              <button
+                v-if="canOpenDSTSettings && selectedGame.id === 'dont-starve-together'"
+                @click="navigate('settings', 'dont-starve-together')"
+              >
+                <Settings2 :size="18" />
+                <span><strong>编辑服务器配置</strong><small>DST cluster / Master / Caves</small></span>
                 <ChevronRight :size="17" />
               </button>
               <button v-if="isAdmin" @click="navigate('logs')">
@@ -2938,6 +3018,62 @@ function gameAccent(id: string) {
         </template>
 
         <template v-else-if="page === 'settings'">
+          <template v-if="settingsGameId === 'dont-starve-together'">
+            <section class="settings-header">
+              <div>
+                <span class="eyebrow">DST · CLUSTER / MASTER / CAVES</span>
+                <h1>饥荒联机版配置</h1>
+                <p>管理员专属。仅编辑已托管实例的三个固定配置文件；保存前必须停止 Master/Caves。</p>
+              </div>
+              <div class="settings-header-actions">
+                <span v-if="dstConfigDirty" class="dirty-indicator"><i></i> 有未保存修改</span>
+                <button class="button secondary" :disabled="dstConfigLoading" @click="loadDSTConfig">
+                  <RefreshCw :size="16" :class="{ spin: dstConfigLoading }" /> 重新载入
+                </button>
+                <button class="button primary" :disabled="dstConfigSaving || !dstConfigDirty || dstGame?.state !== 'stopped'" @click="saveDSTConfig">
+                  <LoaderCircle v-if="dstConfigSaving" class="spin" :size="16" />
+                  <Save v-else :size="16" />
+                  {{ dstConfigSaving ? "保存中…" : "保存配置" }}
+                </button>
+              </div>
+            </section>
+            <div v-if="dstConfigLoading && !dstConfig" class="page-loader">
+              <LoaderCircle class="spin" :size="22" /> 正在读取 DST 配置…
+            </div>
+            <section v-else-if="dstConfig" class="settings-layout dst-config-layout">
+              <aside class="settings-nav panel-card">
+                <nav>
+                  <button
+                    v-for="file in dstConfig.files"
+                    :key="file.id"
+                    :class="{ active: dstConfigActiveFile === file.id }"
+                    @click="dstConfigActiveFile = file.id"
+                  >
+                    <span>{{ file.name }}</span>
+                    <small>{{ Math.ceil((dstConfigDrafts[file.id]?.length ?? 0) / 1024) }} KiB</small>
+                  </button>
+                </nav>
+                <div class="settings-version">
+                  <ShieldCheck :size="17" />
+                  <div><strong>修订 {{ dstConfig.revision.slice(0, 12) }}</strong><span>最后修改 {{ formatRelative(dstConfig.lastModified) }}</span></div>
+                </div>
+              </aside>
+              <div class="settings-main">
+                <article v-if="dstGame?.state !== 'stopped'" class="settings-source-warning panel-card">
+                  <AlertTriangle :size="18" />
+                  <div><strong>服务器运行中，暂时不能写入 DST 配置</strong><span>可以先编辑文本；保存前请停止 Master/Caves。配置保存后需要重新启动分片。</span></div>
+                </article>
+                <article class="settings-group panel-card">
+                  <div class="settings-group-head">
+                    <div><h2>{{ dstConfig.files.find((file) => file.id === dstConfigActiveFile)?.name }}</h2><p>保留未知键和注释；服务端只接受固定文件名和有效 UTF-8 文本。</p></div>
+                    <span>管理员专属</span>
+                  </div>
+                  <textarea class="dst-config-editor" :value="dstConfigDrafts[dstConfigActiveFile] ?? ''" spellcheck="false" @input="updateDSTConfigDraft(($event.target as HTMLTextAreaElement).value)"></textarea>
+                </article>
+              </div>
+            </section>
+          </template>
+          <template v-else>
           <section class="settings-header">
             <div>
               <span class="eyebrow">PALWORLD · {{ settingsSource === "world" ? "WORLDOPTION.SAV" : "PALWORLDSETTINGS.INI" }}</span>
@@ -3143,6 +3279,7 @@ function gameAccent(id: string) {
               </div>
             </div>
           </section>
+          </template>
         </template>
       </main>
     </section>

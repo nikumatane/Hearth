@@ -383,6 +383,14 @@ func (s *Service) UpdateWorldOption(document panel.WorldOptionDocument) (panel.W
 	return readWorldOption(world)
 }
 
+func (s *Service) DSTConfig() (panel.DSTConfigDocument, error) {
+	return panel.DSTConfigDocument{}, panel.ErrNotFound
+}
+
+func (s *Service) UpdateDSTConfig(panel.DSTConfigPatch) (panel.DSTConfigDocument, error) {
+	return panel.DSTConfigDocument{}, panel.ErrNotFound
+}
+
 func (s *Service) snapshot() (panel.Game, panel.ResourceUsage) {
 	process, host, err := s.platform.sample(s.config.ProcessName, s.config.InstallDir)
 	now := time.Now()
