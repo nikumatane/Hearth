@@ -224,6 +224,13 @@ export type DSTConfigDocument = {
   files: DSTConfigFile[];
 };
 
+export type DSTSettings = {
+  version: string;
+  revision: string;
+  groups: SettingGroup[];
+  lastModified: string;
+};
+
 export type LogFile = {
   id: string;
   label: string;
@@ -361,6 +368,13 @@ export const api = {
   updateDSTConfig: (patch: { revision: string; files: Record<string, string> }) =>
     request<DSTConfigDocument>("/api/v1/games/dont-starve-together/config", {
       method: "PUT",
+      body: JSON.stringify(patch)
+    }),
+  dstSettings: () =>
+    request<DSTSettings>("/api/v1/games/dont-starve-together/settings"),
+  updateDSTSettings: (patch: { revision: string; changes: Record<string, unknown> }) =>
+    request<DSTSettings>("/api/v1/games/dont-starve-together/settings", {
+      method: "PATCH",
       body: JSON.stringify(patch)
     }),
   logs: () => request<Logs>("/api/v1/logs"),

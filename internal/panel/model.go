@@ -189,6 +189,18 @@ type DSTConfigPatch struct {
 	Files    map[string]string `json:"files"`
 }
 
+type DSTSettings struct {
+	Version      string         `json:"version"`
+	Revision     string         `json:"revision"`
+	Groups       []SettingGroup `json:"groups"`
+	LastModified time.Time      `json:"lastModified"`
+}
+
+type DSTSettingsPatch struct {
+	Revision string         `json:"revision"`
+	Changes  map[string]any `json:"changes"`
+}
+
 type LogFile struct {
 	ID        string    `json:"id"`
 	Label     string    `json:"label"`

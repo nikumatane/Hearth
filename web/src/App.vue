@@ -47,6 +47,7 @@ import {
   type ConfigAuditChange,
   type ConfigAuditEntry,
   type DSTConfigDocument,
+  type DSTSettings,
   type Game,
   type IPRule,
   type LoginAuditEntry,
@@ -144,6 +145,11 @@ const worldRoundTripError = ref("");
 const worldSourceError = ref("");
 const iniSourceError = ref("");
 const dstConfig = ref<DSTConfigDocument | null>(null);
+const dstSettings = ref<DSTSettings | null>(null);
+const dstSettingsMode = ref<"common" | "advanced">("common");
+const dstSettingsGroup = ref("server");
+const dstSettingsDirtyKeys = ref<Set<string>>(new Set());
+const dstSettingsDirty = computed(() => dstSettingsDirtyKeys.value.size > 0);
 const dstConfigActiveFile = ref<"cluster" | "master" | "caves">("cluster");
 const dstConfigDrafts = ref<Record<string, string>>({});
 const dstConfigDirty = ref(false);
@@ -1048,15 +1054,21 @@ async function loadSettings() {
 async function loadDSTConfig() {
   dstConfigLoading.value = true;
   try {
-    const document = await api.dstConfig();
+    const [settingsDocument, document] = await Promise.all([api.dstSettings(), api.dstConfig()]);
+    dstSettings.value = settingsDocument;
     dstConfig.value = document;
     dstConfigDrafts.value = Object.fromEntries(document.files.map((file) => [file.id, file.content]));
+    dstSettingsDirtyKeys.value = new Set();
     if (!document.files.some((file) => file.id === dstConfigActiveFile.value)) {
       dstConfigActiveFile.value = document.files[0]?.id ?? "cluster";
+    }
+    if (!settingsDocument.groups.some((group) => group.id === dstSettingsGroup.value)) {
+      dstSettingsGroup.value = settingsDocument.groups[0]?.id ?? "server";
     }
     dstConfigDirty.value = false;
   } catch (error) {
     dstConfig.value = null;
+    dstSettings.value = null;
     showToast("error", error instanceof Error ? error.message : "DST 配置加载失败");
   } finally {
     dstConfigLoading.value = false;
@@ -1072,18 +1084,53 @@ async function saveDSTConfig() {
   if (!dstConfig.value || !dstConfigDirty.value) return;
   dstConfigSaving.value = true;
   try {
-    dstConfig.value = await api.updateDSTConfig({
+    await api.updateDSTConfig({
       revision: dstConfig.value.revision,
       files: dstConfigDrafts.value
     });
-    dstConfigDrafts.value = Object.fromEntries(dstConfig.value.files.map((file) => [file.id, file.content]));
-    dstConfigDirty.value = false;
+    await loadDSTConfig();
     showToast("success", "DST 配置已保存；请重新启动 Master/Caves 使其生效");
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "DST 配置保存失败");
   } finally {
     dstConfigSaving.value = false;
   }
+}
+
+function setDSTSettingValue(setting: Setting, value: string | number | boolean) {
+  setting.value = value;
+  const next = new Set(dstSettingsDirtyKeys.value);
+  next.add(setting.key);
+  dstSettingsDirtyKeys.value = next;
+}
+
+function resetDSTSetting(setting: Setting) {
+  setDSTSettingValue(setting, setting.default);
+}
+
+async function saveDSTSettings() {
+  if (!dstSettings.value || !dstSettingsDirty.value) return;
+  dstConfigSaving.value = true;
+  try {
+    const changes: Record<string, string | number | boolean> = {};
+    for (const group of dstSettings.value.groups) {
+      for (const setting of group.settings) {
+        if (dstSettingsDirtyKeys.value.has(setting.key)) changes[setting.key] = setting.value;
+      }
+    }
+    await api.updateDSTSettings({ revision: dstSettings.value.revision, changes });
+    await loadDSTConfig();
+    showToast("success", "DST 常用配置已保存；请重新启动 Master/Caves 使其生效");
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "DST 参数保存失败");
+  } finally {
+    dstConfigSaving.value = false;
+  }
+}
+
+function saveActiveDSTSettings() {
+  if (dstSettingsMode.value === "advanced") void saveDSTConfig();
+  else void saveDSTSettings();
 }
 
 function selectSettingsSource(source: SettingsSource) {
@@ -3021,26 +3068,109 @@ function gameAccent(id: string) {
           <template v-if="settingsGameId === 'dont-starve-together'">
             <section class="settings-header">
               <div>
-                <span class="eyebrow">DST · CLUSTER / MASTER / CAVES</span>
+                <span class="eyebrow">DST · {{ dstSettingsMode === "common" ? "COMMON SETTINGS" : "ADVANCED FILES" }}</span>
                 <h1>饥荒联机版配置</h1>
-                <p>管理员专属。仅编辑已托管实例的三个固定配置文件；保存前必须停止 Master/Caves。</p>
+                <p v-if="dstSettingsMode === 'common'">常用参数按功能分类；只保存明确修改的键，并保留文件中的未知参数与注释。</p>
+                <p v-else>高级模式直接编辑三个固定 INI 文件，适用于模组或尚未功能化的参数。</p>
               </div>
               <div class="settings-header-actions">
-                <span v-if="dstConfigDirty" class="dirty-indicator"><i></i> 有未保存修改</span>
+                <span v-if="dstSettingsMode === 'common' ? dstSettingsDirty : dstConfigDirty" class="dirty-indicator"><i></i> 有未保存修改</span>
                 <button class="button secondary" :disabled="dstConfigLoading" @click="loadDSTConfig">
                   <RefreshCw :size="16" :class="{ spin: dstConfigLoading }" /> 重新载入
                 </button>
-                <button class="button primary" :disabled="dstConfigSaving || !dstConfigDirty || dstGame?.state !== 'stopped'" @click="saveDSTConfig">
+                <button
+                  class="button primary"
+                  :disabled="dstConfigSaving || !(dstSettingsMode === 'common' ? dstSettingsDirty : dstConfigDirty) || dstGame?.state !== 'stopped'"
+                  @click="saveActiveDSTSettings"
+                >
                   <LoaderCircle v-if="dstConfigSaving" class="spin" :size="16" />
                   <Save v-else :size="16" />
                   {{ dstConfigSaving ? "保存中…" : "保存配置" }}
                 </button>
               </div>
             </section>
-            <div v-if="dstConfigLoading && !dstConfig" class="page-loader">
+
+            <div class="settings-source-tabs" role="tablist" aria-label="DST 配置模式">
+              <button :class="{ active: dstSettingsMode === 'common' }" role="tab" @click="dstSettingsMode = 'common'">
+                <strong>常用配置</strong>
+                <span>服务器、玩法、维护与分片端口</span>
+              </button>
+              <button :class="{ active: dstSettingsMode === 'advanced' }" role="tab" @click="dstSettingsMode = 'advanced'">
+                <strong>高级文件</strong>
+                <span>cluster.ini · Master/Caves server.ini</span>
+              </button>
+            </div>
+
+            <div v-if="dstConfigLoading && (!dstConfig || !dstSettings)" class="page-loader">
               <LoaderCircle class="spin" :size="22" /> 正在读取 DST 配置…
             </div>
-            <section v-else-if="dstConfig" class="settings-layout dst-config-layout">
+            <section v-else-if="dstSettingsMode === 'common' && dstSettings" class="settings-layout">
+              <aside class="settings-nav panel-card">
+                <nav>
+                  <button
+                    v-for="group in dstSettings.groups"
+                    :key="group.id"
+                    :class="{ active: dstSettingsGroup === group.id }"
+                    @click="dstSettingsGroup = group.id"
+                  >
+                    <span>{{ group.label }}</span>
+                    <small>{{ group.settings.length }}</small>
+                  </button>
+                </nav>
+                <div class="settings-version">
+                  <ShieldCheck :size="17" />
+                  <div><strong>结构版本 {{ dstSettings.version }}</strong><span>最后修改 {{ formatRelative(dstSettings.lastModified) }}</span></div>
+                </div>
+              </aside>
+              <div class="settings-main">
+                <article v-if="dstGame?.state !== 'stopped'" class="settings-source-warning panel-card">
+                  <AlertTriangle :size="18" />
+                  <div><strong>服务器运行中，暂时不能保存配置</strong><span>可以先调整参数；保存前请停止 Master/Caves。</span></div>
+                </article>
+                <article
+                  v-for="group in dstSettings.groups.filter((item) => item.id === dstSettingsGroup)"
+                  :key="group.id"
+                  class="settings-group panel-card"
+                >
+                  <div class="settings-group-head">
+                    <div><h2>{{ group.label }}</h2><p>{{ group.description }}</p></div>
+                    <span>{{ group.settings.length }} 项</span>
+                  </div>
+                  <div class="setting-list">
+                    <div v-for="setting in group.settings" :key="setting.key" class="setting-row">
+                      <div class="setting-copy">
+                        <div>
+                          <strong>{{ setting.label }}</strong>
+                          <span class="source-chip">{{ setting.configured ? "当前文件" : "默认值" }}</span>
+                          <span v-if="setting.risk" :class="['risk-chip', setting.risk]">
+                            <AlertTriangle :size="12" />
+                            {{ setting.risk === "disk" ? "增加磁盘写入" : "关键配置" }}
+                          </span>
+                        </div>
+                        <p>{{ setting.description }}</p>
+                        <code>{{ setting.key }}</code>
+                      </div>
+                      <div class="setting-control">
+                        <label v-if="setting.type === 'boolean'" class="switch">
+                          <input type="checkbox" :checked="Boolean(setting.value)" @change="setDSTSettingValue(setting, ($event.target as HTMLInputElement).checked)" />
+                          <span></span>
+                        </label>
+                        <div v-else-if="setting.type === 'number'" class="number-control">
+                          <input type="number" :value="Number(setting.value)" :min="setting.min" :max="setting.max" :step="setting.step" @input="setDSTSettingValue(setting, Number(($event.target as HTMLInputElement).value))" />
+                          <small v-if="setting.min !== undefined && setting.max !== undefined">{{ setting.min }}–{{ setting.max }}</small>
+                        </div>
+                        <select v-else-if="setting.type === 'select'" :value="String(setting.value)" @change="setDSTSettingValue(setting, ($event.target as HTMLSelectElement).value)">
+                          <option v-for="option in setting.options ?? []" :key="option.value" :value="option.value">{{ option.label }}</option>
+                        </select>
+                        <input v-else :type="setting.type === 'password' ? 'password' : 'text'" :value="String(setting.value)" autocomplete="off" @input="setDSTSettingValue(setting, ($event.target as HTMLInputElement).value)" />
+                        <button class="reset-button" title="恢复默认值" @click="resetDSTSetting(setting)"><RotateCw :size="14" /></button>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
+            <section v-else-if="dstSettingsMode === 'advanced' && dstConfig" class="settings-layout dst-config-layout">
               <aside class="settings-nav panel-card">
                 <nav>
                   <button

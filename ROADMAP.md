@@ -47,7 +47,8 @@
 状态：开发中（当前分支 `release/1.3.1`）。
 
 - 帕鲁和 DST 的配置入口只对“本机已安装且已由 Hearth 接管”的游戏显示；未安装、仅发现或未接管时不显示配置导航。
-- 为 DST 增加管理员专属的 cluster.ini、Master/server.ini、Caves/server.ini 配置查看与受限编辑，沿用修订校验、停服写入和审计边界。
+- 为 DST 增加管理员专属的结构化常用配置，并保留 cluster.ini、Master/server.ini、Caves/server.ini
+  高级编辑；沿用修订校验、停服写入、敏感值掩码和审计边界。
 - 不把 DST 配置误归入 Palworld 的 WorldOption/INI 编辑器，也不向成员开放。
 
 ## 1.3.2 · 通用游戏版本管理

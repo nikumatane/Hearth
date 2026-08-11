@@ -38,8 +38,8 @@ func (s *Service) DSTConfig() (panel.DSTConfigDocument, error) {
 func (s *Service) UpdateDSTConfig(patch panel.DSTConfigPatch) (panel.DSTConfigDocument, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.busy || s.masterRunning || s.cavesRunning || processRunning(s.config.ProcessName) {
-		return panel.DSTConfigDocument{}, fmt.Errorf("%w: DST 运行中或有任务正在执行", panel.ErrUnsafe)
+	if err := s.ensureDSTConfigWritableLocked(); err != nil {
+		return panel.DSTConfigDocument{}, err
 	}
 	current, err := s.readDSTConfigLocked()
 	if err != nil {
@@ -51,6 +51,17 @@ func (s *Service) UpdateDSTConfig(patch panel.DSTConfigPatch) (panel.DSTConfigDo
 	if len(patch.Files) == 0 {
 		return panel.DSTConfigDocument{}, fmt.Errorf("%w: 至少需要提交一个 DST 配置文件", panel.ErrInvalid)
 	}
+	return s.writeDSTConfigLocked(current, patch.Files)
+}
+
+func (s *Service) ensureDSTConfigWritableLocked() error {
+	if s.busy || s.masterRunning || s.cavesRunning || processRunning(s.config.ProcessName) {
+		return fmt.Errorf("%w: DST 运行中或有任务正在执行", panel.ErrUnsafe)
+	}
+	return nil
+}
+
+func (s *Service) writeDSTConfigLocked(current panel.DSTConfigDocument, files map[string]string) (panel.DSTConfigDocument, error) {
 	allowed := make(map[string]dstConfigFileDefinition, len(dstConfigFiles))
 	oldContent := make(map[string]string, len(current.Files))
 	for _, definition := range dstConfigFiles {
@@ -59,8 +70,8 @@ func (s *Service) UpdateDSTConfig(patch panel.DSTConfigPatch) (panel.DSTConfigDo
 	for _, file := range current.Files {
 		oldContent[file.ID] = file.Content
 	}
-	ids := make([]string, 0, len(patch.Files))
-	for id, content := range patch.Files {
+	ids := make([]string, 0, len(files))
+	for id, content := range files {
 		definition, ok := allowed[id]
 		if !ok {
 			return panel.DSTConfigDocument{}, fmt.Errorf("%w: 不支持的 DST 配置文件 %q", panel.ErrInvalid, id)
@@ -79,7 +90,7 @@ func (s *Service) UpdateDSTConfig(patch panel.DSTConfigPatch) (panel.DSTConfigDo
 	sort.Strings(ids)
 	written := make([]string, 0, len(ids))
 	for _, id := range ids {
-		if err := replaceClusterToken(dstConfigPath(s.config.ClusterDir, id), []byte(patch.Files[id])); err != nil {
+		if err := replaceClusterToken(dstConfigPath(s.config.ClusterDir, id), []byte(files[id])); err != nil {
 			for _, rollbackID := range written {
 				_ = replaceClusterToken(dstConfigPath(s.config.ClusterDir, rollbackID), []byte(oldContent[rollbackID]))
 			}

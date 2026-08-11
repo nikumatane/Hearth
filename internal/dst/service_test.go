@@ -209,3 +209,91 @@ func TestDSTConfigRejectsRunningAndUnsafeContent(t *testing.T) {
 		t.Fatalf("running update error = %v", err)
 	}
 }
+
+func TestDSTSettingsStructuredUpdatePreservesUnknownContent(t *testing.T) {
+	gameConfig := testConfig(t)
+	clusterPath := filepath.Join(gameConfig.ClusterDir, "cluster.ini")
+	clusterINI := "; keep this comment\n[NETWORK]\ncluster_name = Old name\ncluster_password = existing-secret\nunknown_mod_key = keep-me\n\n[GAMEPLAY]\nmax_players = 6\npvp = false\n"
+	if err := os.WriteFile(clusterPath, []byte(clusterINI), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(gameConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	document, err := service.DSTSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	password := findDSTSetting(t, document, "cluster.network.cluster_password")
+	if password.Value != dstSecretMask || !password.Sensitive || !password.Configured {
+		t.Fatalf("password setting = %#v", password)
+	}
+	updated, err := service.UpdateDSTSettings(panel.DSTSettingsPatch{
+		Revision: document.Revision,
+		Changes: map[string]any{
+			"cluster.network.cluster_name":      "New name",
+			"cluster.gameplay.max_players":      float64(12),
+			"cluster.gameplay.pause_when_empty": true,
+			"cluster.network.cluster_password":  dstSecretMask,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision == document.Revision {
+		t.Fatal("structured update did not change revision")
+	}
+	raw, err := os.ReadFile(clusterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	for _, expected := range []string{"; keep this comment", "unknown_mod_key = keep-me", "cluster_name = New name", "max_players = 12", "pause_when_empty = true", "cluster_password = existing-secret"} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("updated cluster.ini missing %q:\n%s", expected, content)
+		}
+	}
+}
+
+func TestDSTSettingsRejectsUnknownStaleAndInvalidValues(t *testing.T) {
+	service, err := NewService(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	document, err := service.DSTSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, changes := range []map[string]any{
+		{"unknown.key": "value"},
+		{"cluster.gameplay.max_players": float64(0)},
+		{"cluster.network.cluster_name": "bad\nname"},
+		{"caves.network.server_port": float64(10999)},
+	} {
+		_, err := service.UpdateDSTSettings(panel.DSTSettingsPatch{Revision: document.Revision, Changes: changes})
+		if !errors.Is(err, panel.ErrInvalid) {
+			t.Fatalf("changes %#v error = %v", changes, err)
+		}
+	}
+	_, err = service.UpdateDSTSettings(panel.DSTSettingsPatch{Revision: "stale", Changes: map[string]any{"cluster.gameplay.pvp": true}})
+	if !errors.Is(err, panel.ErrInvalid) {
+		t.Fatalf("stale settings error = %v", err)
+	}
+}
+
+func findDSTSetting(t *testing.T, document panel.DSTSettings, key string) panel.Setting {
+	t.Helper()
+	for _, group := range document.Groups {
+		for _, setting := range group.Settings {
+			if setting.Key == key {
+				return setting
+			}
+		}
+	}
+	t.Fatalf("DST setting %s not found", key)
+	return panel.Setting{}
+}

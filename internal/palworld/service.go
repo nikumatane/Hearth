@@ -391,6 +391,14 @@ func (s *Service) UpdateDSTConfig(panel.DSTConfigPatch) (panel.DSTConfigDocument
 	return panel.DSTConfigDocument{}, panel.ErrNotFound
 }
 
+func (s *Service) DSTSettings() (panel.DSTSettings, error) {
+	return panel.DSTSettings{}, panel.ErrNotFound
+}
+
+func (s *Service) UpdateDSTSettings(panel.DSTSettingsPatch) (panel.DSTSettings, error) {
+	return panel.DSTSettings{}, panel.ErrNotFound
+}
+
 func (s *Service) snapshot() (panel.Game, panel.ResourceUsage) {
 	process, host, err := s.platform.sample(s.config.ProcessName, s.config.InstallDir)
 	now := time.Now()

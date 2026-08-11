@@ -203,6 +203,26 @@ func (s *Service) UpdateDSTConfig(patch panel.DSTConfigPatch) (panel.DSTConfigDo
 	return delegate.UpdateDSTConfig(patch)
 }
 
+func (s *Service) DSTSettings() (panel.DSTSettings, error) {
+	s.mu.RLock()
+	delegate := s.dstDelegate
+	s.mu.RUnlock()
+	if delegate == nil {
+		return panel.DSTSettings{}, panel.ErrNotFound
+	}
+	return delegate.DSTSettings()
+}
+
+func (s *Service) UpdateDSTSettings(patch panel.DSTSettingsPatch) (panel.DSTSettings, error) {
+	s.mu.RLock()
+	delegate := s.dstDelegate
+	s.mu.RUnlock()
+	if delegate == nil {
+		return panel.DSTSettings{}, panel.ErrNotFound
+	}
+	return delegate.UpdateDSTSettings(patch)
+}
+
 func (s *Service) Management() panel.Management {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
