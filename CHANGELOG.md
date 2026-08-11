@@ -9,6 +9,10 @@
 
 ## 未发布
 
+后续 1.3.x 计划见 [路线图](ROADMAP.md)。
+
+## 1.3.0 - 2026-08-11
+
 - 修复 Windows 服务账户运行 Hearth 时无法自动发现交互用户 `Documents\\Klei\\DoNotStarveTogether`
   默认 cluster 的问题；新增 OneDrive 文档目录的有界探测，特殊路径仍通过额外探测根目录配置。
 - 1.3.0 第一阶段新增 DST Dedicated Server 与 cluster 的只读探测、管理员接管，以及 Master/Caves

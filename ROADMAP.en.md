@@ -32,7 +32,7 @@ Status: complete.
 
 ## 1.3.0 · Production DST adapter
 
-Status: in development.
+Status: complete on Windows (DST automatic installation, mods, and backup/restore remain outside this phase).
 
 - The first phase supports read-only discovery and administrator adoption of an existing Don't Starve
   Together Dedicated Server and cluster, plus Master/Caves start, stop, and restart. Installation,
@@ -42,6 +42,30 @@ Status: in development.
   Administrators can write the DST token from Game Management. The first phase never reads or returns
   the cluster token plaintext; stop/restart and token replacement require the documented safety boundary.
 - Reuse the 1.1.0 game catalog, installation task, and backend settings framework instead of creating a side path.
+
+## 1.3.1 · Game management and DST configuration
+
+Status: planned.
+
+- Show Palworld and DST configuration navigation only when the game is installed locally and managed by Hearth; discovery alone is not enough.
+- Add administrator-only, revision-checked views and constrained editing for `cluster.ini`, `Master/server.ini`, and `Caves/server.ini`, with stopped-server writes and audit boundaries.
+- Keep DST configuration separate from the Palworld WorldOption/INI editor and do not delegate it to members.
+
+## 1.3.2 · Generic game version management
+
+Status: planned.
+
+- Abstract current version, source, check state, and available version in the game adapter so the detail page is not Palworld-specific.
+- Keep Palworld on actual service-server depot/manifest checks; use the DST SteamCMD app/depot version and never expose SteamCMD's own version.
+- Keep checks low-frequency, manually triggerable, auditable, and distinct from whether a game is installed or managed.
+
+## 1.3.3 · DST version checks and safe updates
+
+Status: planned.
+
+- Add DST SteamCMD version checks and update tasks by reusing backup, stage progress, no-progress timeout, logs, and failure recovery.
+- Before an update, follow the Master/Caves backup, stop, update, start, and health-confirmation lifecycle with a recoverable failure boundary.
+- Show update controls only for installed and managed DST; do not auto-install the game or manage mods.
 
 ## Versioning rules
 

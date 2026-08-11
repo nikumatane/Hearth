@@ -9,6 +9,10 @@ Unreleased and moves to a version section when a formal package is built.
 
 ## Unreleased
 
+Future 1.3.x work is tracked in the [roadmap](ROADMAP.en.md).
+
+## 1.3.0 - 2026-08-11
+
 - Fixed Windows service-account discovery of the interactive user's default
   `Documents\\Klei\\DoNotStarveTogether` cluster path; bounded OneDrive document roots are included,
   while unusual locations still use the extra discovery-root setting.
