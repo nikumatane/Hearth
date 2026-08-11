@@ -111,8 +111,18 @@ try {
     if ($palworld.state -ne "not_installed" -or -not $palworld.canInstall) {
         throw "Unexpected Palworld first-start state: $($palworld | ConvertTo-Json -Compress)"
     }
-    if ($dontStarveTogether.support -ne "planned") {
-        throw "Unexpected Don't Starve Together support state: $($dontStarveTogether | ConvertTo-Json -Compress)"
+    $versionMatch = [regex]::Match($ExpectedVersion, '^(\d+)\.(\d+)')
+    if (-not $versionMatch.Success) {
+        throw "Expected version is not semantic: $ExpectedVersion"
+    }
+    $majorVersion = [int]$versionMatch.Groups[1].Value
+    $minorVersion = [int]$versionMatch.Groups[2].Value
+    $expectedDSTSupport = if ($majorVersion -gt 1 -or ($majorVersion -eq 1 -and $minorVersion -ge 3)) { "available" } else { "planned" }
+    if ($dontStarveTogether.support -ne $expectedDSTSupport) {
+        throw "Unexpected Don't Starve Together support state for $ExpectedVersion (expected $expectedDSTSupport): $($dontStarveTogether | ConvertTo-Json -Compress)"
+    }
+    if ($expectedDSTSupport -eq "available" -and ($dontStarveTogether.state -ne "not_installed" -or $dontStarveTogether.canInstall -or $dontStarveTogether.canAdopt)) {
+        throw "Unexpected Don't Starve Together first-start state: $($dontStarveTogether | ConvertTo-Json -Compress)"
     }
 
     $panelUpdate = Invoke-RestMethod `
