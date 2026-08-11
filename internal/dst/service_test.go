@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -116,7 +117,9 @@ func TestUpdateClusterTokenWritesOnlyTokenFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Unix exposes the mode bits we request. Windows security is represented by
+	// ACLs and does not map os.Chmod(0600) to a 0600 Mode().Perm() value.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("token file permissions = %o", info.Mode().Perm())
 	}
 	if string(data) != token || !service.ClusterTokenConfigured() {
