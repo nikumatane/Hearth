@@ -15,8 +15,11 @@ Future 1.3.x work is tracked in the [roadmap](ROADMAP.en.md).
 
 - Show Palworld and DST configuration navigation only when the corresponding game is installed and managed by Hearth.
 - Add an administrator-only DST configuration page with explicit server, gameplay, maintenance, shard,
-  and Master/Caves port settings. Unknown keys and comments are preserved, while an advanced mode retains
-  access to the three fixed INI files.
+  and Master/Caves port settings. Unknown keys and comments are preserved.
+- Add separate Master and Caves world rules grouped by generation, seasons/weather, resources, creatures,
+  threats, and bosses. Hearth accepts only declarative static `worldgenoverride.lua` tables, updates only
+  allowlisted keys, never executes Lua, and never deletes or regenerates an existing save. Advanced mode
+  exposes the three INI files and two optional worldgen files.
 - Enforce fixed paths, UTF-8/size/value validation, revision checks, and stopped-server writes. Passwords
   and shard keys are returned only as configured masks, and audit records never include configuration content.
 

@@ -169,8 +169,11 @@ func TestDSTConfigRevisionAndAtomicUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(document.Files) != 3 || document.Revision == "" {
+	if len(document.Files) != 5 || document.Revision == "" {
 		t.Fatalf("DST config = %#v", document)
+	}
+	if document.Files[3].Exists || document.Files[4].Exists {
+		t.Fatalf("optional worldgen files unexpectedly exist: %#v", document.Files[3:])
 	}
 	updated, err := service.UpdateDSTConfig(panel.DSTConfigPatch{
 		Revision: document.Revision,
@@ -184,6 +187,155 @@ func TestDSTConfigRevisionAndAtomicUpdate(t *testing.T) {
 	}
 	if _, err := service.UpdateDSTConfig(panel.DSTConfigPatch{Revision: document.Revision, Files: map[string]string{"master": "stale"}}); !errors.Is(err, panel.ErrInvalid) {
 		t.Fatalf("stale revision error = %v", err)
+	}
+}
+
+func TestDSTWorldSettingsCreatesStaticOverrideWithoutTouchingSave(t *testing.T) {
+	gameConfig := testConfig(t)
+	savePath := filepath.Join(gameConfig.ClusterDir, "Master", "save", "session", "marker")
+	if err := os.MkdirAll(filepath.Dir(savePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(savePath, []byte("keep-save"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(gameConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	document, err := service.DSTWorldSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Shards) != 2 || document.Shards[0].Configured || document.Shards[1].Configured {
+		t.Fatalf("initial world settings = %#v", document)
+	}
+	setting := findDSTWorldSetting(t, document, "master.world.world_size")
+	if setting.ApplyMode != "regenerate" || setting.Value != "default" {
+		t.Fatalf("world size setting = %#v", setting)
+	}
+	updated, err := service.UpdateDSTWorldSettings(panel.DSTWorldSettingsPatch{
+		Revision: document.Revision,
+		Changes:  map[string]any{"master.world.world_size": "huge", "master.world.hounds": "rare"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Shards[0].Configured || updated.Shards[1].Configured {
+		t.Fatalf("updated shards = %#v", updated.Shards)
+	}
+	content, err := os.ReadFile(filepath.Join(gameConfig.ClusterDir, "Master", "worldgenoverride.lua"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`world_size = "huge"`, `hounds = "rare"`} {
+		if !strings.Contains(string(content), expected) {
+			t.Fatalf("worldgenoverride.lua missing %q:\n%s", expected, content)
+		}
+	}
+	if _, err := parseDSTWorldgen(string(content)); err != nil {
+		t.Fatalf("written worldgenoverride.lua does not round trip: %v", err)
+	}
+	marker, err := os.ReadFile(savePath)
+	if err != nil || string(marker) != "keep-save" {
+		t.Fatalf("existing save changed: content=%q err=%v", marker, err)
+	}
+}
+
+func TestDSTWorldSettingsPreservesUnknownContentAndRejectsUnsafeLua(t *testing.T) {
+	gameConfig := testConfig(t)
+	path := filepath.Join(gameConfig.ClusterDir, "Master", "worldgenoverride.lua")
+	content := "-- keep this comment\nreturn {\n    override_enabled = true,\n    preset = \"SURVIVAL_TOGETHER\",\n    custom_static = { enabled = true, },\n    overrides = {\n        world_size = \"small\", -- keep inline\n        future_rule = \"always\",\n    },\n}\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(gameConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	document, err := service.DSTWorldSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := service.UpdateDSTWorldSettings(panel.DSTWorldSettingsPatch{Revision: document.Revision, Changes: map[string]any{"master.world.world_size": "medium"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision == document.Revision {
+		t.Fatal("world settings revision did not change")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"-- keep this comment", "-- keep inline", `future_rule = "always"`, `world_size = "medium"`, "custom_static"} {
+		if !strings.Contains(string(raw), expected) {
+			t.Fatalf("updated worldgen missing %q:\n%s", expected, raw)
+		}
+	}
+	config, err := service.DSTConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, unsafe := range []string{
+		`return os.execute("whoami")`,
+		`return { overrides = require("evil") }`,
+		`return { overrides = { world_size = (function() return "huge" end)() } }`,
+	} {
+		_, err := service.UpdateDSTConfig(panel.DSTConfigPatch{Revision: config.Revision, Files: map[string]string{"master-world": unsafe}})
+		if !errors.Is(err, panel.ErrInvalid) {
+			t.Fatalf("unsafe Lua %q error = %v", unsafe, err)
+		}
+	}
+}
+
+func TestDSTWorldSettingsRejectsUnknownStaleInvalidAndRunning(t *testing.T) {
+	service, err := NewService(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	document, err := service.DSTWorldSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, patch := range []panel.DSTWorldSettingsPatch{
+		{Revision: document.Revision, Changes: map[string]any{"master.world.unknown": "default"}},
+		{Revision: document.Revision, Changes: map[string]any{"master.world.world_size": "gigantic"}},
+		{Revision: "stale", Changes: map[string]any{"master.world.world_size": "small"}},
+	} {
+		if _, err := service.UpdateDSTWorldSettings(patch); !errors.Is(err, panel.ErrInvalid) {
+			t.Fatalf("patch %#v error = %v", patch, err)
+		}
+	}
+	service.masterRunning = true
+	if _, err := service.UpdateDSTWorldSettings(panel.DSTWorldSettingsPatch{Revision: document.Revision, Changes: map[string]any{"master.world.world_size": "small"}}); !errors.Is(err, panel.ErrUnsafe) {
+		t.Fatalf("running update error = %v", err)
+	}
+}
+
+func TestSetDSTWorldgenOverrideSupportsCompactStaticTables(t *testing.T) {
+	for _, test := range []struct {
+		name, source, expected string
+	}{
+		{name: "existing overrides", source: `return { override_enabled = true, overrides = {} }`, expected: `overrides = { world_size = "huge", }`},
+		{name: "missing overrides", source: `return { override_enabled = true }`, expected: `overrides = { world_size = "huge", }`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			updated, err := setDSTWorldgenOverride(test.source, "world_size", `"huge"`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(updated, test.expected) {
+				t.Fatalf("updated compact table = %q", updated)
+			}
+			if _, err := parseDSTWorldgen(updated); err != nil {
+				t.Fatalf("updated compact table does not parse: %v", err)
+			}
+		})
 	}
 }
 
@@ -295,5 +447,20 @@ func findDSTSetting(t *testing.T, document panel.DSTSettings, key string) panel.
 		}
 	}
 	t.Fatalf("DST setting %s not found", key)
+	return panel.Setting{}
+}
+
+func findDSTWorldSetting(t *testing.T, document panel.DSTWorldSettings, key string) panel.Setting {
+	t.Helper()
+	for _, shard := range document.Shards {
+		for _, group := range shard.Groups {
+			for _, setting := range group.Settings {
+				if setting.Key == key {
+					return setting
+				}
+			}
+		}
+	}
+	t.Fatalf("DST world setting %s not found", key)
 	return panel.Setting{}
 }

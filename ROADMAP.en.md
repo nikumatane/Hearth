@@ -48,7 +48,8 @@ Status: complete on Windows (DST automatic installation, mods, and backup/restor
 Status: in development (current branch: `release/1.3.1`).
 
 - Show Palworld and DST configuration navigation only when the game is installed locally and managed by Hearth; discovery alone is not enough.
-- Add administrator-only structured common settings plus advanced editing for `cluster.ini`, `Master/server.ini`, and `Caves/server.ini`, with revision checks, stopped-server writes, sensitive-value masking, and audit boundaries.
+- Add administrator-only server settings and separate Master/Caves world rules, while retaining advanced editing for three INI files and two `worldgenoverride.lua` files. World rules use static parsing and allowlisted incremental writes and never regenerate a save automatically.
+- Preserve revision checks, stopped-server writes, sensitive-value masking, and audit boundaries. Custom Lua outside the safe parser subset falls back to administrator-only advanced editing without blocking the remaining DST configuration.
 - Keep DST configuration separate from the Palworld WorldOption/INI editor and do not delegate it to members.
 
 ## 1.3.2 · Generic game version management

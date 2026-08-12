@@ -23,8 +23,8 @@ func TestOperationAuditRotatesAndReloads(t *testing.T) {
 	store := &operationAuditStore{path: path, entries: []operationAuditEntry{}}
 	entry := operationAuditEntry{
 		ID: "operation-1", Event: operationEventIPRuleAdded,
-		ActorCredentialID: "ADMIN", ActorRole: roleAdmin, ActorIP: "101.68.35.123",
-		TargetType: operationTargetIPRule, TargetID: "rule-1", TargetIP: "117.150.109.249",
+		ActorCredentialID: "ADMIN", ActorRole: roleAdmin, ActorIP: "198.51.100.23",
+		TargetType: operationTargetIPRule, TargetID: "rule-1", TargetIP: "203.0.113.42",
 		RuleKind: ipRuleAllow, Success: true, CreatedAt: time.Now(),
 	}
 	if err := store.record(entry); err != nil {
@@ -57,10 +57,10 @@ func TestSecurityOperationsAreSeparateFromLoginAudit(t *testing.T) {
 
 	createRuleRequest := httptest.NewRequest(
 		http.MethodPost, "/api/v1/access/ip-rules",
-		strings.NewReader(`{"ip":"117.150.109.249","kind":"allow"}`),
+		strings.NewReader(`{"ip":"203.0.113.42","kind":"allow"}`),
 	)
 	createRuleRequest.Header.Set("Content-Type", "application/json")
-	createRuleRequest.RemoteAddr = "101.68.35.123:49152"
+	createRuleRequest.RemoteAddr = "198.51.100.23:49152"
 	createRuleRequest.AddCookie(adminCookie)
 	createRuleResponse := httptest.NewRecorder()
 	handler.ServeHTTP(createRuleResponse, createRuleRequest)
@@ -70,7 +70,7 @@ func TestSecurityOperationsAreSeparateFromLoginAudit(t *testing.T) {
 
 	loginAudit := requestForTest(t, handler, http.MethodGet, "/api/v1/access/audit", "", adminCookie)
 	if loginAudit.Code != http.StatusOK || strings.Contains(loginAudit.Body.String(), operationEventIPRuleAdded) ||
-		strings.Contains(loginAudit.Body.String(), "117.150.109.249") {
+		strings.Contains(loginAudit.Body.String(), "203.0.113.42") {
 		t.Fatalf("login audit contains a security operation: %d %s", loginAudit.Code, loginAudit.Body.String())
 	}
 
@@ -87,7 +87,7 @@ func TestSecurityOperationsAreSeparateFromLoginAudit(t *testing.T) {
 		t.Fatalf("operation audit response = %d %#v", operationAudit.Code, body.Entries)
 	}
 	entry := body.Entries[0]
-	if entry.ActorIP != "101.68.35.123" || entry.TargetIP != "117.150.109.249" ||
+	if entry.ActorIP != "198.51.100.23" || entry.TargetIP != "203.0.113.42" ||
 		entry.ActorIP == entry.TargetIP || entry.Event != operationEventIPRuleAdded {
 		t.Fatalf("operation actor/target separation = %#v", entry)
 	}

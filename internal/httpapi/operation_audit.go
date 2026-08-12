@@ -193,7 +193,7 @@ func validOperationAuditEntry(entry operationAuditEntry) bool {
 			(entry.RuleKind == ipRuleAllow || entry.RuleKind == ipRuleDeny)
 	case operationEventGameAdopted, operationEventGameInstall:
 		return entry.TargetType == operationTargetGame && entry.TargetID != ""
-	case operationEventDSTTokenUpdated:
+	case operationEventDSTTokenUpdated, operationEventDSTConfigUpdated:
 		return entry.ActorRole == roleAdmin && entry.TargetType == operationTargetGame && entry.TargetID == "dont-starve-together"
 	case operationEventSystemUpdated, operationEventPanelUpdateChecked, operationEventPanelUpdateStarted:
 		return entry.TargetType == operationTargetSystem && entry.TargetID == "hearth"

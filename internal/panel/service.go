@@ -28,6 +28,8 @@ type Service interface {
 	UpdateDSTConfig(patch DSTConfigPatch) (DSTConfigDocument, error)
 	DSTSettings() (DSTSettings, error)
 	UpdateDSTSettings(patch DSTSettingsPatch) (DSTSettings, error)
+	DSTWorldSettings() (DSTWorldSettings, error)
+	UpdateDSTWorldSettings(patch DSTWorldSettingsPatch) (DSTWorldSettings, error)
 }
 
 type DemoService struct {
@@ -192,6 +194,14 @@ func (s *DemoService) DSTSettings() (DSTSettings, error) {
 
 func (s *DemoService) UpdateDSTSettings(DSTSettingsPatch) (DSTSettings, error) {
 	return DSTSettings{}, ErrNotFound
+}
+
+func (s *DemoService) DSTWorldSettings() (DSTWorldSettings, error) {
+	return DSTWorldSettings{}, ErrNotFound
+}
+
+func (s *DemoService) UpdateDSTWorldSettings(DSTWorldSettingsPatch) (DSTWorldSettings, error) {
+	return DSTWorldSettings{}, ErrNotFound
 }
 
 func (s *DemoService) Management() Management {

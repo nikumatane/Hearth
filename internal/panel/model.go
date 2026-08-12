@@ -113,6 +113,7 @@ type Setting struct {
 	MemberEditable  bool            `json:"memberEditable,omitempty"`
 	RestartRequired bool            `json:"restartRequired"`
 	Configured      bool            `json:"configured"`
+	ApplyMode       string          `json:"applyMode,omitempty"`
 }
 
 var memberEditablePalworldSettings = map[string]struct{}{
@@ -173,6 +174,8 @@ type WorldOptionDocument struct {
 type DSTConfigFile struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
+	Format       string    `json:"format"`
+	Exists       bool      `json:"exists"`
 	Revision     string    `json:"revision"`
 	LastModified time.Time `json:"lastModified"`
 	Content      string    `json:"content"`
@@ -197,6 +200,26 @@ type DSTSettings struct {
 }
 
 type DSTSettingsPatch struct {
+	Revision string         `json:"revision"`
+	Changes  map[string]any `json:"changes"`
+}
+
+type DSTWorldShard struct {
+	ID         string         `json:"id"`
+	Name       string         `json:"name"`
+	Preset     string         `json:"preset"`
+	Configured bool           `json:"configured"`
+	Groups     []SettingGroup `json:"groups"`
+}
+
+type DSTWorldSettings struct {
+	Version      string          `json:"version"`
+	Revision     string          `json:"revision"`
+	Shards       []DSTWorldShard `json:"shards"`
+	LastModified time.Time       `json:"lastModified"`
+}
+
+type DSTWorldSettingsPatch struct {
 	Revision string         `json:"revision"`
 	Changes  map[string]any `json:"changes"`
 }

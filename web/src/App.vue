@@ -48,6 +48,7 @@ import {
   type ConfigAuditEntry,
   type DSTConfigDocument,
   type DSTSettings,
+  type DSTWorldSettings,
   type Game,
   type IPRule,
   type LoginAuditEntry,
@@ -146,15 +147,28 @@ const worldSourceError = ref("");
 const iniSourceError = ref("");
 const dstConfig = ref<DSTConfigDocument | null>(null);
 const dstSettings = ref<DSTSettings | null>(null);
-const dstSettingsMode = ref<"common" | "advanced">("common");
+const dstWorldSettings = ref<DSTWorldSettings | null>(null);
+const dstSettingsMode = ref<"server" | "world" | "advanced">("server");
 const dstSettingsGroup = ref("server");
 const dstSettingsDirtyKeys = ref<Set<string>>(new Set());
 const dstSettingsDirty = computed(() => dstSettingsDirtyKeys.value.size > 0);
-const dstConfigActiveFile = ref<"cluster" | "master" | "caves">("cluster");
+const dstWorldShard = ref<"master" | "caves">("master");
+const dstWorldGroup = ref("generation");
+const dstWorldDirtyKeys = ref<Set<string>>(new Set());
+const dstWorldDirty = computed(() => dstWorldDirtyKeys.value.size > 0);
+const dstWorldSourceError = ref("");
+const activeDSTWorldShard = computed(() => dstWorldSettings.value?.shards.find((shard) => shard.id === dstWorldShard.value) ?? null);
+const dstConfigActiveFile = ref<DSTConfigDocument["files"][number]["id"]>("cluster");
 const dstConfigDrafts = ref<Record<string, string>>({});
-const dstConfigDirty = ref(false);
+const dstConfigDirtyFiles = ref<Set<string>>(new Set());
+const dstConfigDirty = computed(() => dstConfigDirtyFiles.value.size > 0);
 const dstConfigLoading = ref(false);
 const dstConfigSaving = ref(false);
+const dstActiveDirty = computed(() => {
+  if (dstSettingsMode.value === "advanced") return dstConfigDirty.value;
+  if (dstSettingsMode.value === "world") return dstWorldDirty.value;
+  return dstSettingsDirty.value;
+});
 const logs = ref<Logs | null>(null);
 const logsLoading = ref(false);
 const selectedLogId = ref("");
@@ -1054,21 +1068,48 @@ async function loadSettings() {
 async function loadDSTConfig() {
   dstConfigLoading.value = true;
   try {
-    const [settingsDocument, document] = await Promise.all([api.dstSettings(), api.dstConfig()]);
+    const [settingsResult, worldResult, configResult] = await Promise.allSettled([
+      api.dstSettings(),
+      api.dstWorldSettings(),
+      api.dstConfig()
+    ]);
+    if (settingsResult.status === "rejected") throw settingsResult.reason;
+    if (configResult.status === "rejected") throw configResult.reason;
+    const settingsDocument = settingsResult.value;
+    const document = configResult.value;
     dstSettings.value = settingsDocument;
     dstConfig.value = document;
     dstConfigDrafts.value = Object.fromEntries(document.files.map((file) => [file.id, file.content]));
     dstSettingsDirtyKeys.value = new Set();
+    dstWorldDirtyKeys.value = new Set();
+    dstConfigDirtyFiles.value = new Set();
     if (!document.files.some((file) => file.id === dstConfigActiveFile.value)) {
       dstConfigActiveFile.value = document.files[0]?.id ?? "cluster";
     }
     if (!settingsDocument.groups.some((group) => group.id === dstSettingsGroup.value)) {
       dstSettingsGroup.value = settingsDocument.groups[0]?.id ?? "server";
     }
-    dstConfigDirty.value = false;
+    if (worldResult.status === "fulfilled") {
+      const worldDocument = worldResult.value;
+      dstWorldSettings.value = worldDocument;
+      dstWorldSourceError.value = "";
+      if (!worldDocument.shards.some((shard) => shard.id === dstWorldShard.value)) {
+        dstWorldShard.value = worldDocument.shards[0]?.id ?? "master";
+      }
+      const selectedWorldShard = worldDocument.shards.find((shard) => shard.id === dstWorldShard.value);
+      if (!selectedWorldShard?.groups.some((group) => group.id === dstWorldGroup.value)) {
+        dstWorldGroup.value = selectedWorldShard?.groups[0]?.id ?? "generation";
+      }
+    } else {
+      dstWorldSettings.value = null;
+      dstWorldSourceError.value = worldResult.reason instanceof Error ? worldResult.reason.message : "worldgenoverride.lua 无法安全解析";
+      if (dstSettingsMode.value === "world") dstSettingsMode.value = "advanced";
+    }
   } catch (error) {
     dstConfig.value = null;
     dstSettings.value = null;
+    dstWorldSettings.value = null;
+    dstWorldSourceError.value = "";
     showToast("error", error instanceof Error ? error.message : "DST 配置加载失败");
   } finally {
     dstConfigLoading.value = false;
@@ -1077,16 +1118,21 @@ async function loadDSTConfig() {
 
 function updateDSTConfigDraft(value: string) {
   dstConfigDrafts.value = { ...dstConfigDrafts.value, [dstConfigActiveFile.value]: value };
-  dstConfigDirty.value = true;
+  const next = new Set(dstConfigDirtyFiles.value);
+  next.add(dstConfigActiveFile.value);
+  dstConfigDirtyFiles.value = next;
 }
 
 async function saveDSTConfig() {
   if (!dstConfig.value || !dstConfigDirty.value) return;
   dstConfigSaving.value = true;
   try {
+    const files = Object.fromEntries(
+      [...dstConfigDirtyFiles.value].map((id) => [id, dstConfigDrafts.value[id] ?? ""])
+    );
     await api.updateDSTConfig({
       revision: dstConfig.value.revision,
-      files: dstConfigDrafts.value
+      files
     });
     await loadDSTConfig();
     showToast("success", "DST 配置已保存；请重新启动 Master/Caves 使其生效");
@@ -1106,6 +1152,22 @@ function setDSTSettingValue(setting: Setting, value: string | number | boolean) 
 
 function resetDSTSetting(setting: Setting) {
   setDSTSettingValue(setting, setting.default);
+}
+
+function setDSTWorldSettingValue(setting: Setting, value: string | number | boolean) {
+  setting.value = value;
+  const next = new Set(dstWorldDirtyKeys.value);
+  next.add(setting.key);
+  dstWorldDirtyKeys.value = next;
+}
+
+function resetDSTWorldSetting(setting: Setting) {
+  setDSTWorldSettingValue(setting, setting.default);
+}
+
+function selectDSTWorldShard(shard: "master" | "caves") {
+  dstWorldShard.value = shard;
+  dstWorldGroup.value = activeDSTWorldShard.value?.groups[0]?.id ?? "generation";
 }
 
 async function saveDSTSettings() {
@@ -1128,8 +1190,31 @@ async function saveDSTSettings() {
   }
 }
 
+async function saveDSTWorldSettings() {
+  if (!dstWorldSettings.value || !dstWorldDirty.value) return;
+  dstConfigSaving.value = true;
+  try {
+    const changes: Record<string, string | number | boolean> = {};
+    for (const shard of dstWorldSettings.value.shards) {
+      for (const group of shard.groups) {
+        for (const setting of group.settings) {
+          if (dstWorldDirtyKeys.value.has(setting.key)) changes[setting.key] = setting.value;
+        }
+      }
+    }
+    await api.updateDSTWorldSettings({ revision: dstWorldSettings.value.revision, changes });
+    await loadDSTConfig();
+    showToast("success", "DST 世界规则已保存；现有存档不会自动重建，规则将在新世界生成时生效");
+  } catch (error) {
+    showToast("error", error instanceof Error ? error.message : "DST 世界规则保存失败");
+  } finally {
+    dstConfigSaving.value = false;
+  }
+}
+
 function saveActiveDSTSettings() {
   if (dstSettingsMode.value === "advanced") void saveDSTConfig();
+  else if (dstSettingsMode.value === "world") void saveDSTWorldSettings();
   else void saveDSTSettings();
 }
 
@@ -3068,19 +3153,20 @@ function gameAccent(id: string) {
           <template v-if="settingsGameId === 'dont-starve-together'">
             <section class="settings-header">
               <div>
-                <span class="eyebrow">DST · {{ dstSettingsMode === "common" ? "COMMON SETTINGS" : "ADVANCED FILES" }}</span>
+                <span class="eyebrow">DST · {{ dstSettingsMode === "server" ? "SERVER SETTINGS" : dstSettingsMode === "world" ? "WORLD RULES" : "ADVANCED FILES" }}</span>
                 <h1>饥荒联机版配置</h1>
-                <p v-if="dstSettingsMode === 'common'">常用参数按功能分类；只保存明确修改的键，并保留文件中的未知参数与注释。</p>
-                <p v-else>高级模式直接编辑三个固定 INI 文件，适用于模组或尚未功能化的参数。</p>
+                <p v-if="dstSettingsMode === 'server'">服务器参数按功能分类；只保存明确修改的键，并保留 INI 中的未知参数与注释。</p>
+                <p v-else-if="dstSettingsMode === 'world'">分别配置地表与洞穴的常用生成规则；只修改白名单键，不执行 Lua。</p>
+                <p v-else>高级模式直接编辑三个 INI 与两个 worldgenoverride.lua 文件，适用于模组或尚未功能化的参数。</p>
               </div>
               <div class="settings-header-actions">
-                <span v-if="dstSettingsMode === 'common' ? dstSettingsDirty : dstConfigDirty" class="dirty-indicator"><i></i> 有未保存修改</span>
+                <span v-if="dstActiveDirty" class="dirty-indicator"><i></i> 有未保存修改</span>
                 <button class="button secondary" :disabled="dstConfigLoading" @click="loadDSTConfig">
                   <RefreshCw :size="16" :class="{ spin: dstConfigLoading }" /> 重新载入
                 </button>
                 <button
                   class="button primary"
-                  :disabled="dstConfigSaving || !(dstSettingsMode === 'common' ? dstSettingsDirty : dstConfigDirty) || dstGame?.state !== 'stopped'"
+                  :disabled="dstConfigSaving || !dstActiveDirty || dstGame?.state !== 'stopped'"
                   @click="saveActiveDSTSettings"
                 >
                   <LoaderCircle v-if="dstConfigSaving" class="spin" :size="16" />
@@ -3090,21 +3176,25 @@ function gameAccent(id: string) {
               </div>
             </section>
 
-            <div class="settings-source-tabs" role="tablist" aria-label="DST 配置模式">
-              <button :class="{ active: dstSettingsMode === 'common' }" role="tab" @click="dstSettingsMode = 'common'">
-                <strong>常用配置</strong>
+            <div class="settings-source-tabs dst-source-tabs" role="tablist" aria-label="DST 配置模式">
+              <button :class="{ active: dstSettingsMode === 'server' }" role="tab" @click="dstSettingsMode = 'server'">
+                <strong>服务器配置</strong>
                 <span>服务器、玩法、维护与分片端口</span>
+              </button>
+              <button :class="{ active: dstSettingsMode === 'world' }" :disabled="!dstWorldSettings" :title="dstWorldSourceError" role="tab" @click="dstSettingsMode = 'world'">
+                <strong>世界规则</strong>
+                <span>{{ dstWorldSourceError ? "文件含高级语法，请使用高级模式" : "地表与洞穴的常用生成选项" }}</span>
               </button>
               <button :class="{ active: dstSettingsMode === 'advanced' }" role="tab" @click="dstSettingsMode = 'advanced'">
                 <strong>高级文件</strong>
-                <span>cluster.ini · Master/Caves server.ini</span>
+                <span>INI · Master/Caves worldgenoverride.lua</span>
               </button>
             </div>
 
-            <div v-if="dstConfigLoading && (!dstConfig || !dstSettings)" class="page-loader">
+            <div v-if="dstConfigLoading && (!dstConfig || !dstSettings || !dstWorldSettings)" class="page-loader">
               <LoaderCircle class="spin" :size="22" /> 正在读取 DST 配置…
             </div>
-            <section v-else-if="dstSettingsMode === 'common' && dstSettings" class="settings-layout">
+            <section v-else-if="dstSettingsMode === 'server' && dstSettings" class="settings-layout">
               <aside class="settings-nav panel-card">
                 <nav>
                   <button
@@ -3170,6 +3260,82 @@ function gameAccent(id: string) {
                 </article>
               </div>
             </section>
+            <section v-else-if="dstSettingsMode === 'world' && dstWorldSettings && activeDSTWorldShard" class="settings-layout">
+              <aside class="settings-nav panel-card">
+                <div class="dst-world-shards" role="tablist" aria-label="DST 世界分片">
+                  <button
+                    v-for="shard in dstWorldSettings.shards"
+                    :key="shard.id"
+                    :class="{ active: dstWorldShard === shard.id }"
+                    role="tab"
+                    @click="selectDSTWorldShard(shard.id)"
+                  >
+                    <span>{{ shard.name }}</span>
+                    <small>{{ shard.configured ? "已接管" : "新文件" }}</small>
+                  </button>
+                </div>
+                <nav>
+                  <button
+                    v-for="group in activeDSTWorldShard.groups"
+                    :key="group.id"
+                    :class="{ active: dstWorldGroup === group.id }"
+                    @click="dstWorldGroup = group.id"
+                  >
+                    <span>{{ group.label }}</span>
+                    <small>{{ group.settings.length }}</small>
+                  </button>
+                </nav>
+                <div class="settings-version">
+                  <ShieldCheck :size="17" />
+                  <div>
+                    <strong>{{ activeDSTWorldShard.preset || "未指定预设" }}</strong>
+                    <span>{{ activeDSTWorldShard.configured ? "读取现有 worldgenoverride.lua" : "保存时创建安全模板" }}</span>
+                  </div>
+                </div>
+              </aside>
+              <div class="settings-main">
+                <article class="settings-source-warning panel-card danger">
+                  <AlertTriangle :size="18" />
+                  <div>
+                    <strong>世界生成规则不会改造当前存档</strong>
+                    <span>Hearth 只保存 worldgenoverride.lua，不会删除或重新生成世界；这些选项通常需要创建新世界后才生效。</span>
+                  </div>
+                </article>
+                <article v-if="dstGame?.state !== 'stopped'" class="settings-source-warning panel-card">
+                  <AlertTriangle :size="18" />
+                  <div><strong>服务器运行中，暂时不能保存世界规则</strong><span>可以先调整选项；保存前请停止 Master/Caves。</span></div>
+                </article>
+                <article
+                  v-for="group in activeDSTWorldShard.groups.filter((item) => item.id === dstWorldGroup)"
+                  :key="group.id"
+                  class="settings-group panel-card"
+                >
+                  <div class="settings-group-head">
+                    <div><h2>{{ group.label }}</h2><p>{{ group.description }}</p></div>
+                    <span>{{ group.settings.length }} 项 · 新世界生效</span>
+                  </div>
+                  <div class="setting-list">
+                    <div v-for="setting in group.settings" :key="setting.key" class="setting-row">
+                      <div class="setting-copy">
+                        <div>
+                          <strong>{{ setting.label }}</strong>
+                          <span class="source-chip">{{ setting.configured ? "当前文件" : "默认值" }}</span>
+                          <span class="risk-chip worldgen"><AlertTriangle :size="12" />重新生成世界生效</span>
+                        </div>
+                        <p>{{ setting.description }}</p>
+                        <code>{{ setting.key }}</code>
+                      </div>
+                      <div class="setting-control">
+                        <select :value="String(setting.value)" @change="setDSTWorldSettingValue(setting, ($event.target as HTMLSelectElement).value)">
+                          <option v-for="option in setting.options ?? []" :key="option.value" :value="option.value">{{ option.label }}</option>
+                        </select>
+                        <button class="reset-button" title="恢复默认值" @click="resetDSTWorldSetting(setting)"><RotateCw :size="14" /></button>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
             <section v-else-if="dstSettingsMode === 'advanced' && dstConfig" class="settings-layout dst-config-layout">
               <aside class="settings-nav panel-card">
                 <nav>
@@ -3195,7 +3361,11 @@ function gameAccent(id: string) {
                 </article>
                 <article class="settings-group panel-card">
                   <div class="settings-group-head">
-                    <div><h2>{{ dstConfig.files.find((file) => file.id === dstConfigActiveFile)?.name }}</h2><p>保留未知键和注释；服务端只接受固定文件名和有效 UTF-8 文本。</p></div>
+                    <div>
+                      <h2>{{ dstConfig.files.find((file) => file.id === dstConfigActiveFile)?.name }}</h2>
+                      <p v-if="dstConfig.files.find((file) => file.id === dstConfigActiveFile)?.format === 'worldgen'">只接受声明式静态 Lua table；不会执行文件内容，并保留支持语法内的未知键和注释。</p>
+                      <p v-else>保留未知键和注释；服务端只接受固定文件名和有效 INI 文本。</p>
+                    </div>
                     <span>管理员专属</span>
                   </div>
                   <textarea class="dst-config-editor" :value="dstConfigDrafts[dstConfigActiveFile] ?? ''" spellcheck="false" @input="updateDSTConfigDraft(($event.target as HTMLTextAreaElement).value)"></textarea>

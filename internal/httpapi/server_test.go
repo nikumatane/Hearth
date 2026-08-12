@@ -23,6 +23,23 @@ type updateTestService struct {
 	acknowledged bool
 }
 
+type dstWorldSettingsTestService struct {
+	*panel.DemoService
+	patch panel.DSTWorldSettingsPatch
+}
+
+func (s *dstWorldSettingsTestService) DSTWorldSettings() (panel.DSTWorldSettings, error) {
+	return panel.DSTWorldSettings{
+		Version: "1.0", Revision: "world-revision",
+		Shards: []panel.DSTWorldShard{{ID: "master", Name: "地表世界", Groups: []panel.SettingGroup{}}},
+	}, nil
+}
+
+func (s *dstWorldSettingsTestService) UpdateDSTWorldSettings(patch panel.DSTWorldSettingsPatch) (panel.DSTWorldSettings, error) {
+	s.patch = patch
+	return s.DSTWorldSettings()
+}
+
 func (s *updateTestService) UpdateStatus() panel.PanelUpdateStatus { return s.status }
 func (s *updateTestService) CheckForUpdate(context.Context) (panel.PanelUpdateStatus, error) {
 	return s.status, nil
@@ -104,6 +121,34 @@ func TestDSTTokenRouteIsAdminOnlyAndScoped(t *testing.T) {
 	unsupported := requestForTest(t, handler, http.MethodPut, "/api/v1/system/games/dont-starve-together/cluster-token", `{"token":"secret"}`, cookie)
 	if unsupported.Code != http.StatusBadRequest || strings.Contains(unsupported.Body.String(), "secret") {
 		t.Fatalf("unsupported token update = %d %s", unsupported.Code, unsupported.Body.String())
+	}
+}
+
+func TestDSTWorldSettingsRouteIsAdminOnlyAndAudited(t *testing.T) {
+	service := &dstWorldSettingsTestService{DemoService: panel.NewDemoService()}
+	handler, err := New(config.Config{AdminPassword: "correct"}, service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthorized := requestForTest(t, handler, http.MethodGet, "/api/v1/games/dont-starve-together/world-settings", "", nil)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous world settings status = %d", unauthorized.Code)
+	}
+	cookie := loginTestHandler(t, handler)
+	read := requestForTest(t, handler, http.MethodGet, "/api/v1/games/dont-starve-together/world-settings", "", cookie)
+	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), "world-revision") {
+		t.Fatalf("read world settings = %d %s", read.Code, read.Body.String())
+	}
+	updated := requestForTest(
+		t, handler, http.MethodPatch, "/api/v1/games/dont-starve-together/world-settings",
+		`{"revision":"world-revision","changes":{"master.world.world_size":"huge"}}`, cookie,
+	)
+	if updated.Code != http.StatusOK || service.patch.Revision != "world-revision" || service.patch.Changes["master.world.world_size"] != "huge" {
+		t.Fatalf("update world settings = %d body=%s patch=%#v", updated.Code, updated.Body.String(), service.patch)
+	}
+	audit := requestForTest(t, handler, http.MethodGet, "/api/v1/access/operation-audit", "", cookie)
+	if audit.Code != http.StatusOK || !strings.Contains(audit.Body.String(), operationEventDSTConfigUpdated) {
+		t.Fatalf("world settings audit = %d %s", audit.Code, audit.Body.String())
 	}
 }
 

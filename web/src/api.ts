@@ -81,7 +81,8 @@ export type Setting = {
   step?: number;
   options?: Array<{ label: string; value: string }>;
   sensitive?: boolean;
-  risk?: "performance" | "disk" | "security" | "";
+  risk?: "performance" | "disk" | "security" | "worldgen" | "";
+  applyMode?: "restart" | "regenerate";
   memberEditable?: boolean;
   restartRequired: boolean;
   configured: boolean;
@@ -211,8 +212,10 @@ export type WorldOptionDocument = {
 };
 
 export type DSTConfigFile = {
-  id: "cluster" | "master" | "caves";
+  id: "cluster" | "master" | "caves" | "master-world" | "caves-world";
   name: string;
+  format: "ini" | "worldgen";
+  exists: boolean;
   revision: string;
   lastModified: string;
   content: string;
@@ -228,6 +231,21 @@ export type DSTSettings = {
   version: string;
   revision: string;
   groups: SettingGroup[];
+  lastModified: string;
+};
+
+export type DSTWorldShard = {
+  id: "master" | "caves";
+  name: string;
+  preset: string;
+  configured: boolean;
+  groups: SettingGroup[];
+};
+
+export type DSTWorldSettings = {
+  version: string;
+  revision: string;
+  shards: DSTWorldShard[];
   lastModified: string;
 };
 
@@ -374,6 +392,13 @@ export const api = {
     request<DSTSettings>("/api/v1/games/dont-starve-together/settings"),
   updateDSTSettings: (patch: { revision: string; changes: Record<string, unknown> }) =>
     request<DSTSettings>("/api/v1/games/dont-starve-together/settings", {
+      method: "PATCH",
+      body: JSON.stringify(patch)
+    }),
+  dstWorldSettings: () =>
+    request<DSTWorldSettings>("/api/v1/games/dont-starve-together/world-settings"),
+  updateDSTWorldSettings: (patch: { revision: string; changes: Record<string, unknown> }) =>
+    request<DSTWorldSettings>("/api/v1/games/dont-starve-together/world-settings", {
       method: "PATCH",
       body: JSON.stringify(patch)
     }),

@@ -122,6 +122,14 @@ func NewWithUpdates(cfg config.Config, service panel.Service, updates panel.Pane
 		"PATCH /api/v1/games/dont-starve-together/settings",
 		s.admin(s.updateDSTSettings),
 	)
+	mux.HandleFunc(
+		"GET /api/v1/games/dont-starve-together/world-settings",
+		s.admin(s.dstWorldSettings),
+	)
+	mux.HandleFunc(
+		"PATCH /api/v1/games/dont-starve-together/world-settings",
+		s.admin(s.updateDSTWorldSettings),
+	)
 	mux.HandleFunc("GET /api/v1/logs", s.admin(s.logs))
 	mux.HandleFunc("GET /api/v1/logs/{id}", s.admin(s.logFile))
 	mux.HandleFunc("GET /api/v1/access/members", s.admin(s.members))
@@ -737,6 +745,30 @@ func (s *server) updateDSTSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated, err := s.service.UpdateDSTSettings(patch)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	s.recordManagementOperation(r, operationEventDSTConfigUpdated, operationTargetGame, "dont-starve-together")
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (s *server) dstWorldSettings(w http.ResponseWriter, _ *http.Request) {
+	document, err := s.service.DSTWorldSettings()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, document)
+}
+
+func (s *server) updateDSTWorldSettings(w http.ResponseWriter, r *http.Request) {
+	var patch panel.DSTWorldSettingsPatch
+	if err := decodeJSONLimit(r, &patch, 256<<10); err != nil {
+		writeError(w, http.StatusBadRequest, "DST 世界规则请求格式不正确")
+		return
+	}
+	updated, err := s.service.UpdateDSTWorldSettings(patch)
 	if err != nil {
 		writeServiceError(w, err)
 		return
