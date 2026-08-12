@@ -106,7 +106,7 @@ func (s *Service) checkVersion(report versionReporter, logID string) error {
 	}
 	s.setVersionStatus(installedBuildID, status)
 	if status.UpdateAvailable {
-		report("检查完成", 100, "DST Dedicated Server 的 public 分支有可用更新；本版本仅提示，不执行更新")
+		report("检查完成", 100, "DST Dedicated Server 的 public 分支有可用更新，可以在详情页确认安全更新")
 	} else {
 		report("检查完成", 100, "DST Dedicated Server 当前已是 public 分支最新版")
 	}

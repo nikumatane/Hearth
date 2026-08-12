@@ -36,9 +36,10 @@ Production is deployed as one Go binary:
     management remains on a separate backend page.
 11. Startup discovery checks known exact locations and administrator-configured roots with depth,
     directory, and candidate limits. Adoption and installation are separate confirmed administrator
-    actions; the first 1.3.0 DST phase supports adopting an existing Dedicated Server/cluster and
-    Master/Caves lifecycle, and lets an administrator write the cluster token from Game Management;
-    installation, mods, and backup/restore remain disabled.
+    actions. DST supports adopting an existing Dedicated Server/cluster, Master/Caves lifecycle,
+    configuration, version checks, stopped-save backups, and safe updates, and lets an administrator
+    write the cluster token from Game Management. Automatic DST installation, mod management, and
+    in-panel restore remain disabled.
 12. Backend settings reject stale revisions, replace through a same-directory temporary file, and
     retain `.previous`. Installation stages SteamCMD in isolation and never starts Palworld on completion.
 13. The panel-update layer queries only the fixed official GitHub Release. It verifies the asset
@@ -137,7 +138,10 @@ current small-server use case.
 - Game IDs map to process names, installation directories, and Steam App IDs only through server
   configuration.
 - At most one mutating task runs for the same game at a time.
-- Update and backup while running must first save the world through the official Palworld REST API.
+- Palworld update and backup while running must first save the world through the official REST API.
+- DST has no REST save/shutdown channel. Standalone backups require stopped Master/Caves. A running
+  update requires explicit administrator confirmation to terminate both managed shards, archive the
+  stopped cluster, update App `343050`, and restore the task's original runtime state.
 - Stop and restart always try a REST shutdown first. When REST is unavailable and the user explicitly
   accepts the save risk, Hearth may terminate only the Palworld process whose PID and start time were
   captured when the task began.
@@ -147,11 +151,14 @@ current small-server use case.
 - A newly created ZIP is always retained. Older Hearth ZIPs default to 30 days and 20 GiB total.
   Cleanup failures become warnings rather than turning a successful backup into a false failure, and
   unknown filenames are never deleted.
-- Forced-stop fallback does not apply to update, backup, configuration writes, or other operations.
-- A running `steamcmd.exe` prevents a concurrent update.
+- Palworld forced-stop fallback does not apply to update, backup, configuration writes, or other
+  operations. DST update uses a separate explicit risk boundary and is never enabled by an ordinary
+  stop confirmation.
+- A running `steamcmd.exe` prevents a concurrent version check or update.
 - SteamCMD self-update, server download, and verification share log-progress monitoring. The process
-  tree is stopped only after 30 minutes without log growth. A clean exit without the App ID `2394010`
-  success marker retries once so self-update cannot be mistaken for a completed server update.
+  tree is stopped only after 30 minutes without log growth. Palworld retries once after a clean exit
+  without the App ID `2394010` success marker; DST accepts only an explicit App `343050` completion
+  marker, so SteamCMD self-update cannot be mistaken for a completed game update.
 - Version checks share the serialized game-task lock; manual checks require Update server permission.
   The first automatic attempt starts after 30 seconds, a 15-minute poll evaluates staleness, and a
   successful result remains fresh for six hours. Failed retries are at least one hour apart. Busy or

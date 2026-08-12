@@ -54,7 +54,7 @@ Status: implemented and continuing through 1.3.2 acceptance.
 
 ## 1.3.2 · Generic game version management
 
-Status: in development (current branch: `release/1.3.2`).
+Status: implemented and continuing through 1.3.3 acceptance.
 
 - Abstract current version, source, check state, and available version in the game adapter so the detail page is not Palworld-specific.
 - Keep Palworld on actual service-server depot/manifest checks; use the DST SteamCMD app/depot version and never expose SteamCMD's own version.
@@ -62,10 +62,11 @@ Status: in development (current branch: `release/1.3.2`).
 
 ## 1.3.3 · DST version checks and safe updates
 
-Status: planned.
+Status: in development (current branch: `release/1.3.3`).
 
 - Add DST SteamCMD version checks and update tasks by reusing backup, stage progress, no-progress timeout, logs, and failure recovery.
-- Before an update, follow the Master/Caves backup, stop, update, start, and health-confirmation lifecycle with a recoverable failure boundary.
+- Before an update, stop Master/Caves, create a consistent backup, update, restore the original runtime state, and confirm
+  shard health. A failure retains the new backup and attempts to restore the task's previous runtime state.
 - Show update controls only for installed and managed DST; do not auto-install the game or manage mods.
 
 ## Versioning rules

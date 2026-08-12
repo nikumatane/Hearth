@@ -416,6 +416,7 @@ func (s *Service) snapshot() (panel.Game, panel.ResourceUsage) {
 		ID: palworldID, Name: "幻兽帕鲁", ShortName: "PAL", State: "stopped",
 		Port: s.config.Port, Tags: []string{"Steam", "REST API", "Windows"},
 		VersionSource: "Steam appmanifest", UpdateSupported: true, BackupSupported: true,
+		BackupRequiresStopped: false, UpdateRequiresUnsafeStop: false,
 		PlayersMax:       configuredPlayerMax,
 		PlayersMaxKnown:  configuredPlayerMax > 0,
 		PlayersAvailable: true, PlayersSource: "进程已停止",

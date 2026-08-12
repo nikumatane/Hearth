@@ -17,7 +17,7 @@ func terminateCommand(command *exec.Cmd) error {
 	if command.Process == nil {
 		return nil
 	}
-	return command.Process.Kill()
+	return syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 }
 
 func processRunning(name string) bool {

@@ -1242,9 +1242,13 @@ function actionDisabledReason(game: Game, action: ActionName): string | undefine
   if (!hasActionPermission(action)) return "当前成员密码没有此操作权限";
   if (action === "update" && !game.updateSupported) return "当前游戏暂未接入安全更新";
   if (action === "backup" && !game.backupSupported) return "当前游戏暂未接入面板备份";
+  if (action === "backup" && game.backupRequiresStopped && game.state !== "stopped") {
+    return "DST 没有在线保存通道，请先停止 Master/Caves 再备份";
+  }
   if (
     game.state === "running" &&
     !game.restAvailable &&
+    !(action === "update" && game.updateRequiresUnsafeStop) &&
     action !== "start" &&
     action !== "stop" &&
     action !== "restart"
@@ -1264,7 +1268,7 @@ function askAction(game: Game, action: ActionName) {
     return;
   }
   if (!canRunSafeAction(game, action)) {
-    showToast("error", "REST API 当前不可用；运行中的更新和备份仍需先安全保存世界");
+    showToast("error", actionDisabledReason(game, action) ?? "当前无法安全执行此操作");
     return;
   }
   confirmAction.value = { game, action };
@@ -1272,9 +1276,9 @@ function askAction(game: Game, action: ActionName) {
 
 function usesUnsafeFallback(game: Game, action: ActionName): boolean {
   return (
-    game.state === "running" &&
+    game.state !== "stopped" &&
     !game.restAvailable &&
-    actionAllowsUnsafeFallback(action)
+    (actionAllowsUnsafeFallback(action) || (action === "update" && game.updateRequiresUnsafeStop))
   );
 }
 
@@ -1289,7 +1293,8 @@ function activityProgress(item: { progress?: number }): number {
 async function executeAction() {
   if (!confirmAction.value) return;
   const { game, action } = confirmAction.value;
-  const allowUnsafe = actionAllowsUnsafeFallback(action);
+  const allowUnsafe = actionAllowsUnsafeFallback(action) ||
+    (action === "update" && game.updateRequiresUnsafeStop && game.state !== "stopped");
   actionBusy.value = true;
   try {
     await api.action(game.id, action, allowUnsafe);
@@ -2477,7 +2482,7 @@ function gameAccent(id: string) {
                 <Clock3 :size="17" />当前只展示探测结果，不提供安装或接管，避免产生无法管理的半成品服务器。
               </div>
               <div v-else-if="game.id === 'dont-starve-together' && !game.canInstall" class="planned-note">
-                <Clock3 :size="17" />当前支持接管现有 cluster 与 Master/Caves 生命周期；自动安装、模组和备份恢复将在后续阶段开放。
+                <Clock3 :size="17" />当前支持接管现有 cluster、Master/Caves 生命周期、版本检查、备份与安全更新；自动安装、模组和面板内恢复将在后续阶段开放。
               </div>
             </article>
           </section>
@@ -2494,10 +2499,10 @@ function gameAccent(id: string) {
               <label class="wide"><span>额外探测根目录</span><textarea v-model="discoveryRootsText" rows="4"></textarea><small>每行一个绝对路径，最多向下探测 5 层。</small></label>
             </div>
             <div class="system-settings-section">
-              <div><h2>Palworld 运维</h2><p>保存后需要重启 Hearth，正在运行的游戏不会被自动重启。</p></div>
+              <div><h2>游戏服务器运维</h2><p>备份保留与 SteamCMD 超时同时用于 Palworld 和 DST；保存后需重启 Hearth，正在运行的游戏不会被自动重启。</p></div>
               <label><span>备份保留天数</span><input v-model.number="management.settings.backupRetentionDays" type="number" min="1" max="36500" /></label>
               <label><span>备份容量上限 GiB</span><input v-model.number="management.settings.backupMaxTotalGB" type="number" min="1" max="1000000" /></label>
-              <label><span>安全关闭等待秒数</span><input v-model.number="management.settings.shutdownWaitSeconds" type="number" min="5" max="600" /></label>
+              <label><span>关闭等待秒数</span><input v-model.number="management.settings.shutdownWaitSeconds" type="number" min="5" max="600" /><small>Palworld 用于安全关闭；DST 用于等待 Master/Caves 退出。</small></label>
               <label><span>SteamCMD 无进展超时</span><input v-model.number="management.settings.steamCmdNoProgressMinutes" type="number" min="1" max="10080" /></label>
               <label><span>Palworld 游戏端口</span><input v-model.number="management.settings.palworldPort" type="number" min="1" max="65535" /></label>
             </div>
@@ -3618,7 +3623,11 @@ function gameAccent(id: string) {
           </div>
           <span class="eyebrow">CONFIRM ACTION</span>
           <h2>确认{{ actionLabel(confirmAction.action) }}{{ confirmAction.game.name }}？</h2>
-          <p v-if="confirmAction.action === 'update'">
+          <p v-if="confirmAction.action === 'update' && usesUnsafeFallback(confirmAction.game, confirmAction.action)">
+            DST 没有 REST 保存与安全关闭通道。面板会终止 Master/Caves，对静止存档创建 ZIP 备份，
+            再更新并恢复两个分片；最近尚未由游戏写入磁盘的进度可能丢失。
+          </p>
+          <p v-else-if="confirmAction.action === 'update'">
             面板会先通知在线玩家、保存世界并安全停止服务器，然后执行 SteamCMD 更新和健康检查。
           </p>
           <p v-else-if="usesUnsafeFallback(confirmAction.game, confirmAction.action)">

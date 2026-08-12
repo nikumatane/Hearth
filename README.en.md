@@ -24,8 +24,9 @@
 Hearth embeds its frontend and API in one Go binary. It can adopt an existing SteamCMD game in
 place or install a new Palworld Dedicated Server after explicit administrator confirmation. It
 does not require Docker and never adopts, starts, or moves saves automatically. The production
-adapter focuses on Windows Palworld. The first 1.3.0 DST phase can adopt an existing Dedicated Server
-and cluster and manage the Master/Caves lifecycle; installation, mods, and backups remain in development.
+adapters support Windows Palworld plus adoption, Master/Caves lifecycle, configuration, version checks,
+stopped-save backups, and safe updates for an existing DST Dedicated Server and cluster. Automatic DST
+installation, mod management, and in-panel restore remain outside the current scope.
 
 Hearth is intended for setups where:
 
@@ -212,6 +213,14 @@ SteamCMD exits normally after self-update without confirming the Palworld update
 once and announces completion only after seeing the success marker for App ID `2394010`.
 An `already up to date` marker is reported as Server already current and clears stale update state.
 
+DST uses the same public-depot manifest parser but always queries Dedicated Server App `343050`.
+DST has no REST save or safe-shutdown channel: a standalone backup requires stopped Master/Caves,
+while a safe update explicitly confirms the risk, stops both shards, creates a ZIP from the static
+cluster, runs SteamCMD, and restores the task's original runtime state. A failure retains the new
+backup and attempts to restore that runtime state. Backup age/capacity and SteamCMD no-progress
+settings apply to both games. Hearth neither manages DST mods nor reports SteamCMD's own version as
+the game version.
+
 ## Local development
 
 Requires Go 1.26.5+, Node.js 22+, and pnpm 10+.
@@ -238,11 +247,11 @@ HEARTH_DEMO=true HEARTH_ADMIN_PASSWORD='replace-me' ./bin/hearth
 
 ## Project boundaries
 
-- The current production adapter supports only Palworld 1.0 on Windows.
+- Production adapters support Windows Palworld 1.0 and an existing Windows DST Dedicated Server/cluster.
 - Frontend input is never executed as arbitrary shell text.
 - At most one mutating task runs for a game at a time.
-- SteamCMD is launched in the background only for low-frequency Palworld server-version checks; a
-  busy task or existing SteamCMD process causes the automatic check to be skipped.
+- SteamCMD is launched in the background only for low-frequency managed-game version checks; a busy
+  task or existing SteamCMD process causes the automatic check to be skipped.
 - Monitoring time series and version-check results are not persisted long-term.
 - World settings can be viewed and edited while running, but writing requires a safe stop.
 - Hearth refuses to guess when it cannot identify the active save and never binds a fixed world ID.

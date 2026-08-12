@@ -14,6 +14,8 @@ export type Game = {
   updateAvailable: boolean;
   updateSupported: boolean;
   backupSupported: boolean;
+  backupRequiresStopped: boolean;
+  updateRequiresUnsafeStop: boolean;
   versionCheck?: "unchecked" | "checking" | "current" | "update_available" | "unavailable";
   playersOnline: number;
   playersMax: number;

@@ -472,6 +472,10 @@ func (s *Service) UpdateSystemSettings(patch panel.SystemSettingsPatch) (panel.S
 	next.Games.Palworld.ShutdownWaitSeconds = patch.ShutdownWaitSeconds
 	next.Games.Palworld.SteamCmdNoProgressMinutes = patch.SteamCmdNoProgressMinutes
 	next.Games.Palworld.Port = patch.PalworldPort
+	next.Games.DontStarveTogether.BackupRetentionDays = patch.BackupRetentionDays
+	next.Games.DontStarveTogether.BackupMaxTotalGB = patch.BackupMaxTotalGB
+	next.Games.DontStarveTogether.ShutdownWaitSeconds = patch.ShutdownWaitSeconds
+	next.Games.DontStarveTogether.SteamCmdNoProgressMinutes = patch.SteamCmdNoProgressMinutes
 	next.SecureCookies = patch.SecureCookies
 	next.TrustedProxyCIDRs = cleanUniqueStrings(patch.TrustedProxyCIDRs)
 	next.Update.Channel = patch.UpdateChannel
@@ -485,7 +489,11 @@ func (s *Service) UpdateSystemSettings(patch panel.SystemSettingsPatch) (panel.S
 		next.Games.Palworld.BackupMaxTotalGB != s.config.Games.Palworld.BackupMaxTotalGB ||
 		next.Games.Palworld.ShutdownWaitSeconds != s.config.Games.Palworld.ShutdownWaitSeconds ||
 		next.Games.Palworld.SteamCmdNoProgressMinutes != s.config.Games.Palworld.SteamCmdNoProgressMinutes ||
-		next.Games.Palworld.Port != s.config.Games.Palworld.Port
+		next.Games.Palworld.Port != s.config.Games.Palworld.Port ||
+		next.Games.DontStarveTogether.BackupRetentionDays != s.config.Games.DontStarveTogether.BackupRetentionDays ||
+		next.Games.DontStarveTogether.BackupMaxTotalGB != s.config.Games.DontStarveTogether.BackupMaxTotalGB ||
+		next.Games.DontStarveTogether.ShutdownWaitSeconds != s.config.Games.DontStarveTogether.ShutdownWaitSeconds ||
+		next.Games.DontStarveTogether.SteamCmdNoProgressMinutes != s.config.Games.DontStarveTogether.SteamCmdNoProgressMinutes
 	s.config = next
 	s.discoverLocked()
 	return s.systemSettingsLocked(restartRequired), nil

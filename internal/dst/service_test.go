@@ -1,6 +1,7 @@
 package dst
 
 import (
+	"archive/zip"
 	"errors"
 	"fmt"
 	"os"
@@ -49,7 +50,8 @@ func TestNewServiceValidatesClusterBoundary(t *testing.T) {
 	if game.State != "stopped" || game.SaveID != "MyCluster" || game.Port != 11000 {
 		t.Fatalf("game = %#v", game)
 	}
-	if game.UpdateSupported || game.BackupSupported || game.VersionSource != "Steam appmanifest" {
+	if !game.UpdateSupported || !game.BackupSupported || !game.BackupRequiresStopped ||
+		!game.UpdateRequiresUnsafeStop || game.VersionSource != "Steam appmanifest" {
 		t.Fatalf("DST capabilities = %#v", game)
 	}
 	if _, err := service.Game("palworld"); !errors.Is(err, panel.ErrNotFound) {
@@ -108,9 +110,356 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !game.UpdateAvailable || game.AvailableVersion != "101" || game.UpdateSupported {
+	if !game.UpdateAvailable || game.AvailableVersion != "101" || !game.UpdateSupported {
 		t.Fatalf("DST version status = %#v", game)
 	}
+}
+
+func TestDSTSteamVersionCommandStopsAfterNoLogProgress(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX shell script")
+	}
+	gameConfig := testConfig(t)
+	gameConfig.SteamCmd = filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(gameConfig.InstallDir))), "steamcmd")
+	if err := os.WriteFile(gameConfig.SteamCmd, []byte("#!/bin/sh\nsleep 10\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(gameConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	logPath := filepath.Join(t.TempDir(), "steamcmd.log")
+	logFile, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logFile.Close()
+	started := time.Now()
+	err = service.runSteamVersionCommand(logFile, 150*time.Millisecond, "+quit")
+	if err == nil || !strings.Contains(err.Error(), "no log progress") {
+		t.Fatalf("runSteamVersionCommand() error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("no-progress termination took %v", elapsed)
+	}
+}
+
+func TestDSTSteamUpdateResultRequiresTargetAppCompletion(t *testing.T) {
+	directory := t.TempDir()
+	for name, fixture := range map[string]struct {
+		log       string
+		confirmed bool
+	}{
+		"updated":  {log: "Success! App '343050' fully installed.", confirmed: true},
+		"current":  {log: "Success! App '343050' already up to date.", confirmed: true},
+		"palworld": {log: "Success! App '2394010' fully installed.", confirmed: false},
+		"steamcmd": {log: "Loading Steam API...OK", confirmed: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(directory, name+".log")
+			if err := os.WriteFile(path, []byte(fixture.log), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, confirmed := dstSteamUpdateResult(path)
+			if confirmed != fixture.confirmed {
+				t.Fatalf("dstSteamUpdateResult(%q) confirmed = %v", fixture.log, confirmed)
+			}
+		})
+	}
+}
+
+func TestDSTBackupArchivesStoppedClusterAndExcludesPanelState(t *testing.T) {
+	gameConfig := testConfig(t)
+	savePath := filepath.Join(gameConfig.ClusterDir, "Master", "save", "session", "world.dat")
+	if err := os.MkdirAll(filepath.Dir(savePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(savePath, []byte("world-state"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(gameConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	if err := os.MkdirAll(filepath.Join(service.config.ClusterDir, "panel-logs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(service.config.ClusterDir, "panel-logs", "ignore.log"), []byte("ignore"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backupPath, err := service.createBackup(func(string, int, string) {}, "dst-backup-test.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zip.OpenReader(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer archive.Close()
+	foundSave := false
+	for _, file := range archive.File {
+		if strings.Contains(file.Name, "panel-backups") || strings.Contains(file.Name, "panel-logs") {
+			t.Fatalf("panel state leaked into cluster backup: %s", file.Name)
+		}
+		if file.Name == "Master/save/session/world.dat" {
+			foundSave = true
+		}
+	}
+	if !foundSave {
+		t.Fatalf("save file missing from backup %s", backupPath)
+	}
+}
+
+func TestDSTBackupRequiresStoppedShards(t *testing.T) {
+	service, err := NewService(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	service.masterRunning = true
+	if _, err := service.RunAction(gameID, panel.ActionRequest{Action: "backup"}); !errors.Is(err, panel.ErrUnsafe) {
+		t.Fatalf("running backup error = %v", err)
+	}
+}
+
+func TestDSTBackupRetentionUsesAgeAndCapacityAndKeepsCurrent(t *testing.T) {
+	service, err := NewService(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	service.config.BackupRetentionDays = 30
+	service.config.BackupMaxTotalGB = 1
+	if err := os.MkdirAll(service.config.BackupDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	type fixture struct {
+		name string
+		size int64
+		age  time.Duration
+	}
+	fixtures := []fixture{
+		{name: "dst-backup-current.zip", size: 1, age: 0},
+		{name: "dst-backup-new.zip", size: 600 << 20, age: time.Hour},
+		{name: "dst-backup-capacity.zip", size: 600 << 20, age: 2 * time.Hour},
+		{name: "dst-backup-expired.zip", size: 1, age: 40 * 24 * time.Hour},
+	}
+	for _, item := range fixtures {
+		path := filepath.Join(service.config.BackupDir, item.name)
+		file, createErr := os.Create(path)
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		if truncateErr := file.Truncate(item.size); truncateErr != nil {
+			_ = file.Close()
+			t.Fatal(truncateErr)
+		}
+		if closeErr := file.Close(); closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		if err := os.Chtimes(path, now.Add(-item.age), now.Add(-item.age)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unknown := filepath.Join(service.config.BackupDir, "manual-backup.zip")
+	if err := os.WriteFile(unknown, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	current := filepath.Join(service.config.BackupDir, "dst-backup-current.zip")
+	removed, _, err := service.pruneBackups(current, now)
+	if err != nil || removed != 2 {
+		t.Fatalf("prune removed=%d error=%v", removed, err)
+	}
+	for _, name := range []string{"dst-backup-current.zip", "dst-backup-new.zip", "manual-backup.zip"} {
+		if _, err := os.Stat(filepath.Join(service.config.BackupDir, name)); err != nil {
+			t.Fatalf("retained backup %s: %v", name, err)
+		}
+	}
+	for _, name := range []string{"dst-backup-capacity.zip", "dst-backup-expired.zip"} {
+		if _, err := os.Stat(filepath.Join(service.config.BackupDir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("backup %s was not removed: %v", name, err)
+		}
+	}
+}
+
+func TestDSTUpdateStopsBacksUpUpdatesAndRestoresShards(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses POSIX shell scripts")
+	}
+	gameConfig := testConfig(t)
+	if err := os.WriteFile(gameConfig.Executable, []byte("#!/bin/sh\nsleep 30\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(gameConfig.Executable, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gameConfig.ClusterDir, "cluster_token.txt"), []byte("test-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	steamRoot := filepath.Dir(filepath.Dir(filepath.Dir(gameConfig.InstallDir)))
+	gameConfig.SteamCmd = filepath.Join(steamRoot, "steamcmd")
+	manifestPath := filepath.Join(steamRoot, "steamapps", "appmanifest_"+dstAppID+".acf")
+	manifest := `"AppState"
+{
+	"buildid" "100"
+	"MountedDepots"
+	{
+		"343051" "700"
+	}
+}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	steamScript := `#!/bin/sh
+case "$*" in
+  *app_update*) printf " Update state (0x61) downloading, progress: 100.00 (1 / 1)\nSuccess! App '343050' fully installed.\n" ;;
+esac
+`
+	if err := os.WriteFile(gameConfig.SteamCmd, []byte(steamScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(gameConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	previousHealthDuration := shardHealthConfirmationDuration
+	previousRecoveryDuration := recoveryHealthDuration
+	shardHealthConfirmationDuration = 200 * time.Millisecond
+	recoveryHealthDuration = 200 * time.Millisecond
+	defer func() {
+		shardHealthConfirmationDuration = previousHealthDuration
+		recoveryHealthDuration = previousRecoveryDuration
+	}()
+
+	start, err := service.RunAction(gameID, panel.ActionRequest{Action: "start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitDSTActivity(t, service, start.ID, "success", 3*time.Second)
+	if _, err := service.RunAction(gameID, panel.ActionRequest{Action: "update"}); !errors.Is(err, panel.ErrUnsafe) {
+		t.Fatalf("running update without confirmation error = %v", err)
+	}
+	update, err := service.RunAction(gameID, panel.ActionRequest{Action: "update", AllowUnsafe: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(update.Logs) != 3 {
+		t.Fatalf("update logs = %#v", update.Logs)
+	}
+	waitDSTActivity(t, service, update.ID, "success", 8*time.Second)
+	game, err := service.Game(gameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if game.State != "running" || game.VersionCheck != versionCheckCurrent || game.LastBackupAt == nil {
+		t.Fatalf("game after update = %#v", game)
+	}
+	backups, err := filepath.Glob(filepath.Join(service.config.BackupDir, "dst-backup-*.zip"))
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("backups = %#v, error = %v", backups, err)
+	}
+	stop, err := service.RunAction(gameID, panel.ActionRequest{Action: "stop", AllowUnsafe: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitDSTActivity(t, service, stop.ID, "success", 3*time.Second)
+	stoppedUpdate, err := service.RunAction(gameID, panel.ActionRequest{Action: "update"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitDSTActivity(t, service, stoppedUpdate.ID, "success", 5*time.Second)
+	stoppedGame, err := service.Game(gameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stoppedGame.State != "stopped" {
+		t.Fatalf("stopped server was unexpectedly started: %#v", stoppedGame)
+	}
+}
+
+func TestDSTUpdateFailureRetainsBackupAndRestoresOriginalRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses POSIX shell scripts")
+	}
+	gameConfig := testConfig(t)
+	if err := os.WriteFile(gameConfig.Executable, []byte("#!/bin/sh\nsleep 30\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(gameConfig.Executable, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gameConfig.ClusterDir, "cluster_token.txt"), []byte("test-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	steamRoot := filepath.Dir(filepath.Dir(filepath.Dir(gameConfig.InstallDir)))
+	gameConfig.SteamCmd = filepath.Join(steamRoot, "steamcmd")
+	manifestPath := filepath.Join(steamRoot, "steamapps", "appmanifest_"+dstAppID+".acf")
+	if err := os.WriteFile(manifestPath, []byte(`"AppState"
+{
+	"buildid" "100"
+	"MountedDepots" { "343051" "700" }
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gameConfig.SteamCmd, []byte("#!/bin/sh\ncase \"$*\" in *app_update*) echo \"Error! App '343050' state is 0x6 after update job.\"; exit 1;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(gameConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	previousRecoveryDuration := recoveryHealthDuration
+	recoveryHealthDuration = 200 * time.Millisecond
+	defer func() { recoveryHealthDuration = previousRecoveryDuration }()
+	start, err := service.RunAction(gameID, panel.ActionRequest{Action: "start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitDSTActivity(t, service, start.ID, "success", 3*time.Second)
+	update, err := service.RunAction(gameID, panel.ActionRequest{Action: "update", AllowUnsafe: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := waitDSTActivity(t, service, update.ID, "error", 8*time.Second)
+	if !strings.Contains(failed.Detail, "0x6") && !strings.Contains(failed.Detail, "exit status") {
+		t.Fatalf("failure detail = %q", failed.Detail)
+	}
+	game, err := service.Game(gameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if game.State != "running" || game.LastBackupAt == nil {
+		t.Fatalf("runtime was not restored after update failure: %#v", game)
+	}
+	stop, err := service.RunAction(gameID, panel.ActionRequest{Action: "stop", AllowUnsafe: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitDSTActivity(t, service, stop.ID, "success", 3*time.Second)
+}
+
+func waitDSTActivity(t *testing.T, service *Service, id, status string, timeout time.Duration) panel.Activity {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		for _, activity := range service.Overview().Activities {
+			if activity.ID != id || activity.Status == "running" {
+				continue
+			}
+			if activity.Status != status {
+				t.Fatalf("activity %s = %#v", id, activity)
+			}
+			return activity
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("activity %s did not reach %s: %#v", id, status, service.Overview().Activities)
+	return panel.Activity{}
 }
 
 func TestStopRequiresExplicitUnsafeConfirmation(t *testing.T) {

@@ -23,8 +23,9 @@
 
 Hearth 把前端和 API 合并为一个 Go 二进制，可以原地接管现有 SteamCMD 游戏安装，也可
 在管理员明确确认后安装新的 Palworld Dedicated Server。它不要求 Docker，不自动接管、
-启动或迁移存档。当前生产适配器专注于 Windows 帕鲁；饥荒联机版 1.3.0 第一阶段已支持现有
-Dedicated Server 与 cluster 接管及 Master/Caves 生命周期，安装、模组和备份仍在开发中。
+启动或迁移存档。当前生产适配器支持 Windows 帕鲁，以及现有 DST Dedicated Server 与 cluster
+的接管、Master/Caves 生命周期、配置、版本检查、静止存档备份和安全更新；DST 自动安装、
+模组管理和面板内恢复仍不在当前范围。
 
 适合这样的场景：
 
@@ -191,6 +192,12 @@ SteamCMD 进程树并提示重试。若 SteamCMD 在自更新后正常退出但�
 完成，Hearth 会自动重试一次，并且只有看到 App ID `2394010` 的成功标志才会宣布完成。
 若标志明确为 `already up to date`，任务会显示“服务器已是最新版”并清除旧更新提示。
 
+DST 使用同一套公共 depot manifest 解析，但固定查询 Dedicated Server App `343050`。运行中的
+DST 没有 REST 保存和安全关闭通道：单独备份必须先手动停止 Master/Caves；安全更新则在管理员
+明确确认风险后停止两个分片，对静止 cluster 创建 ZIP，再执行 SteamCMD 更新并按任务前状态恢复。
+更新失败仍保留新备份并尝试恢复原运行状态。备份保留天数、容量上限和 SteamCMD 无进展超时
+对两个游戏同时生效；Hearth 不自动处理 DST 模组，也不把 SteamCMD 自身版本显示为游戏版本。
+
 ## 本地开发
 
 要求 Go 1.26.5+、Node.js 22+ 和 pnpm 10+。
@@ -217,10 +224,10 @@ HEARTH_DEMO=true HEARTH_ADMIN_PASSWORD='replace-me' ./bin/hearth
 
 ## 项目边界
 
-- 当前生产适配器只支持 Windows Palworld 1.0。
+- 当前生产适配器支持 Windows Palworld 1.0 和已安装的 Windows DST Dedicated Server/cluster。
 - 不执行来自前端的任意 Shell 文本。
 - 同一游戏同时只运行一个变更任务。
-- 只为 Palworld 服务端版本检查低频启动 SteamCMD；繁忙或已有 SteamCMD 时自动跳过。
+- 只为已接管游戏的低频版本检查启动 SteamCMD；繁忙或已有 SteamCMD 时自动跳过。
 - 不长期保存监控时间序列或版本检查结果。
 - 运行中的世界规则可以查看和编辑，但必须安全停服后才能写入。
 - 不明确识别存档时拒绝猜测，不绑定固定世界 ID。

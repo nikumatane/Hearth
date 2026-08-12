@@ -20,6 +20,12 @@ import (
 
 const gameID = "dont-starve-together"
 
+const (
+	maxBackupRetentionDays int   = 36_500
+	maxBackupTotalGB       int64 = (1<<63 - 1) / (1 << 30)
+	maxNoProgressMinutes         = 7 * 24 * 60
+)
+
 type Service struct {
 	mu     sync.Mutex
 	config config.GameConfig
@@ -33,6 +39,7 @@ type Service struct {
 	busy          bool
 	currentAction string
 	activities    []panel.Activity
+	lastBackup    *time.Time
 
 	versionMu          sync.Mutex
 	versionStatus      steamVersionStatus
@@ -67,6 +74,15 @@ func applyDefaults(gameConfig *config.GameConfig) {
 	if gameConfig.ShutdownWaitSeconds <= 0 {
 		gameConfig.ShutdownWaitSeconds = 30
 	}
+	if gameConfig.BackupRetentionDays <= 0 {
+		gameConfig.BackupRetentionDays = 30
+	}
+	if gameConfig.BackupMaxTotalGB <= 0 {
+		gameConfig.BackupMaxTotalGB = 20
+	}
+	if gameConfig.SteamCmdNoProgressMinutes <= 0 {
+		gameConfig.SteamCmdNoProgressMinutes = defaultNoProgressTimeoutMinutes
+	}
 	if gameConfig.Port <= 0 {
 		gameConfig.Port = readINIInt(filepath.Join(gameConfig.ClusterDir, "Master", "server.ini"), "server_port", 11000)
 	}
@@ -75,7 +91,7 @@ func applyDefaults(gameConfig *config.GameConfig) {
 func validateConfig(gameConfig config.GameConfig) error {
 	paths := map[string]string{
 		"installDir": gameConfig.InstallDir, "executable": gameConfig.Executable,
-		"clusterDir": gameConfig.ClusterDir,
+		"clusterDir": gameConfig.ClusterDir, "backupDir": gameConfig.BackupDir,
 	}
 	for name, value := range paths {
 		if strings.TrimSpace(value) == "" || !filepath.IsAbs(value) {
@@ -84,6 +100,18 @@ func validateConfig(gameConfig config.GameConfig) error {
 	}
 	if strings.ContainsAny(gameConfig.ProcessName, `/\\`) {
 		return fmt.Errorf("%w: invalid DST processName", panel.ErrInvalid)
+	}
+	if pathWithin(gameConfig.ClusterDir, gameConfig.BackupDir) {
+		return fmt.Errorf("%w: DST backupDir must not contain the cluster directory", panel.ErrInvalid)
+	}
+	if gameConfig.BackupRetentionDays > maxBackupRetentionDays {
+		return fmt.Errorf("%w: DST backupRetentionDays is too large", panel.ErrInvalid)
+	}
+	if gameConfig.BackupMaxTotalGB > maxBackupTotalGB {
+		return fmt.Errorf("%w: DST backupMaxTotalGB is too large", panel.ErrInvalid)
+	}
+	if gameConfig.SteamCmdNoProgressMinutes > maxNoProgressMinutes {
+		return fmt.Errorf("%w: DST steamCmdNoProgressMinutes is too large", panel.ErrInvalid)
 	}
 	for name, path := range map[string]string{
 		"executable":        gameConfig.Executable,
@@ -128,10 +156,11 @@ func (s *Service) RunAction(id string, request panel.ActionRequest) (panel.Activ
 	if id != gameID {
 		return panel.Activity{}, panel.ErrNotFound
 	}
-	if request.Action != "start" && request.Action != "stop" && request.Action != "restart" && request.Action != "check-update" {
+	if request.Action != "start" && request.Action != "stop" && request.Action != "restart" &&
+		request.Action != "check-update" && request.Action != "backup" && request.Action != "update" {
 		return panel.Activity{}, panel.ErrBadAction
 	}
-	if request.Action == "check-update" {
+	if request.Action == "check-update" || request.Action == "update" {
 		if err := s.validateSteamVersionCheck(); err != nil {
 			return panel.Activity{}, err
 		}
@@ -161,9 +190,18 @@ func (s *Service) RunAction(id string, request panel.ActionRequest) (panel.Activ
 		}
 		return panel.Activity{}, fmt.Errorf("%w: DST 当前未运行", panel.ErrUnsafe)
 	}
-	if (request.Action == "stop" || request.Action == "restart") && !request.AllowUnsafe {
+	if request.Action == "backup" && (masterRunning || cavesRunning || externalRunning) {
 		s.mu.Unlock()
-		return panel.Activity{}, fmt.Errorf("%w: DST 没有 REST 安全关闭通道；请明确确认强制终止 Master/Caves", panel.ErrUnsafe)
+		return panel.Activity{}, fmt.Errorf("%w: DST 没有在线保存通道；请先停止 Master/Caves 再创建一致性备份", panel.ErrUnsafe)
+	}
+	if request.Action == "update" && externalRunning && !masterRunning && !cavesRunning {
+		s.mu.Unlock()
+		return panel.Activity{}, fmt.Errorf("%w: 检测到外部 DST 进程；当前只允许更新 Hearth 接管的分片", panel.ErrUnsafe)
+	}
+	if (request.Action == "stop" || request.Action == "restart" ||
+		(request.Action == "update" && (masterRunning || cavesRunning))) && !request.AllowUnsafe {
+		s.mu.Unlock()
+		return panel.Activity{}, fmt.Errorf("%w: DST 没有 REST 安全关闭通道；请明确确认终止 Master/Caves 后再继续", panel.ErrUnsafe)
 	}
 	s.busy = true
 	s.currentAction = request.Action
@@ -171,6 +209,14 @@ func (s *Service) RunAction(id string, request panel.ActionRequest) (panel.Activ
 	logs := []panel.LogRef{{ID: fmt.Sprintf("dst-%d-master.log", now.UnixNano()), Label: "DST Master 日志"}, {ID: fmt.Sprintf("dst-%d-caves.log", now.UnixNano()), Label: "DST Caves 日志"}}
 	if request.Action == "check-update" {
 		logs = []panel.LogRef{{ID: fmt.Sprintf("dst-%d-version.log", now.UnixNano()), Label: "DST Steam 版本检查日志"}}
+	} else if request.Action == "update" {
+		logs = []panel.LogRef{
+			{ID: fmt.Sprintf("dst-%d-update.log", now.UnixNano()), Label: "DST 备份与 SteamCMD 更新日志"},
+			{ID: fmt.Sprintf("dst-%d-master.log", now.UnixNano()), Label: "DST Master 恢复日志"},
+			{ID: fmt.Sprintf("dst-%d-caves.log", now.UnixNano()), Label: "DST Caves 恢复日志"},
+		}
+	} else if request.Action == "backup" {
+		logs = []panel.LogRef{{ID: fmt.Sprintf("dst-%d-backup.log", now.UnixNano()), Label: "DST 备份任务日志"}}
 	}
 	activity := panel.Activity{
 		ID: fmt.Sprintf("dst-%d", now.UnixNano()), GameID: gameID,
@@ -244,7 +290,7 @@ func (s *Service) snapshot() panel.Game {
 		switch action {
 		case "start":
 			state = "starting"
-		case "stop", "restart":
+		case "stop", "restart", "update":
 			state = "stopping"
 		}
 	}
@@ -257,7 +303,8 @@ func (s *Service) snapshot() panel.Game {
 		ID: gameID, Name: "饥荒联机版", ShortName: "DST", State: state,
 		Version: s.installedBuildID(), VersionSource: "Steam appmanifest", Port: s.config.Port,
 		SaveID: clusterName, SaveDetection: "cluster.ini；" + tokenStatus,
-		UpdateSupported: false, BackupSupported: false,
+		UpdateSupported: true, BackupSupported: true,
+		BackupRequiresStopped: true, UpdateRequiresUnsafeStop: true,
 		Tags:             []string{"Steam", "Master/Caves", "无 REST API"},
 		PlayersAvailable: false, PlayersSource: "DST 适配器第一阶段暂不读取玩家列表",
 		CPUHistory: []panel.MetricPoint{}, MemoryHistory: []panel.MetricPoint{},
@@ -266,6 +313,12 @@ func (s *Service) snapshot() panel.Game {
 		game.PlayersSource = "检测到外部 DST 进程；当前仅管理 Hearth 启动的分片"
 	}
 	applyVersionStatus(&game, s.versionStatusForBuild(game.Version))
+	s.mu.Lock()
+	if s.lastBackup != nil {
+		lastBackup := *s.lastBackup
+		game.LastBackupAt = &lastBackup
+	}
+	s.mu.Unlock()
 	return game
 }
 
@@ -287,6 +340,12 @@ func (s *Service) performAction(action string, allowUnsafe bool, activityID stri
 		err = s.checkVersion(func(stage string, progress int, detail string) {
 			s.updateActivity(activityID, stage, progress, detail)
 		}, logs[0].ID)
+	case "backup":
+		_, err = s.createBackup(func(stage string, progress int, detail string) {
+			s.updateActivity(activityID, stage, progress, detail)
+		}, logs[0].ID)
+	case "update":
+		err = s.updateServer(allowUnsafe, activityID, logs)
 	}
 	if err != nil {
 		s.finishActivity(activityID, false, err)
@@ -423,7 +482,15 @@ func (s *Service) finishActivity(id string, success bool, err error) {
 		s.activities[index].Stage, s.activities[index].UpdatedAt = "完成", time.Now()
 		if !success {
 			s.activities[index].Status, s.activities[index].Stage = "error", "失败"
+			s.activities[index].Title = failedActionTitle(s.activities[index].Action)
 			s.activities[index].Detail = err.Error()
+		} else {
+			title, detail := completedActionResult(s.activities[index].Action)
+			s.activities[index].Title = title
+			if s.activities[index].Action == "start" || s.activities[index].Action == "stop" ||
+				s.activities[index].Action == "restart" || s.activities[index].Detail == "" {
+				s.activities[index].Detail = detail
+			}
 		}
 	}
 }
@@ -450,7 +517,27 @@ func actionTitle(action string) string {
 	return map[string]string{
 		"start": "启动饥荒联机版", "stop": "停止饥荒联机版", "restart": "重启饥荒联机版",
 		"check-update": "检查饥荒联机版服务端版本",
+		"backup":       "备份饥荒联机版存档", "update": "安全更新饥荒联机版服务端",
 	}[action]
+}
+
+func failedActionTitle(action string) string {
+	return map[string]string{
+		"start": "饥荒联机版启动失败", "stop": "饥荒联机版停止失败", "restart": "饥荒联机版重启失败",
+		"check-update": "DST 版本检查失败", "backup": "DST 备份失败", "update": "DST 更新失败",
+	}[action]
+}
+
+func completedActionResult(action string) (string, string) {
+	result := map[string][2]string{
+		"start":        {"饥荒联机版已启动", "Master/Caves 分片已启动"},
+		"stop":         {"饥荒联机版已停止", "Master/Caves 分片已按确认边界终止"},
+		"restart":      {"饥荒联机版已重启", "Master/Caves 分片已重新启动"},
+		"check-update": {"DST 版本检查完成", "已对比本机与 App 343050 public 分支 depot manifest"},
+		"backup":       {"DST 备份完成", "已创建静止 cluster 的一致性 ZIP 备份"},
+		"update":       {"DST 安全更新完成", "一致性备份、SteamCMD 更新与任务前运行状态处理已完成"},
+	}[action]
+	return result[0], result[1]
 }
 
 func readINIInt(path, key string, fallback int) int {

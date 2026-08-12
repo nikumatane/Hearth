@@ -255,6 +255,12 @@ func TestSystemSettingsRejectStaleRevisionAndGlobalProxy(t *testing.T) {
 	if persisted.TrustedProxyCIDRs == nil || len(persisted.TrustedProxyCIDRs) != 0 {
 		t.Fatalf("persisted TrustedProxyCIDRs = %#v; want explicit empty list", persisted.TrustedProxyCIDRs)
 	}
+	if persisted.Games.DontStarveTogether.BackupRetentionDays != patch.BackupRetentionDays ||
+		persisted.Games.DontStarveTogether.BackupMaxTotalGB != patch.BackupMaxTotalGB ||
+		persisted.Games.DontStarveTogether.ShutdownWaitSeconds != patch.ShutdownWaitSeconds ||
+		persisted.Games.DontStarveTogether.SteamCmdNoProgressMinutes != patch.SteamCmdNoProgressMinutes {
+		t.Fatalf("DST operation settings were not synchronized: %#v", persisted.Games.DontStarveTogether)
+	}
 }
 
 func TestInstallValidationRejectsOverlapAndExistingFiles(t *testing.T) {

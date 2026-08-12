@@ -11,6 +11,19 @@ Unreleased and moves to a version section when a formal package is built.
 
 Future 1.3.x work is tracked in the [roadmap](ROADMAP.en.md).
 
+### 1.3.3 in development
+
+- Add administrator-triggered, stopped-cluster ZIP backups and safe DST updates. Standalone backups are rejected while
+  Master/Caves are running because DST has no in-game save channel that can guarantee a consistent online archive.
+- A confirmed running update stops both shards, archives the static cluster, updates and verifies SteamCMD App `343050`,
+  restores the task's original runtime state, and confirms that both shards remain alive. A server that was stopped
+  before the task remains stopped.
+- Reuse the configurable no-log-progress timeout and per-task SteamCMD logs. Failures retain the backup and attempt to
+  restore the original runtime state, reporting both the update and recovery error when needed. Mods are never managed,
+  and Hearth does not perform an unconfirmed binary rollback.
+- Backend backup age/capacity, shutdown wait, and SteamCMD timeout settings now apply to both Palworld and DST. DST
+  retention deletes only Hearth-named old ZIPs and always preserves the newly created successful backup.
+
 ### 1.3.2 in development
 
 - Add explicit version source, update capability, and backup capability fields so overview and detail views no longer
