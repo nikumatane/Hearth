@@ -11,6 +11,17 @@ Unreleased and moves to a version section when a formal package is built.
 
 Future 1.3.x work is tracked in the [roadmap](ROADMAP.en.md).
 
+### 1.3.2 in development
+
+- Add explicit version source, update capability, and backup capability fields so overview and detail views no longer
+  describe DST status as Palworld or expose actions before an adapter supports them.
+- Compare DST's installed appmanifest against public depot manifests for SteamCMD App `343050`. SteamCMD may update
+  itself during preparation, but its own version is neither displayed nor used as the game-version signal, and the
+  check never modifies DST files.
+- Support administrator-triggered and six-hour low-frequency DST checks with task stages and raw logs. Failures only
+  mark version checking unavailable and do not change Master/Caves management state. A shared Steam manifest parser
+  now also provides Palworld with the available Steam Build ID.
+
 ### 1.3.1 in development
 
 - Show Palworld and DST configuration navigation only when the corresponding game is installed and managed by Hearth.

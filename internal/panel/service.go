@@ -50,8 +50,9 @@ func NewDemoService() *DemoService {
 		games: map[string]Game{
 			"palworld": {
 				ID: "palworld", Name: "幻兽帕鲁", ShortName: "PAL",
-				State: "running", Version: "1.0.1.76890", AvailableVersion: "77142",
-				UpdateAvailable: true, VersionCheck: "update_available", PlayersOnline: 2, PlayersMax: 8,
+				State: "running", Version: "1.0.1.76890", VersionSource: "Palworld REST API", AvailableVersion: "77142",
+				UpdateAvailable: true, UpdateSupported: true, BackupSupported: true,
+				VersionCheck: "update_available", PlayersOnline: 2, PlayersMax: 8,
 				PlayersMaxKnown: true, Players: []OnlinePlayer{{Name: "Moss"}, {Name: "Nia"}},
 				PlayersAvailable: true, PlayersSource: "演示数据",
 				UptimeSeconds: 5*3600 + 42*60, CPUPercent: 36.8, MemoryGB: 5.72,

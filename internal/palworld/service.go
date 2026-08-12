@@ -20,6 +20,7 @@ import (
 
 	"hearth/internal/config"
 	"hearth/internal/panel"
+	"hearth/internal/steamapp"
 )
 
 const (
@@ -414,6 +415,7 @@ func (s *Service) snapshot() (panel.Game, panel.ResourceUsage) {
 	game := panel.Game{
 		ID: palworldID, Name: "幻兽帕鲁", ShortName: "PAL", State: "stopped",
 		Port: s.config.Port, Tags: []string{"Steam", "REST API", "Windows"},
+		VersionSource: "Steam appmanifest", UpdateSupported: true, BackupSupported: true,
 		PlayersMax:       configuredPlayerMax,
 		PlayersMaxKnown:  configuredPlayerMax > 0,
 		PlayersAvailable: true, PlayersSource: "进程已停止",
@@ -495,6 +497,9 @@ func (s *Service) snapshot() (panel.Game, panel.ResourceUsage) {
 	buildID := s.installedBuildID()
 	if game.Version == "" {
 		game.Version = buildID
+		game.VersionSource = "Steam appmanifest"
+	} else {
+		game.VersionSource = "Palworld REST API"
 	}
 	applyVersionStatus(&game, s.versionStatusForBuild(buildID))
 	return game, resource
@@ -630,19 +635,7 @@ func (s *Service) invalidateAPIStatus() {
 }
 
 func (s *Service) installedBuildID() string {
-	path := s.appManifestPath()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "未知"
-	}
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) == 2 && strings.Trim(fields[0], `"`) == "buildid" {
-			return strings.Trim(fields[1], `"`)
-		}
-	}
-	return "未知"
+	return steamapp.ReadBuildID(s.appManifestPath())
 }
 
 func (s *Service) appManifestPath() string {

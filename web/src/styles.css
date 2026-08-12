@@ -1483,6 +1483,12 @@ textarea:focus-visible {
   font-size: 12px;
 }
 
+.update-callout > small,
+.detail-update-banner > small {
+  color: var(--dim);
+  font-size: 11px;
+}
+
 .version-row {
   min-height: 46px;
   margin-top: 17px;

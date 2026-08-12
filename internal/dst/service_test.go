@@ -2,6 +2,7 @@ package dst
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -48,8 +49,67 @@ func TestNewServiceValidatesClusterBoundary(t *testing.T) {
 	if game.State != "stopped" || game.SaveID != "MyCluster" || game.Port != 11000 {
 		t.Fatalf("game = %#v", game)
 	}
+	if game.UpdateSupported || game.BackupSupported || game.VersionSource != "Steam appmanifest" {
+		t.Fatalf("DST capabilities = %#v", game)
+	}
 	if _, err := service.Game("palworld"); !errors.Is(err, panel.ErrNotFound) {
 		t.Fatalf("unknown game error = %v", err)
+	}
+}
+
+func TestCheckVersionUsesDSTDedicatedServerAppWithoutUpdatingFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX shell script")
+	}
+	gameConfig := testConfig(t)
+	steamRoot := filepath.Dir(filepath.Dir(filepath.Dir(gameConfig.InstallDir)))
+	gameConfig.SteamCmd = filepath.Join(steamRoot, "steamcmd")
+	manifestPath := filepath.Join(steamRoot, "steamapps", "appmanifest_"+dstAppID+".acf")
+	manifest := `"AppState"
+{
+	"buildid" "100"
+	"MountedDepots"
+	{
+		"343051" "700"
+	}
+}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	attemptsPath := filepath.Join(steamRoot, "attempts")
+	script := fmt.Sprintf(`#!/bin/sh
+count=0
+if [ -f %q ]; then count=$(cat %q); fi
+count=$((count + 1))
+printf "%%s" "$count" > %q
+case "$*" in
+  *app_info_print*)
+    printf '"343050"\n{\n"depots"\n{\n"343051"\n{\n"manifests"\n{\n"public"\n{\n"gid" "701"\n}\n}\n}\n"branches"\n{\n"public"\n{\n"buildid" "101"\n}\n}\n}\n}\n'
+    ;;
+esac
+`, attemptsPath, attemptsPath, attemptsPath)
+	if err := os.WriteFile(gameConfig.SteamCmd, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(gameConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	logID := "dst-version-test.log"
+	if err := service.checkVersion(func(string, int, string) {}, logID); err != nil {
+		t.Fatal(err)
+	}
+	attempts, err := os.ReadFile(attemptsPath)
+	if err != nil || string(attempts) != "2" {
+		t.Fatalf("SteamCMD attempts = %q, error = %v", attempts, err)
+	}
+	game, err := service.Game(gameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !game.UpdateAvailable || game.AvailableVersion != "101" || game.UpdateSupported {
+		t.Fatalf("DST version status = %#v", game)
 	}
 }
 

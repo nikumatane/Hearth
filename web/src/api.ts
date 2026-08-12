@@ -9,8 +9,11 @@ export type Game = {
   shortName: string;
   state: "running" | "stopped" | "starting" | "stopping" | "error";
   version: string;
+  versionSource?: string;
   availableVersion?: string;
   updateAvailable: boolean;
+  updateSupported: boolean;
+  backupSupported: boolean;
   versionCheck?: "unchecked" | "checking" | "current" | "update_available" | "unavailable";
   playersOnline: number;
   playersMax: number;

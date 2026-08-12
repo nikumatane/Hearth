@@ -33,6 +33,12 @@ type Service struct {
 	busy          bool
 	currentAction string
 	activities    []panel.Activity
+
+	versionMu          sync.Mutex
+	versionStatus      steamVersionStatus
+	versionBuildID     string
+	versionCheckedAt   time.Time
+	versionAttemptedAt time.Time
 }
 
 func NewService(gameConfig config.GameConfig) (*Service, error) {
@@ -41,7 +47,11 @@ func NewService(gameConfig config.GameConfig) (*Service, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{config: gameConfig, ctx: ctx, cancel: cancel}, nil
+	service := &Service{config: gameConfig, ctx: ctx, cancel: cancel}
+	if strings.TrimSpace(gameConfig.SteamCmd) != "" {
+		go service.runAutomaticVersionChecks()
+	}
+	return service, nil
 }
 
 func applyDefaults(gameConfig *config.GameConfig) {
@@ -118,8 +128,16 @@ func (s *Service) RunAction(id string, request panel.ActionRequest) (panel.Activ
 	if id != gameID {
 		return panel.Activity{}, panel.ErrNotFound
 	}
-	if request.Action != "start" && request.Action != "stop" && request.Action != "restart" {
+	if request.Action != "start" && request.Action != "stop" && request.Action != "restart" && request.Action != "check-update" {
 		return panel.Activity{}, panel.ErrBadAction
+	}
+	if request.Action == "check-update" {
+		if err := s.validateSteamVersionCheck(); err != nil {
+			return panel.Activity{}, err
+		}
+		if processRunning(filepath.Base(s.config.SteamCmd)) {
+			return panel.Activity{}, fmt.Errorf("%w: 检测到已有 SteamCMD 进程，已拒绝并行版本检查", panel.ErrUnsafe)
+		}
 	}
 	s.mu.Lock()
 	if s.busy {
@@ -150,12 +168,16 @@ func (s *Service) RunAction(id string, request panel.ActionRequest) (panel.Activ
 	s.busy = true
 	s.currentAction = request.Action
 	now := time.Now()
+	logs := []panel.LogRef{{ID: fmt.Sprintf("dst-%d-master.log", now.UnixNano()), Label: "DST Master 日志"}, {ID: fmt.Sprintf("dst-%d-caves.log", now.UnixNano()), Label: "DST Caves 日志"}}
+	if request.Action == "check-update" {
+		logs = []panel.LogRef{{ID: fmt.Sprintf("dst-%d-version.log", now.UnixNano()), Label: "DST Steam 版本检查日志"}}
+	}
 	activity := panel.Activity{
 		ID: fmt.Sprintf("dst-%d", now.UnixNano()), GameID: gameID,
 		Action: request.Action, Title: actionTitle(request.Action),
 		Detail: "DST Master/Caves 任务已进入执行队列", Status: "running",
 		Stage: "排队", Progress: 5, CreatedAt: now, UpdatedAt: now,
-		Logs: []panel.LogRef{{ID: fmt.Sprintf("dst-%d-master.log", now.UnixNano()), Label: "DST Master 日志"}, {ID: fmt.Sprintf("dst-%d-caves.log", now.UnixNano()), Label: "DST Caves 日志"}},
+		Logs: logs,
 	}
 	if request.AllowUnsafe {
 		activity.Detail = "已确认：DST 没有 REST 安全关闭通道，将按分片终止进程"
@@ -233,7 +255,9 @@ func (s *Service) snapshot() panel.Game {
 	}
 	game := panel.Game{
 		ID: gameID, Name: "饥荒联机版", ShortName: "DST", State: state,
-		Version: "", Port: s.config.Port, SaveID: clusterName, SaveDetection: "cluster.ini；" + tokenStatus,
+		Version: s.installedBuildID(), VersionSource: "Steam appmanifest", Port: s.config.Port,
+		SaveID: clusterName, SaveDetection: "cluster.ini；" + tokenStatus,
+		UpdateSupported: false, BackupSupported: false,
 		Tags:             []string{"Steam", "Master/Caves", "无 REST API"},
 		PlayersAvailable: false, PlayersSource: "DST 适配器第一阶段暂不读取玩家列表",
 		CPUHistory: []panel.MetricPoint{}, MemoryHistory: []panel.MetricPoint{},
@@ -241,6 +265,7 @@ func (s *Service) snapshot() panel.Game {
 	if externalRunning && !masterRunning && !cavesRunning {
 		game.PlayersSource = "检测到外部 DST 进程；当前仅管理 Hearth 启动的分片"
 	}
+	applyVersionStatus(&game, s.versionStatusForBuild(game.Version))
 	return game
 }
 
@@ -258,6 +283,10 @@ func (s *Service) performAction(action string, allowUnsafe bool, activityID stri
 		if err == nil {
 			err = s.startShards(logs)
 		}
+	case "check-update":
+		err = s.checkVersion(func(stage string, progress int, detail string) {
+			s.updateActivity(activityID, stage, progress, detail)
+		}, logs[0].ID)
 	}
 	if err != nil {
 		s.finishActivity(activityID, false, err)
@@ -418,7 +447,10 @@ func (s *Service) writeLogs(logs []panel.LogRef, text string) {
 }
 
 func actionTitle(action string) string {
-	return map[string]string{"start": "启动饥荒联机版", "stop": "停止饥荒联机版", "restart": "重启饥荒联机版"}[action]
+	return map[string]string{
+		"start": "启动饥荒联机版", "stop": "停止饥荒联机版", "restart": "重启饥荒联机版",
+		"check-update": "检查饥荒联机版服务端版本",
+	}[action]
 }
 
 func readINIInt(path, key string, fallback int) int {

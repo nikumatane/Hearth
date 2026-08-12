@@ -1240,6 +1240,8 @@ function hasActionPermission(action: ActionName): boolean {
 
 function actionDisabledReason(game: Game, action: ActionName): string | undefined {
   if (!hasActionPermission(action)) return "当前成员密码没有此操作权限";
+  if (action === "update" && !game.updateSupported) return "当前游戏暂未接入安全更新";
+  if (action === "backup" && !game.backupSupported) return "当前游戏暂未接入面板备份";
   if (
     game.state === "running" &&
     !game.restAvailable &&
@@ -1460,10 +1462,12 @@ function managementStateLabel(state: ManagedGame["state"]) {
 
 function versionCheckLabel(game: Game) {
   if (game.versionCheck === "unchecked") return "等待自动检查服务端版本";
-  if (game.versionCheck === "checking") return "正在检查 Palworld 服务端版本";
+  if (game.versionCheck === "checking") return `正在检查${game.name}服务端版本`;
   if (game.versionCheck === "current") return "服务端已是最新版";
   if (game.versionCheck === "update_available") {
-    return "Palworld 服务端有可用更新";
+    return game.availableVersion
+      ? `可更新至 Steam Build ${game.availableVersion}`
+      : `${game.name}服务端有可用更新`;
   }
   if (game.versionCheck === "unavailable") return "服务端版本检查暂不可用";
   return "";
@@ -1993,18 +1997,20 @@ function gameAccent(id: string) {
                       <RefreshCw :size="16" />
                       <span>
                         <strong>服务端有更新</strong>
-                        Palworld Dedicated Server
+                        {{ game.name }} · public 分支
                       </span>
                     </div>
                     <button
+                      v-if="game.updateSupported"
                       :disabled="!canRunSafeAction(game, 'update')"
                       :title="actionDisabledReason(game, 'update')"
                       @click="askAction(game, 'update')"
                     >立即更新</button>
+                    <small v-else>当前仅提供版本提示</small>
                   </div>
                   <div v-else class="version-row">
                     <Check :size="15" />
-                    已安装版本 · {{ game.version }}
+                    已安装版本 · {{ game.version }}<template v-if="game.versionSource"> · {{ game.versionSource }}</template>
                   </div>
                   <div class="game-actions">
                     <button
@@ -2150,6 +2156,7 @@ function gameAccent(id: string) {
                 </button>
                 <div v-if="gameMenuOpen" class="action-menu game-action-menu">
                   <button
+                    v-if="selectedGame.backupSupported"
                     :disabled="!canRunSafeAction(selectedGame, 'backup')"
                     :title="actionDisabledReason(selectedGame, 'backup')"
                     @click="askAction(selectedGame, 'backup'); gameMenuOpen = false"
@@ -2196,10 +2203,12 @@ function gameAccent(id: string) {
             <div>
               <strong>发现新的服务端版本</strong>
               <span>
-                当前 {{ selectedGame.version }} · Palworld public 分支有可用更新
+                当前 {{ selectedGame.version }} ·
+                {{ selectedGame.availableVersion ? `可更新至 Steam Build ${selectedGame.availableVersion}` : `${selectedGame.name} public 分支有可用更新` }}
               </span>
             </div>
             <button
+              v-if="selectedGame.updateSupported"
               class="button primary small"
               :disabled="!canRunSafeAction(selectedGame, 'update')"
               :title="actionDisabledReason(selectedGame, 'update')"
@@ -2207,6 +2216,7 @@ function gameAccent(id: string) {
             >
               安全更新
             </button>
+            <small v-else>当前版本仅检查和提示，不会修改游戏文件</small>
           </section>
 
           <section class="detail-grid">
@@ -2249,6 +2259,7 @@ function gameAccent(id: string) {
                   <dt>当前版本</dt>
                   <dd class="version-detail">
                     <span>{{ selectedGame.version }}</span>
+                    <small v-if="selectedGame.versionSource">来源：{{ selectedGame.versionSource }}</small>
                     <span class="version-check-row">
                       <small
                         v-if="versionCheckLabel(selectedGame)"
@@ -2301,6 +2312,7 @@ function gameAccent(id: string) {
                 <CloudCog :size="19" />
               </div>
               <button
+                v-if="selectedGame.backupSupported"
                 :disabled="!canRunSafeAction(selectedGame, 'backup')"
                 :title="actionDisabledReason(selectedGame, 'backup')"
                 @click="askAction(selectedGame, 'backup')"
@@ -2310,6 +2322,7 @@ function gameAccent(id: string) {
                 <ChevronRight :size="17" />
               </button>
               <button
+                v-if="selectedGame.updateSupported"
                 :disabled="!canRunSafeAction(selectedGame, 'update')"
                 :title="actionDisabledReason(selectedGame, 'update')"
                 @click="askAction(selectedGame, 'update')"

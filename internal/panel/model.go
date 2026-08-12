@@ -29,8 +29,11 @@ type Game struct {
 	ShortName        string         `json:"shortName"`
 	State            string         `json:"state"`
 	Version          string         `json:"version"`
+	VersionSource    string         `json:"versionSource,omitempty"`
 	AvailableVersion string         `json:"availableVersion,omitempty"`
 	UpdateAvailable  bool           `json:"updateAvailable"`
+	UpdateSupported  bool           `json:"updateSupported"`
+	BackupSupported  bool           `json:"backupSupported"`
 	VersionCheck     string         `json:"versionCheck,omitempty"`
 	PlayersOnline    int            `json:"playersOnline"`
 	PlayersMax       int            `json:"playersMax"`

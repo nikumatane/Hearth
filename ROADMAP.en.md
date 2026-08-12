@@ -45,7 +45,7 @@ Status: complete on Windows (DST automatic installation, mods, and backup/restor
 
 ## 1.3.1 · Game management and DST configuration
 
-Status: in development (current branch: `release/1.3.1`).
+Status: implemented and continuing through 1.3.2 acceptance.
 
 - Show Palworld and DST configuration navigation only when the game is installed locally and managed by Hearth; discovery alone is not enough.
 - Add administrator-only server settings and separate Master/Caves world rules, while retaining advanced editing for three INI files and two `worldgenoverride.lua` files. World rules use static parsing and allowlisted incremental writes and never regenerate a save automatically.
@@ -54,7 +54,7 @@ Status: in development (current branch: `release/1.3.1`).
 
 ## 1.3.2 · Generic game version management
 
-Status: planned.
+Status: in development (current branch: `release/1.3.2`).
 
 - Abstract current version, source, check state, and available version in the game adapter so the detail page is not Palworld-specific.
 - Keep Palworld on actual service-server depot/manifest checks; use the DST SteamCMD app/depot version and never expose SteamCMD's own version.
