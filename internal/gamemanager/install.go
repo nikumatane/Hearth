@@ -58,6 +58,7 @@ func (s *Service) InstallGame(id string, request panel.InstallGameRequest) (pane
 	s.activeTask = activity.ID
 	s.mu.Unlock()
 
+	s.signalHistorySync()
 	go s.runInstall(activity.ID, installDir, steamCmdRoot)
 	return activity, nil
 }

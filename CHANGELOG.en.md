@@ -13,6 +13,11 @@ Future 1.3.x work is tracked in the [roadmap](ROADMAP.en.md).
 
 ### 1.3.3 in development
 
+- Persist a lightweight task-history index so linked logs remain reachable after a panel update or restart.
+  Keep the latest 100 tasks for at most 30 days and delete their Hearth-owned log files when records expire.
+  Tasks left running by the previous process are marked Interrupted rather than reported as successful. The
+  selected log now refreshes on an independent fast cadence and continues following game-console output after
+  the launch task itself has completed.
 - Add administrator-triggered, stopped-cluster ZIP backups and safe DST updates. Standalone backups are rejected while
   Master/Caves are running because DST has no in-game save channel that can guarantee a consistent online archive.
 - A confirmed running update stops both shards, archives the static cluster, updates and verifies SteamCMD App `343050`,

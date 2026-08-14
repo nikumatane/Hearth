@@ -313,13 +313,15 @@ SteamCMD self-verification output is not treated as Palworld download progress.
 
 ## Task logs
 
-Opening Task logs no longer scans and reads several historical files. The panel runtime log stays
-pinned. If a start, update, or version-check task is running when the page opens, its linked log is
-added as a closable tab. Completed logs open from their exact activity record; when an update also
-restarts the server, its SteamCMD and Palworld startup logs stay grouped under that one operation.
-Stop, backup, and configuration-save operations without separate console output show no View log
-action. Each request reads at most the final 128 KiB, and the API accepts only files explicitly
-referenced by current activity.
+Opening Task logs does not scan and read several historical files. Hearth persists task-to-log
+references in `task-history.json` under its state directory, retaining the latest 100 tasks for at
+most 30 days and deleting linked task logs as records roll out. Orphaned logs created before this
+index existed are neither guessed nor deleted automatically. The panel runtime log stays pinned.
+Running task logs become closable tabs, while completed logs open from their exact activity record;
+SteamCMD and game startup logs created by one update stay grouped under that operation. Tasks without
+separate console output show no View log action. Each request reads at most the final 128 KiB, and the
+API accepts only files explicitly referenced by task history. The selected log refreshes about every
+0.75 seconds, including game-console output that continues after a launch task completes.
 
 ## Safe update flow
 

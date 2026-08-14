@@ -212,9 +212,11 @@ const discoveryRootsText = ref("");
 const trustedProxyCIDRsText = ref("");
 const currentTime = ref(new Date());
 let pollTimer: number | undefined;
+let logPollTimer: number | undefined;
 let toastTimer: number | undefined;
 let clockTimer: number | undefined;
 let refreshInFlight = false;
+let logRefreshInFlight = false;
 let dismissedLogIds = new Set<string>();
 let panelUpdateTrackingEpoch = 0;
 let sessionRecoveryReloading = false;
@@ -382,6 +384,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (pollTimer) window.clearTimeout(pollTimer);
+  if (logPollTimer) window.clearTimeout(logPollTimer);
   if (toastTimer) window.clearTimeout(toastTimer);
   if (clockTimer) window.clearInterval(clockTimer);
 });
@@ -389,6 +392,11 @@ onBeforeUnmount(() => {
 function stopOverviewPolling() {
   if (pollTimer) window.clearTimeout(pollTimer);
   pollTimer = undefined;
+}
+
+function stopLogPolling() {
+  if (logPollTimer) window.clearTimeout(logPollTimer);
+  logPollTimer = undefined;
 }
 
 function clearAuthenticatedState() {
@@ -407,6 +415,7 @@ function clearAuthenticatedState() {
   panelUpdateBusy.value = false;
   panelUpdateTrackingEpoch += 1;
   stopOverviewPolling();
+  stopLogPolling();
 }
 
 function rememberPanelUpdateResume(target?: string) {
@@ -523,13 +532,6 @@ async function refresh(silent = false) {
     if (logs.value) {
       logs.value = { ...logs.value, activities: nextOverview.activities ?? [] };
       syncRunningTaskLogs(nextOverview.activities ?? []);
-      const selectedIsRunning = (nextOverview.activities ?? []).some(
-        (item) => item.status === "running" && item.logs?.some((ref) => ref.id === selectedLogId.value)
-      );
-      if (page.value === "logs" && selectedLogId.value &&
-        (selectedLogId.value === "panel" || selectedIsRunning)) {
-        void loadLogContent(selectedLogId.value, true);
-      }
     }
     loadError.value = "";
   } catch (error) {
@@ -564,6 +566,7 @@ function navigate(next: Page, gameId?: string) {
   const enteringLogs = next === "logs" && page.value !== "logs";
   if (gameId) selectedGameId.value = gameId;
   page.value = next;
+  if (next !== "logs") stopLogPolling();
   mobileNavOpen.value = false;
   nodeMenuOpen.value = false;
   gameMenuOpen.value = false;
@@ -845,7 +848,24 @@ async function loadLogs(resetTabs = false) {
     showToast("error", error instanceof Error ? error.message : "日志加载失败");
   } finally {
     logsLoading.value = false;
+    scheduleLogPolling();
   }
+}
+
+function scheduleLogPolling(delay = 750) {
+  stopLogPolling();
+  if (!loggedIn.value || !isAdmin.value || page.value !== "logs" || !selectedLogId.value) return;
+  logPollTimer = window.setTimeout(async () => {
+    if (!logRefreshInFlight) {
+      logRefreshInFlight = true;
+      try {
+        await loadLogContent(selectedLogId.value, true);
+      } finally {
+        logRefreshInFlight = false;
+      }
+    }
+    scheduleLogPolling();
+  }, delay);
 }
 
 function addLogTabs(refs: LogRef[], updatedAt?: string) {
@@ -885,6 +905,7 @@ async function loadLogContent(id: string, silent = false) {
 function selectLog(id: string) {
   selectedLogId.value = id;
   void loadLogContent(id);
+  scheduleLogPolling();
 }
 
 async function openActivityLogs(item: Logs["activities"][number]) {
@@ -914,6 +935,7 @@ function closeLog(id: string) {
     selectedLogId.value = files[Math.max(0, index - 1)]?.id ?? files[0]?.id ?? "";
     if (selectedLogId.value) void loadLogContent(selectedLogId.value, true);
   }
+  scheduleLogPolling();
 }
 
 async function loadAccess() {
@@ -3082,7 +3104,7 @@ function gameAccent(id: string) {
             <div>
               <span class="eyebrow">OPERATIONS · WINDOWS ECS</span>
               <h1>任务日志</h1>
-              <p>操作记录、面板运行日志、帕鲁启动日志和 SteamCMD 更新输出。</p>
+              <p>持久化操作记录、面板运行日志，以及帕鲁和饥荒联机版的任务输出。</p>
             </div>
             <button class="button secondary" :disabled="logsLoading" @click="loadLogs(false)">
               <RefreshCw :size="16" :class="{ spin: logsLoading }" />刷新日志
@@ -3095,7 +3117,7 @@ function gameAccent(id: string) {
           <section v-else-if="logs" class="logs-layout">
             <article class="panel-card logs-activity-card">
               <div class="card-heading">
-                <div><h2>操作记录</h2><p>本次面板进程中的管理任务</p></div>
+                <div><h2>操作记录</h2><p>跨面板重启保留的最近管理任务</p></div>
                 <span>{{ logs.activities.length }} 条</span>
               </div>
               <div class="activity-list">

@@ -77,10 +77,12 @@ settings, and the complete `WorldOption.sav` remain administrator-only. Legacy
 
 Recent activity on the home page and complete task logs remain administrator-only. Members do not
 see historical activity, but they can see the current stage and progress of tasks they are allowed
-to start. Recent activity is held only in the current Hearth process and is cleared after a panel
-restart. The panel log stays pinned on the Task logs page. Each start, update, or version-check log
-is linked to its exact operation and read only when opened; running-task logs appear automatically
-and task tabs are closable. Use the log files on disk for troubleshooting across panel restarts.
+to start. A lightweight index in the Hearth state directory preserves task history across panel
+restarts. It keeps the latest 100 tasks for at most 30 days and deletes their Hearth-owned log files
+when records expire. The panel log stays pinned on the Task logs page. Each start, update, or
+version-check log is linked to its exact operation and read only when opened; running-task logs
+appear automatically and task tabs are closable. The selected log refreshes quickly while the page
+is open and continues following game-console output after a launch task has completed.
 
 After a successful `PalWorldSettings.ini` save, the backend compares structured values before and
 after the write and records the time, actor, source IP, configuration revision, and actual changes.

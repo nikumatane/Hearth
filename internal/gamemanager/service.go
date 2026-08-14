@@ -1,8 +1,11 @@
 package gamemanager
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -43,6 +46,11 @@ type Service struct {
 	factory      serviceFactory
 
 	host hostMonitor
+
+	history     *taskHistoryStore
+	historyStop chan struct{}
+	historyDone chan struct{}
+	historyWake chan struct{}
 }
 
 func New(cfg config.Config, configPath string) (*Service, error) {
@@ -50,6 +58,7 @@ func New(cfg config.Config, configPath string) (*Service, error) {
 	manager := &Service{
 		config: cfg, configPath: configPath,
 		candidates: make(map[string][]panel.GameCandidate), logPaths: make(map[string]string),
+		historyStop: make(chan struct{}), historyDone: make(chan struct{}), historyWake: make(chan struct{}, 1),
 		factory: func(gameConfig config.GameConfig) (panel.Service, error) {
 			return palworld.NewService(gameConfig)
 		},
@@ -60,8 +69,26 @@ func New(cfg config.Config, configPath string) (*Service, error) {
 	if cfg.Games.DontStarveTogether.Enabled {
 		manager.dstDelegate, manager.dstInitError = dst.NewService(cfg.Games.DontStarveTogether)
 	}
+	historyPath := taskHistoryPath(cfg, configPath)
+	history, removed, historyErr := openTaskHistory(historyPath, time.Now())
+	if historyErr != nil {
+		slog.Warn("load task history; continuing with the safe in-memory state", "path", historyPath, "error", historyErr)
+	}
+	manager.history = history
+	manager.removeTaskLogs(removed)
 	manager.discoverLocked()
+	go manager.runHistorySync()
 	return manager, nil
+}
+
+func taskHistoryPath(cfg config.Config, configPath string) string {
+	if cfg.AuditFile != "" {
+		return filepath.Join(filepath.Dir(cfg.AuditFile), "task-history.json")
+	}
+	if configPath != "" {
+		return filepath.Join(filepath.Dir(configPath), "task-history.json")
+	}
+	return ""
 }
 
 func applyManagementDefaults(cfg *config.Config, configPath string) {
@@ -86,6 +113,19 @@ func applyManagementDefaults(cfg *config.Config, configPath string) {
 }
 
 func (s *Service) Overview() panel.Overview {
+	overview := s.runtimeOverview()
+	if s.history != nil {
+		activities, removed, err := s.history.reconcile(overview.Activities, time.Now())
+		if err != nil {
+			slog.Warn("persist task history", "error", err)
+		}
+		s.removeTaskLogs(removed)
+		overview.Activities = activities
+	}
+	return overview
+}
+
+func (s *Service) runtimeOverview() panel.Overview {
 	s.mu.RLock()
 	delegate := s.delegate
 	dstDelegate := s.dstDelegate
@@ -118,6 +158,74 @@ func (s *Service) Overview() panel.Overview {
 	return overview
 }
 
+func (s *Service) runHistorySync() {
+	defer close(s.historyDone)
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
+	var next <-chan time.Time
+	for {
+		select {
+		case <-s.historyWake:
+			if s.syncHistory() {
+				timer.Reset(time.Second)
+				next = timer.C
+			} else {
+				next = nil
+			}
+		case <-next:
+			if s.syncHistory() {
+				timer.Reset(time.Second)
+				next = timer.C
+			} else {
+				next = nil
+			}
+		case <-s.historyStop:
+			s.syncHistory()
+			return
+		}
+	}
+}
+
+func (s *Service) signalHistorySync() {
+	select {
+	case s.historyWake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Service) syncHistory() bool {
+	if s.history == nil {
+		return false
+	}
+	live := s.runtimeOverview().Activities
+	_, removed, err := s.history.reconcile(live, time.Now())
+	if err != nil {
+		slog.Warn("persist task history", "error", err)
+	}
+	s.removeTaskLogs(removed)
+	for _, activity := range live {
+		if activity.Status == "running" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) removeTaskLogs(refs []panel.LogRef) {
+	for _, ref := range refs {
+		path, ok := s.TaskLogPath(ref.ID)
+		if !ok || filepath.Base(path) != ref.ID {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("remove expired task log", "log", ref.ID, "error", err)
+		}
+	}
+}
+
 func (s *Service) Game(id string) (panel.Game, error) {
 	delegate := s.serviceForGame(id)
 	if delegate == nil {
@@ -131,7 +239,11 @@ func (s *Service) RunAction(id string, request panel.ActionRequest) (panel.Activ
 	if delegate == nil {
 		return panel.Activity{}, panel.ErrNotFound
 	}
-	return delegate.RunAction(id, request)
+	activity, err := delegate.RunAction(id, request)
+	if err == nil {
+		s.signalHistorySync()
+	}
+	return activity, err
 }
 
 func (s *Service) serviceForGame(id string) panel.Service {
@@ -509,8 +621,14 @@ func (s *Service) TaskLogPath(id string) (string, bool) {
 			}
 		}
 	}
+	if strings.HasPrefix(id, "dst-") && s.config.Games.DontStarveTogether.ClusterDir != "" {
+		return filepath.Join(s.config.Games.DontStarveTogether.ClusterDir, "panel-logs", id), true
+	}
 	if path, ok := s.logPaths[id]; ok {
 		return path, true
+	}
+	if strings.HasPrefix(id, "steamcmd-install-") && s.config.Management.SteamCmdRoot != "" {
+		return filepath.Join(s.config.Management.SteamCmdRoot, "hearth-logs", id), true
 	}
 	if s.config.Games.Palworld.InstallDir == "" {
 		return "", false
@@ -520,6 +638,16 @@ func (s *Service) TaskLogPath(id string) (string, bool) {
 
 // Close releases adapter background work without changing any game process.
 func (s *Service) Close() error {
+	if s.historyStop != nil {
+		select {
+		case <-s.historyStop:
+		default:
+			close(s.historyStop)
+		}
+	}
+	if s.historyDone != nil {
+		<-s.historyDone
+	}
 	s.mu.RLock()
 	delegate := s.delegate
 	dstDelegate := s.dstDelegate
