@@ -165,7 +165,7 @@ func (s *Service) RunAction(id string, request panel.ActionRequest) (panel.Activ
 		if err := s.validateSteamVersionCheck(); err != nil {
 			return panel.Activity{}, err
 		}
-		if processRunning(filepath.Base(s.config.SteamCmd)) {
+		if processRunning(s.config.SteamCmd) {
 			return panel.Activity{}, fmt.Errorf("%w: 检测到已有 SteamCMD 进程，已拒绝并行版本检查", panel.ErrUnsafe)
 		}
 	}
@@ -175,7 +175,7 @@ func (s *Service) RunAction(id string, request panel.ActionRequest) (panel.Activ
 		return panel.Activity{}, panel.ErrBusy
 	}
 	masterRunning, cavesRunning := s.masterRunning, s.cavesRunning
-	externalRunning := processRunning(s.config.ProcessName)
+	externalRunning := processRunning(s.config.Executable)
 	if request.Action == "start" && (masterRunning || cavesRunning) {
 		s.mu.Unlock()
 		return panel.Activity{}, fmt.Errorf("%w: DST 已有分片进程运行", panel.ErrUnsafe)
@@ -278,7 +278,7 @@ func (s *Service) snapshot() panel.Game {
 	busy, action := s.busy, s.currentAction
 	s.mu.Unlock()
 	state := "stopped"
-	externalRunning := processRunning(s.config.ProcessName)
+	externalRunning := processRunning(s.config.Executable)
 	switch {
 	case masterRunning && cavesRunning:
 		state = "running"

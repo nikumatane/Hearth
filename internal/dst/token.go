@@ -35,12 +35,12 @@ func (s *Service) UpdateClusterToken(token string) error {
 		return panel.ErrBusy
 	}
 	masterRunning, cavesRunning := s.masterRunning, s.cavesRunning
-	processName, clusterDir := s.config.ProcessName, s.config.ClusterDir
+	executable, clusterDir := s.config.Executable, s.config.ClusterDir
 	if masterRunning || cavesRunning {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: DST 正在运行，请先停止 Master/Caves 后再更新 Token", panel.ErrUnsafe)
 	}
-	if processRunning(processName) {
+	if processRunning(executable) {
 		s.mu.Unlock()
 		return fmt.Errorf("%w: 检测到外部 DST 进程，请先停止后再更新 Token", panel.ErrUnsafe)
 	}

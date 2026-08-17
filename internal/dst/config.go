@@ -59,7 +59,7 @@ func (s *Service) UpdateDSTConfig(patch panel.DSTConfigPatch) (panel.DSTConfigDo
 }
 
 func (s *Service) ensureDSTConfigWritableLocked() error {
-	if s.busy || s.masterRunning || s.cavesRunning || processRunning(s.config.ProcessName) {
+	if s.busy || s.masterRunning || s.cavesRunning || processRunning(s.config.Executable) {
 		return fmt.Errorf("%w: DST 运行中或有任务正在执行", panel.ErrUnsafe)
 	}
 	return nil

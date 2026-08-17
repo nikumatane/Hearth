@@ -5,6 +5,7 @@ package dst
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -26,7 +27,8 @@ func terminateCommand(command *exec.Cmd) error {
 	return nil
 }
 
-func processRunning(name string) bool {
+func processRunning(executable string) bool {
+	name := filepath.Base(executable)
 	output, err := exec.Command("tasklist.exe", "/FI", "IMAGENAME eq "+name, "/FO", "CSV", "/NH").Output()
 	return err == nil && strings.Contains(strings.ToLower(string(output)), strings.ToLower(name))
 }

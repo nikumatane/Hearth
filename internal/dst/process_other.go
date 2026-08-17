@@ -4,6 +4,7 @@ package dst
 
 import (
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,7 +21,9 @@ func terminateCommand(command *exec.Cmd) error {
 	return syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 }
 
-func processRunning(name string) bool {
+func processRunning(executable string) bool {
+	executable = filepath.Clean(executable)
+	name := filepath.Base(executable)
 	output, err := exec.Command("pgrep", "-f", name).Output()
 	if err != nil {
 		return false
@@ -39,7 +42,16 @@ func processRunning(name string) bool {
 		if strings.EqualFold(strings.TrimSpace(string(command)), "pgrep") {
 			continue
 		}
-		return true
+		arguments, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
+		if err != nil {
+			continue
+		}
+		// A process with the same basename may belong to another installation
+		// (or to another package's parallel test). Match the configured absolute
+		// executable path before treating it as this managed DST/SteamCMD process.
+		if strings.Contains(string(arguments), executable) {
+			return true
+		}
 	}
 	return false
 }
