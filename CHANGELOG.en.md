@@ -13,6 +13,8 @@ Future releases are tracked in the [roadmap](ROADMAP.en.md).
 
 ## 1.3.3 - 2026-08-17
 
+- Pin the transitive frontend build dependency `nanoid` to `3.3.18`, which fixes the infinite-loop
+  denial-of-service advisory, so the release no longer contains the High-severity version flagged by Dependabot.
 - Persist a lightweight task-history index so linked logs remain reachable after a panel update or restart.
   Keep the latest 100 tasks for at most 30 days and delete their Hearth-owned log files when records expire.
   Tasks left running by the previous process are marked Interrupted rather than reported as successful. The

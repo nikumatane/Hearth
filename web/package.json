@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.28.2",
   "pnpm": {
     "overrides": {
-      "nanoid": "3.3.17"
+      "nanoid": "3.3.18"
     }
   },
   "type": "module",
