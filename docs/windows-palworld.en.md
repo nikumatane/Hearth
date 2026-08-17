@@ -108,7 +108,7 @@ The installer does not:
 - The first 1.3.0 DST phase discovers and explicitly adopts an existing Dedicated Server and cluster,
   and manages Master/Caves lifecycle. Administrators can write the token from Game Management; it is
   written only to `cluster_token.txt`, never persisted in Hearth configuration, API responses, or audit
-  data. Installation, mod updates, and backup/restore remain later phases.
+  data. Administrator-confirmed one-click installation, mod updates, and backup/restore remain later phases.
 
 Backend settings use a revision and reject concurrent overwrites. A successful save retains
 `config.json.previous`. Runtime security changes are marked as requiring a Hearth restart and never

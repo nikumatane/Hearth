@@ -25,8 +25,8 @@ Hearth embeds its frontend and API in one Go binary. It can adopt an existing St
 place or install a new Palworld Dedicated Server after explicit administrator confirmation. It
 does not require Docker and never adopts, starts, or moves saves automatically. The production
 adapters support Windows Palworld plus adoption, Master/Caves lifecycle, configuration, version checks,
-stopped-save backups, and safe updates for an existing DST Dedicated Server and cluster. Automatic DST
-installation, mod management, and in-panel restore remain outside the current scope.
+stopped-save backups, and safe updates for an existing DST Dedicated Server and cluster. Administrator-confirmed
+DST one-click installation, mod management, and in-panel restore remain outside the current scope.
 
 Hearth is intended for setups where:
 

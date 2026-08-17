@@ -9,9 +9,9 @@ Unreleased and moves to a version section when a formal package is built.
 
 ## Unreleased
 
-Future 1.3.x work is tracked in the [roadmap](ROADMAP.en.md).
+Future releases are tracked in the [roadmap](ROADMAP.en.md).
 
-### 1.3.3 in development
+## 1.3.3 - 2026-08-17
 
 - Persist a lightweight task-history index so linked logs remain reachable after a panel update or restart.
   Keep the latest 100 tasks for at most 30 days and delete their Hearth-owned log files when records expire.
@@ -29,8 +29,6 @@ Future 1.3.x work is tracked in the [roadmap](ROADMAP.en.md).
 - Backend backup age/capacity, shutdown wait, and SteamCMD timeout settings now apply to both Palworld and DST. DST
   retention deletes only Hearth-named old ZIPs and always preserves the newly created successful backup.
 
-### 1.3.2 in development
-
 - Add explicit version source, update capability, and backup capability fields so overview and detail views no longer
   describe DST status as Palworld or expose actions before an adapter supports them.
 - Compare DST's installed appmanifest against public depot manifests for SteamCMD App `343050`. SteamCMD may update
@@ -39,8 +37,6 @@ Future 1.3.x work is tracked in the [roadmap](ROADMAP.en.md).
 - Support administrator-triggered and six-hour low-frequency DST checks with task stages and raw logs. Failures only
   mark version checking unavailable and do not change Master/Caves management state. A shared Steam manifest parser
   now also provides Palworld with the available Steam Build ID.
-
-### 1.3.1 in development
 
 - Show Palworld and DST configuration navigation only when the corresponding game is installed and managed by Hearth.
 - Add an administrator-only DST configuration page with explicit server, gameplay, maintenance, shard,

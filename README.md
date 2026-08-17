@@ -24,8 +24,8 @@
 Hearth 把前端和 API 合并为一个 Go 二进制，可以原地接管现有 SteamCMD 游戏安装，也可
 在管理员明确确认后安装新的 Palworld Dedicated Server。它不要求 Docker，不自动接管、
 启动或迁移存档。当前生产适配器支持 Windows 帕鲁，以及现有 DST Dedicated Server 与 cluster
-的接管、Master/Caves 生命周期、配置、版本检查、静止存档备份和安全更新；DST 自动安装、
-模组管理和面板内恢复仍不在当前范围。
+的接管、Master/Caves 生命周期、配置、版本检查、静止存档备份和安全更新；DST 管理员确认的
+一键安装、模组管理和面板内恢复仍不在当前范围。
 
 适合这样的场景：
 

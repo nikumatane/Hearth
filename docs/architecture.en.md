@@ -38,8 +38,8 @@ Production is deployed as one Go binary:
     directory, and candidate limits. Adoption and installation are separate confirmed administrator
     actions. DST supports adopting an existing Dedicated Server/cluster, Master/Caves lifecycle,
     configuration, version checks, stopped-save backups, and safe updates, and lets an administrator
-    write the cluster token from Game Management. Automatic DST installation, mod management, and
-    in-panel restore remain disabled.
+    write the cluster token from Game Management. Administrator-confirmed DST one-click installation,
+    mod management, and in-panel restore remain disabled.
 12. Backend settings reject stale revisions, replace through a same-directory temporary file, and
     retain `.previous`. Installation stages SteamCMD in isolation and never starts Palworld on completion.
 13. The panel-update layer queries only the fixed official GitHub Release. It verifies the asset

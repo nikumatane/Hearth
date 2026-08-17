@@ -100,7 +100,7 @@ Set-ExecutionPolicy -Scope Process Bypass
   解压中断不会把半成品目录当作有效安装。
 - DST 1.3.0 第一阶段支持识别并由管理员明确接管现有 Dedicated Server 与 cluster，且可管理
   Master/Caves 启停；管理员可在游戏管理页写入 Token。Token 只写入 cluster_token.txt，不进入
-  Hearth 配置、接口响应或审计；不提供自动安装、模组或备份恢复。
+  Hearth 配置、接口响应或审计；不提供管理员确认的一键安装、模组或备份恢复。
 
 后台设置保存带修订号，拒绝覆盖并发修改；写入成功时保留 `config.json.previous`。运行期
 安全参数在页面明确提示需要重启 Hearth，游戏进程不会因保存后台设置而重启。
