@@ -15,6 +15,8 @@ import (
 	"hearth/internal/panel"
 )
 
+const dstSteamFixtureName = "dst-valve-client"
+
 func testConfig(t *testing.T) config.GameConfig {
 	t.Helper()
 	root := t.TempDir()
@@ -65,7 +67,7 @@ func TestCheckVersionUsesDSTDedicatedServerAppWithoutUpdatingFiles(t *testing.T)
 	}
 	gameConfig := testConfig(t)
 	steamRoot := filepath.Dir(filepath.Dir(filepath.Dir(gameConfig.InstallDir)))
-	gameConfig.SteamCmd = filepath.Join(steamRoot, "steamcmd")
+	gameConfig.SteamCmd = filepath.Join(steamRoot, dstSteamFixtureName)
 	manifestPath := filepath.Join(steamRoot, "steamapps", "appmanifest_"+dstAppID+".acf")
 	manifest := `"AppState"
 {
@@ -120,7 +122,7 @@ func TestDSTSteamVersionCommandStopsAfterNoLogProgress(t *testing.T) {
 		t.Skip("test helper uses a POSIX shell script")
 	}
 	gameConfig := testConfig(t)
-	gameConfig.SteamCmd = filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(gameConfig.InstallDir))), "steamcmd")
+	gameConfig.SteamCmd = filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(gameConfig.InstallDir))), dstSteamFixtureName)
 	if err := os.WriteFile(gameConfig.SteamCmd, []byte("#!/bin/sh\nsleep 10\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +302,7 @@ func TestDSTUpdateStopsBacksUpUpdatesAndRestoresShards(t *testing.T) {
 		t.Fatal(err)
 	}
 	steamRoot := filepath.Dir(filepath.Dir(filepath.Dir(gameConfig.InstallDir)))
-	gameConfig.SteamCmd = filepath.Join(steamRoot, "steamcmd")
+	gameConfig.SteamCmd = filepath.Join(steamRoot, dstSteamFixtureName)
 	manifestPath := filepath.Join(steamRoot, "steamapps", "appmanifest_"+dstAppID+".acf")
 	manifest := `"AppState"
 {
@@ -396,7 +398,7 @@ func TestDSTUpdateFailureRetainsBackupAndRestoresOriginalRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	steamRoot := filepath.Dir(filepath.Dir(filepath.Dir(gameConfig.InstallDir)))
-	gameConfig.SteamCmd = filepath.Join(steamRoot, "steamcmd")
+	gameConfig.SteamCmd = filepath.Join(steamRoot, dstSteamFixtureName)
 	manifestPath := filepath.Join(steamRoot, "steamapps", "appmanifest_"+dstAppID+".acf")
 	if err := os.WriteFile(manifestPath, []byte(`"AppState"
 {

@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	taskHistoryVersion    = 1
-	maxTaskHistoryEntries = 100
-	maxTaskHistoryAge     = 30 * 24 * time.Hour
-	maxTaskHistoryBytes   = 2 << 20
+	taskHistoryVersion         = 1
+	maxTaskHistoryEntries      = 100
+	maxTaskHistoryAge          = 30 * 24 * time.Hour
+	maxTaskHistoryBytes        = 2 << 20
+	taskHistoryMinSaveInterval = 2 * time.Second
 )
 
 type taskHistoryDocument struct {
@@ -34,6 +35,7 @@ type taskHistoryStore struct {
 	activities     []panel.Activity
 	dirty          bool
 	pendingRemoved []panel.LogRef
+	lastSavedAt    time.Time
 }
 
 func openTaskHistory(path string, now time.Time) (*taskHistoryStore, []panel.LogRef, error) {
@@ -84,6 +86,7 @@ func openTaskHistory(path string, now time.Time) (*taskHistoryStore, []panel.Log
 			// them. A later successful reconciliation will replace the index.
 			return store, nil, err
 		}
+		store.lastSavedAt = now
 		removed = store.pendingRemoved
 		store.pendingRemoved = nil
 		store.dirty = false
@@ -95,6 +98,7 @@ func (s *taskHistoryStore) reconcile(live []panel.Activity, now time.Time) ([]pa
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	previous := cloneActivities(s.activities)
 	before, _ := json.Marshal(s.activities)
 	byID := make(map[string]int, len(s.activities))
 	for index, activity := range s.activities {
@@ -119,9 +123,18 @@ func (s *taskHistoryStore) reconcile(live []panel.Activity, now time.Time) ([]pa
 		s.dirty = true
 	}
 	if s.dirty {
+		if hasRunningActivity(live) && !hasTerminalStateChange(previous, s.activities) &&
+			now.Sub(s.lastSavedAt) < taskHistoryMinSaveInterval {
+			// Coalesce intermediate progress updates while a task is running.
+			// The store stays dirty and flushes on the next reconcile past the
+			// interval, or immediately once the task settles (no running
+			// activities), so a final "success"/"error" state is never deferred.
+			return cloneActivities(s.activities), nil, nil
+		}
 		if err := s.saveLocked(); err != nil {
 			return cloneActivities(s.activities), nil, err
 		}
+		s.lastSavedAt = now
 		removed = s.pendingRemoved
 		s.pendingRemoved = nil
 		s.dirty = false
@@ -129,6 +142,32 @@ func (s *taskHistoryStore) reconcile(live []panel.Activity, now time.Time) ([]pa
 		removed = nil
 	}
 	return cloneActivities(s.activities), removed, nil
+}
+
+func hasTerminalStateChange(previous, current []panel.Activity) bool {
+	previousStatus := make(map[string]string, len(previous))
+	for _, activity := range previous {
+		previousStatus[activity.ID] = activity.Status
+	}
+	for _, activity := range current {
+		if activity.Status == "running" {
+			continue
+		}
+		status, existed := previousStatus[activity.ID]
+		if !existed || status == "running" || status != activity.Status {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRunningActivity(activities []panel.Activity) bool {
+	for _, activity := range activities {
+		if activity.Status == "running" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *taskHistoryStore) snapshot() []panel.Activity {

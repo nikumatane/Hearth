@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -324,6 +325,13 @@ func (s *Service) snapshot() panel.Game {
 
 func (s *Service) performAction(action string, allowUnsafe bool, activityID string, logs []panel.LogRef) {
 	var err error
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			slog.Error("DST task panicked", "activity", activityID, "action", action, "panic", recovered)
+			err = fmt.Errorf("DST 任务执行发生内部错误，请查看面板运行日志：%v", recovered)
+		}
+		s.finishActivity(activityID, err == nil, err)
+	}()
 	s.updateActivity(activityID, "准备 DST 分片", 15, "检查 cluster.ini、Master 与 Caves 配置")
 	s.writeLogs(logs, "Hearth DST task: "+action+"\n")
 	switch action {
@@ -347,11 +355,6 @@ func (s *Service) performAction(action string, allowUnsafe bool, activityID stri
 	case "update":
 		err = s.updateServer(allowUnsafe, activityID, logs)
 	}
-	if err != nil {
-		s.finishActivity(activityID, false, err)
-		return
-	}
-	s.finishActivity(activityID, true, nil)
 }
 
 func (s *Service) startShards(logs []panel.LogRef) error {
@@ -406,9 +409,11 @@ func (s *Service) startShard(shard, logID string) (*exec.Cmd, error) {
 		_ = logFile.Close()
 		s.mu.Lock()
 		if s.master == command {
+			s.master = nil
 			s.masterRunning = false
 		}
 		if s.caves == command {
+			s.caves = nil
 			s.cavesRunning = false
 		}
 		s.mu.Unlock()

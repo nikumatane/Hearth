@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hearth/internal/panel"
 )
@@ -120,6 +121,40 @@ func TestPatchSettingsPreservesSecretsAndUnknownOptions(t *testing.T) {
 	backups, err := filepath.Glob(path + ".panel-backup-*")
 	if err != nil || len(backups) != 1 {
 		t.Fatalf("backup files = %v, error = %v", backups, err)
+	}
+}
+
+func TestPruneSettingsBackupsOnlyDeletesTimestampedRegularFiles(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "PalWorldSettings.ini")
+	base := time.Date(2026, 8, 14, 9, 0, 0, 0, time.Local)
+	backups := make([]string, 0, maxSettingsBackups+2)
+	for index := 0; index < maxSettingsBackups+2; index++ {
+		name := path + ".panel-backup-" + base.Add(time.Duration(index)*time.Second).Format("20060102-150405.000000000")
+		if err := os.WriteFile(name, []byte("backup"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		backups = append(backups, name)
+	}
+	manual := path + ".panel-backup-keep-manually"
+	if err := os.WriteFile(manual, []byte("manual"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	directoryEntry := path + ".panel-backup-" + base.Add(24*time.Hour).Format("20060102-150405.000000000")
+	if err := os.Mkdir(directoryEntry, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	pruneSettingsBackups(path)
+	for _, removed := range backups[:2] {
+		if _, err := os.Stat(removed); !os.IsNotExist(err) {
+			t.Fatalf("old backup was not removed: %s (%v)", removed, err)
+		}
+	}
+	for _, retained := range append(backups[2:], manual, directoryEntry) {
+		if _, err := os.Stat(retained); err != nil {
+			t.Fatalf("non-expired or nonstandard backup was removed: %s (%v)", retained, err)
+		}
 	}
 }
 

@@ -708,6 +708,13 @@ func (s *Service) performAction(
 		forced        bool
 		updateOutcome steamUpdateOutcome
 	)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			slog.Error("palworld task panicked", "activity", activityID, "action", action, "panic", recovered)
+			err = fmt.Errorf("任务执行发生内部错误，请查看面板运行日志：%v", recovered)
+		}
+		s.finishActivity(activityID, action, forced, updateOutcome, err)
+	}()
 	switch action {
 	case "start":
 		err = s.start(scaleReporter(report, 5, 95), registerLog)
@@ -732,7 +739,6 @@ func (s *Service) performAction(
 	case "check-update":
 		err = s.checkVersion(report, registerLog)
 	}
-	s.finishActivity(activityID, action, forced, updateOutcome, err)
 }
 
 func scaleReporter(report taskReporter, start, end int) taskReporter {

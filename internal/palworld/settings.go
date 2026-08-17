@@ -636,12 +636,49 @@ func toFloat(value any) (float64, error) {
 	}
 }
 
+const maxSettingsBackups = 10
+
 func atomicWriteWithBackup(path string, data []byte) error {
 	backupPath := path + ".panel-backup-" + time.Now().Format("20060102-150405.000000000")
 	if err := copyFile(path, backupPath); err != nil {
 		return fmt.Errorf("backup current settings: %w", err)
 	}
-	return atomicWriteFile(path, data)
+	if err := atomicWriteFile(path, data); err != nil {
+		return err
+	}
+	pruneSettingsBackups(path)
+	return nil
+}
+
+// pruneSettingsBackups keeps only the newest maxSettingsBackups on-disk backups
+// of a settings file. Backups use a fixed-width timestamp suffix, so a lexical
+// sort equals chronological order. Failures are best-effort cleanup and are
+// intentionally ignored so a successful save is never reported as failed.
+func pruneSettingsBackups(path string) {
+	directory := filepath.Dir(path)
+	prefix := filepath.Base(path) + ".panel-backup-"
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return
+	}
+	backups := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() || !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		suffix := strings.TrimPrefix(entry.Name(), prefix)
+		if _, err := time.Parse("20060102-150405.000000000", suffix); err != nil {
+			continue
+		}
+		backups = append(backups, entry.Name())
+	}
+	if len(backups) <= maxSettingsBackups {
+		return
+	}
+	sort.Strings(backups)
+	for _, name := range backups[:len(backups)-maxSettingsBackups] {
+		_ = os.Remove(filepath.Join(directory, name))
+	}
 }
 
 func atomicWriteFile(path string, data []byte) error {

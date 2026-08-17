@@ -1,6 +1,7 @@
 package gamemanager
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,6 +39,62 @@ func TestTaskHistoryPersistsAndMarksInterruptedTask(t *testing.T) {
 	if len(entries[0].Logs) != 1 || entries[0].Logs[0].ID != "dst-update.log" {
 		t.Fatalf("reloaded log references = %#v", entries[0].Logs)
 	}
+}
+
+func TestTaskHistoryCoalescesProgressButFlushesTerminalState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "task-history.json")
+	now := time.Date(2026, 8, 14, 9, 0, 0, 0, time.Local)
+	store, _, err := openTaskHistory(path, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activities := []panel.Activity{
+		{ID: "pal-running", GameID: palworldID, Title: "Pal", Status: "running", Progress: 10, CreatedAt: now, UpdatedAt: now},
+		{ID: "dst-running", GameID: dstID, Title: "DST", Status: "running", Progress: 10, CreatedAt: now, UpdatedAt: now},
+	}
+	if _, _, err := store.reconcile(activities, now); err != nil {
+		t.Fatal(err)
+	}
+	activities[0].Progress = 20
+	activities[0].UpdatedAt = now.Add(time.Second)
+	activities[1].Progress = 20
+	activities[1].UpdatedAt = now.Add(time.Second)
+	if _, _, err := store.reconcile(activities, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	document := readTaskHistoryDocument(t, path)
+	if document.Activities[0].Progress != 10 || document.Activities[1].Progress != 10 {
+		t.Fatalf("intermediate progress was not coalesced: %#v", document.Activities)
+	}
+
+	activities[0].Status = "success"
+	activities[0].Stage = "完成"
+	activities[0].Progress = 100
+	activities[0].UpdatedAt = now.Add(1500 * time.Millisecond)
+	if _, _, err := store.reconcile(activities, now.Add(1500*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	document = readTaskHistoryDocument(t, path)
+	statuses := make(map[string]string)
+	for _, activity := range document.Activities {
+		statuses[activity.ID] = activity.Status
+	}
+	if statuses["pal-running"] != "success" || statuses["dst-running"] != "running" {
+		t.Fatalf("terminal state was deferred while another task ran: %#v", statuses)
+	}
+}
+
+func readTaskHistoryDocument(t *testing.T, path string) taskHistoryDocument {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document taskHistoryDocument
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	return document
 }
 
 func TestTaskHistoryRollsByAgeAndCount(t *testing.T) {
