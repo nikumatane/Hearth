@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -34,7 +35,10 @@ func TestCreateDSTClusterWritesCompletePrivateConfiguration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stat %s: %v", relative, err)
 		}
-		if info.Mode().Perm()&0o077 != 0 {
+		// Windows exposes access through NTFS ACLs rather than POSIX mode bits;
+		// os.FileMode therefore reports regular files as 0666 there even when
+		// the inherited ACL is private to the service account.
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 			t.Fatalf("%s mode = %o, want private", relative, info.Mode().Perm())
 		}
 	}
