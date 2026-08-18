@@ -9,6 +9,22 @@ Unreleased and moves to a version section when a formal package is built.
 
 ## Unreleased
 
+- Add administrator-confirmed one-click DST installation using SteamCMD's standard App `343050` library,
+  existing task stages, no-progress timeout, and per-run logs. A new Master/Caves cluster is attached to
+  Hearth after installation but remains stopped.
+- Require the target cluster directory not to exist and its parent to exist. Hearth stages `cluster.ini`,
+  both `server.ini` files, and the Caves world preset beside the target before one rename. Adapter or config
+  persistence failure removes only that newly created cluster, retains downloaded Steam files, and never
+  overwrites, merges, or moves an existing save.
+- Allow an optional Klei Cluster Token during setup. It is written only to the new cluster's
+  `cluster_token.txt`, never Hearth configuration, API responses, task details, or operation audit. A cluster
+  without a token is still attached but cannot start until an administrator adds one in Game Management.
+- Share the SteamCMD app installer between Palworld and DST, including self-update retry, exact App completion
+  markers, no-progress termination, Windows process-tree waiting, and the standard Steam library layout.
+- Add an internal-only cross-game mod foundation for source, version, enabled state, dependency warnings,
+  ownership, change plans, and rollback records. There is no mod API or UI yet, and the planner refuses to
+  remove externally owned mods Hearth has not adopted.
+
 Future releases are tracked in the [roadmap](ROADMAP.en.md).
 
 ## 1.3.3 - 2026-08-17

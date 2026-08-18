@@ -294,7 +294,7 @@ func (s *server) installGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request panel.InstallGameRequest
-	if err := decodeJSON(r, &request); err != nil {
+	if err := decodeJSONLimit(r, &request, 16<<10); err != nil {
 		writeError(w, http.StatusBadRequest, "安装请求格式不正确")
 		return
 	}

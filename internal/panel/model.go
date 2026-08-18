@@ -268,6 +268,7 @@ type ManagedGame struct {
 	CanAdopt               bool            `json:"canAdopt"`
 	Candidates             []GameCandidate `json:"candidates,omitempty"`
 	ActiveTaskID           string          `json:"activeTaskId,omitempty"`
+	SuggestedClusterDir    string          `json:"suggestedClusterDir,omitempty"`
 }
 
 type SystemSettings struct {
@@ -297,8 +298,17 @@ type AdoptGameRequest struct {
 }
 
 type InstallGameRequest struct {
-	SteamCmdRoot string `json:"steamCmdRoot"`
-	Confirm      bool   `json:"confirm"`
+	SteamCmdRoot string             `json:"steamCmdRoot"`
+	Confirm      bool               `json:"confirm"`
+	DST          *DSTInstallOptions `json:"dst,omitempty"`
+}
+
+// DSTInstallOptions contains only first-run inputs. ClusterToken is written
+// directly to Klei's cluster_token.txt and must never be persisted by Hearth.
+type DSTInstallOptions struct {
+	ClusterDir   string `json:"clusterDir"`
+	ClusterName  string `json:"clusterName"`
+	ClusterToken string `json:"clusterToken,omitempty"`
 }
 
 // DSTTokenPatch replaces the Klei cluster token without persisting it in

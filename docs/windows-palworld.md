@@ -98,9 +98,10 @@ Set-ExecutionPolicy -Scope Process Bypass
   确认后才从 Valve 官方地址下载 SteamCMD 并安装 App `2394010`；完成后服务器保持停止。
 - SteamCMD 先下载到同磁盘隔离暂存目录，校验 ZIP 路径与体积后再切换到目标目录。下载或
   解压中断不会把半成品目录当作有效安装。
-- DST 1.3.0 第一阶段支持识别并由管理员明确接管现有 Dedicated Server 与 cluster，且可管理
-  Master/Caves 启停；管理员可在游戏管理页写入 Token。Token 只写入 cluster_token.txt，不进入
-  Hearth 配置、接口响应或审计；不提供管理员确认的一键安装、模组或备份恢复。
+- DST 支持识别并由管理员明确接管现有 Dedicated Server 与 cluster，也支持管理员确认的一键
+  安装 App `343050` 并原子创建全新 Master/Caves cluster。Token 只写入 cluster_token.txt，
+  不进入 Hearth 配置、接口响应或审计；模组和面板内备份恢复仍未开放。DST 详细流程见
+  [Windows DST 部署指南](windows-dst.md)。
 
 后台设置保存带修订号，拒绝覆盖并发修改；写入成功时保留 `config.json.previous`。运行期
 安全参数在页面明确提示需要重启 Hearth，游戏进程不会因保存后台设置而重启。

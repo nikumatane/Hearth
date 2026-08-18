@@ -151,7 +151,7 @@ func TestDiscoverySupportsDSTAdoptionCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := manager.Management().Games[1]
-	if dst.Support != "available" || dst.State != "detected" || dst.CanInstall || !dst.CanAdopt || len(dst.Candidates) != 1 {
+	if dst.Support != "available" || dst.State != "detected" || !dst.CanInstall || !dst.CanAdopt || len(dst.Candidates) != 1 {
 		t.Fatalf("dst = %#v", dst)
 	}
 	if dst.Candidates[0].ClusterDir != clusterDir || !dst.Candidates[0].CanAdopt {
@@ -199,6 +199,21 @@ func TestDSTProfileRootsIncludeDocumentsAndOneDrive(t *testing.T) {
 		if roots[index] != want[index] {
 			t.Fatalf("DST profile root %d = %q, want %q", index, roots[index], want[index])
 		}
+	}
+}
+
+func TestDiscoveryRootsDoNotTreatEmptyGamePathsAsWorkingDirectory(t *testing.T) {
+	manager := &Service{config: config.Config{}}
+	for _, root := range manager.discoveryRootsLocked() {
+		if filepath.Clean(root) == "." {
+			t.Fatalf("empty game path added the working directory to discovery roots: %#v", manager.discoveryRootsLocked())
+		}
+	}
+}
+
+func TestEmptyDSTClusterPathNeverReadsTokenFromWorkingDirectory(t *testing.T) {
+	if dstClusterTokenPresent("") {
+		t.Fatal("empty DST cluster path was treated as a token location")
 	}
 }
 

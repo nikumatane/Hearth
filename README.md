@@ -22,10 +22,10 @@
 ## Hearth 是什么
 
 Hearth 把前端和 API 合并为一个 Go 二进制，可以原地接管现有 SteamCMD 游戏安装，也可
-在管理员明确确认后安装新的 Palworld Dedicated Server。它不要求 Docker，不自动接管、
+在管理员明确确认后安装新的 Palworld 或 DST Dedicated Server。它不要求 Docker，不自动接管、
 启动或迁移存档。当前生产适配器支持 Windows 帕鲁，以及现有 DST Dedicated Server 与 cluster
-的接管、Master/Caves 生命周期、配置、版本检查、静止存档备份和安全更新；DST 管理员确认的
-一键安装、模组管理和面板内恢复仍不在当前范围。
+的接管、Master/Caves 生命周期、配置、版本检查、静止存档备份和安全更新。DST 新安装会原子
+创建一个全新 cluster 并保持停服；模组管理和面板内恢复仍不在当前范围。
 
 适合这样的场景：
 
@@ -147,8 +147,10 @@ Hearth 和启动任务，不会停止、启动、更新或修改正在运行的 
 3. 现有 Palworld 请先正常保存并关闭，再选择探测结果并明确确认接管；新服务器只选择
    SteamCMD 根目录，Palworld 固定安装到其标准 `steamapps\\common\\PalServer` 目录。
    管理员确认后才开始联网安装，完成后不会自动启动。
-4. 从 Hearth 启动服务器；启动本身不依赖 REST API。
-5. 如果需要玩家数据以及运行中的安全停止、重启、更新和备份，再进入 INI 配置来源，
+4. 新建 DST 时还要明确选择一个尚不存在的 cluster 目录和服务器名，可选填写 Klei Token；
+   Hearth 会创建 Master/Caves 基础配置并接管，但不会启动。已有 DST 存档始终使用探测与接管。
+5. 从 Hearth 启动服务器；启动本身不依赖 REST API。DST 未配置 Token 时会保持不可启动。
+6. 如果需要 Palworld 玩家数据以及运行中的安全停止、重启、更新和备份，再进入 INI 配置来源，
    设置非空 `AdminPassword`、启用 `RESTAPIEnabled` 并确认 `RESTAPIPort=8212`。
 
 Hearth 固定从 `127.0.0.1` 访问 Palworld REST API。REST 不可用时仍允许启动，
@@ -166,7 +168,8 @@ Palworld 进程。运行中的更新和备份仍要求 REST API，绝不会自�
 或其他程序生成的文件不在清理范围内。阈值可通过 `backupRetentionDays` 和
 `backupMaxTotalGB` 调整。
 
-完整流程见 [Windows 帕鲁部署指南](docs/windows-palworld.md)。
+完整流程见 [Windows 帕鲁部署指南](docs/windows-palworld.md) 和
+[Windows DST 部署指南](docs/windows-dst.md)。
 
 面板自身更新的校验、健康检查和回滚说明见
 [面板安全更新指南](docs/panel-update.md)。
@@ -225,7 +228,8 @@ HEARTH_DEMO=true HEARTH_ADMIN_PASSWORD='replace-me' ./bin/hearth
 
 ## 项目边界
 
-- 当前生产适配器支持 Windows Palworld 1.0 和已安装的 Windows DST Dedicated Server/cluster。
+- 当前生产适配器支持 Windows Palworld 1.0，以及 Windows DST Dedicated Server/cluster 的
+  管理员确认安装或现有实例接管。
 - 不执行来自前端的任意 Shell 文本。
 - 同一游戏同时只运行一个变更任务。
 - 只为已接管游戏的低频版本检查启动 SteamCMD；繁忙或已有 SteamCMD 时自动跳过。
@@ -236,9 +240,10 @@ HEARTH_DEMO=true HEARTH_ADMIN_PASSWORD='replace-me' ./bin/hearth
 ## 文档
 
 - [Windows 帕鲁部署与升级](docs/windows-palworld.md)
+- [Windows DST 部署与升级](docs/windows-dst.md)
 - [面板安全更新](docs/panel-update.md)
 - [架构与安全边界](docs/architecture.md)
-- [1.1.0–1.3.0 路线图](ROADMAP.md)
+- [1.1.0–1.4.x 路线图](ROADMAP.md)
 - [参与贡献](CONTRIBUTING.md)
 - [安全报告策略](SECURITY.md)
 - [MIT 开源许可证](LICENSE)

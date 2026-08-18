@@ -71,13 +71,15 @@ Status: complete on Windows.
 
 ## 1.4.0 · Explicit DST installation and shared mod foundations
 
-Status: planned.
+Status: in development.
 
 - Rename the ambiguous “automatic DST installation” capability to “administrator-confirmed one-click installation.”
   Hearth never installs a game during startup, discovery, or update; SteamCMD runs only after an administrator chooses
   a target and confirms the operation.
 - Reuse the game catalog, task stages, no-progress timeout, logs, audit trail, and failure cleanup to install DST.
-  A completed installation remains stopped until an administrator configures its cluster and token.
+  The administrator chooses a target cluster path that does not yet exist; Hearth atomically creates the base
+  Master/Caves configuration, optionally writes the token, attaches it, and keeps it stopped. Existing clusters
+  always use the separate adoption flow.
 - Add a cross-game model for mod inventory, source, version, enabled state, dependency warnings, change plans, and
   rollback records. Mod actions require an installed and managed game and never delete unknown files Hearth has not adopted.
 

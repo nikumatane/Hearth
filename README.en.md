@@ -22,11 +22,11 @@
 ## What is Hearth?
 
 Hearth embeds its frontend and API in one Go binary. It can adopt an existing SteamCMD game in
-place or install a new Palworld Dedicated Server after explicit administrator confirmation. It
+place or install a new Palworld or DST Dedicated Server after explicit administrator confirmation. It
 does not require Docker and never adopts, starts, or moves saves automatically. The production
 adapters support Windows Palworld plus adoption, Master/Caves lifecycle, configuration, version checks,
-stopped-save backups, and safe updates for an existing DST Dedicated Server and cluster. Administrator-confirmed
-DST one-click installation, mod management, and in-panel restore remain outside the current scope.
+stopped-save backups, and safe updates for DST. A new DST installation atomically creates a fresh cluster
+and remains stopped; mod management and in-panel restore remain outside the current scope.
 
 Hearth is intended for setups where:
 
@@ -162,8 +162,12 @@ it neither downloads nor adopts a game.
    explicitly confirm adoption. For a new server, select only the SteamCMD root; Palworld is installed
    at its standard `steamapps\\common\\PalServer` path. Installation starts only after confirmation
    and does not start the server when complete.
-4. Start the server from Hearth; starting does not depend on the REST API.
-5. If you need player data and safe stop/restart/update/backup while the server is running, open
+4. A new DST server also requires an explicit target cluster path that does not yet exist and a server
+   name; the Klei token is optional during setup. Hearth creates the base Master/Caves configuration and
+   attaches it without starting either shard. Existing DST saves always use discovery and adoption.
+5. Start the server from Hearth; starting does not depend on the REST API. DST remains unable to start
+   until its Cluster Token has been configured.
+6. If you need Palworld player data and safe stop/restart/update/backup while the server is running, open
    the INI source, set a non-empty `AdminPassword`, enable `RESTAPIEnabled`, and confirm
    `RESTAPIPort=8212`.
 
@@ -185,10 +189,11 @@ days are removed first, followed by the oldest files until their total size is a
 newly created backup is always retained, and manually named or third-party files are untouched.
 Adjust the thresholds with `backupRetentionDays` and `backupMaxTotalGB`.
 
-See the [Windows Palworld deployment guide](docs/windows-palworld.en.md) for the complete flow.
+See the [Windows Palworld deployment guide](docs/windows-palworld.en.md) and
+[Windows DST deployment guide](docs/windows-dst.en.md) for the complete flow.
 
-See the [panel safe-update guide](docs/panel-update.en.md) for release verification, private-repository
-tokens, health checks, and rollback behavior.
+See the [panel safe-update guide](docs/panel-update.en.md) for release verification, health checks,
+and rollback behavior.
 
 See the [Hearth roadmap](ROADMAP.en.md) for the agreed boundaries of the next three open-source iterations.
 
@@ -261,9 +266,10 @@ HEARTH_DEMO=true HEARTH_ADMIN_PASSWORD='replace-me' ./bin/hearth
 ## Documentation
 
 - [Windows Palworld deployment and upgrade](docs/windows-palworld.en.md)
+- [Windows DST deployment and upgrade](docs/windows-dst.en.md)
 - [Panel safe update](docs/panel-update.en.md)
 - [Architecture and security boundaries](docs/architecture.en.md)
-- [1.1.0–1.3.0 roadmap](ROADMAP.en.md)
+- [1.1.0–1.4.x roadmap](ROADMAP.en.md)
 - [Contributing](CONTRIBUTING.en.md)
 - [Security reporting policy](SECURITY.en.md)
 - [MIT License](LICENSE)

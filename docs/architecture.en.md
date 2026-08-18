@@ -38,10 +38,13 @@ Production is deployed as one Go binary:
     directory, and candidate limits. Adoption and installation are separate confirmed administrator
     actions. DST supports adopting an existing Dedicated Server/cluster, Master/Caves lifecycle,
     configuration, version checks, stopped-save backups, and safe updates, and lets an administrator
-    write the cluster token from Game Management. Administrator-confirmed DST one-click installation,
-    mod management, and in-panel restore remain disabled.
+    write the cluster token from Game Management. DST one-click installation runs only after an administrator
+    confirms the SteamCMD root, fresh cluster path, and write scope; it attaches the result but keeps it stopped.
+    Mod management and in-panel restore remain disabled.
 12. Backend settings reject stale revisions, replace through a same-directory temporary file, and
-    retain `.previous`. Installation stages SteamCMD in isolation and never starts Palworld on completion.
+    retain `.previous`. Installation stages SteamCMD in isolation and never starts a game on completion.
+    A new DST cluster is fully staged beside its target and committed with one rename; adapter or Hearth
+    configuration persistence failure removes only that cluster and retains downloaded game files.
 13. The panel-update layer queries only the fixed official GitHub Release. It verifies the asset
     digest, sidecar SHA256, packaged version, and safe extraction before creating an update plan.
     An independent Windows updater replaces panel binaries after the main process exits and commits
@@ -137,6 +140,13 @@ current small-server use case.
 - The frontend cannot submit executable paths or arbitrary command arguments.
 - Game IDs map to process names, installation directories, and Steam App IDs only through server
   configuration.
+- A DST installation request accepts only the SteamCMD root, an absolute cluster path that does not yet
+  exist, a display name, and an optional token. App ID, executable path, Master/Caves filenames, port
+  template, and launch arguments remain server-defined. The target cannot overlap SteamCMD, game, or
+  Hearth configuration paths, and boundaries are checked again after resolving parent symlinks.
+- The optional DST setup token is used only to write `cluster_token.txt`; it never enters Hearth
+  configuration, activity detail, API responses, or audit. An existing cluster target is rejected and
+  directed to the adoption flow.
 - At most one mutating task runs for the same game at a time.
 - Palworld update and backup while running must first save the world through the official REST API.
 - DST has no REST save/shutdown channel. Standalone backups require stopped Master/Caves. A running

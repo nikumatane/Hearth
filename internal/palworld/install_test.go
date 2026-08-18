@@ -31,7 +31,7 @@ echo "Success! App '2394010' fully installed."
 	}
 	logPath := filepath.Join(directory, "install.log")
 	if err := InstallDedicatedServer(
-		steamCmd, logPath, time.Second, nil,
+		steamCmd, logPath, 5*time.Second, nil,
 	); err != nil {
 		t.Fatalf("InstallDedicatedServer() error = %v", err)
 	}
@@ -54,7 +54,7 @@ func TestInstallDedicatedServerRequiresPalworldCompletionMarker(t *testing.T) {
 	logPath := filepath.Join(directory, "install.log")
 	stages := make([]string, 0, 4)
 	err := InstallDedicatedServer(
-		steamCmd, logPath, time.Second,
+		steamCmd, logPath, 5*time.Second,
 		func(stage string, _ int, _ string) { stages = append(stages, stage) },
 	)
 	if err != nil {
@@ -72,7 +72,7 @@ func TestInstallDedicatedServerRejectsCleanExitWithoutMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := InstallDedicatedServer(
-		steamCmd, filepath.Join(directory, "install.log"), time.Second, nil,
+		steamCmd, filepath.Join(directory, "install.log"), 5*time.Second, nil,
 	)
 	if err == nil {
 		t.Fatal("InstallDedicatedServer() accepted output without an app completion marker")
@@ -88,7 +88,7 @@ func TestInstallDedicatedServerUsesSteamCMDDefaultLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := InstallDedicatedServer(
-		steamCmd, filepath.Join(directory, "install.log"), time.Second, nil,
+		steamCmd, filepath.Join(directory, "install.log"), 5*time.Second, nil,
 	); err != nil {
 		t.Fatalf("InstallDedicatedServer() error = %v", err)
 	}

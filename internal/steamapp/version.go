@@ -49,6 +49,21 @@ func ReadBuildID(path string) string {
 	return "未知"
 }
 
+func ReadAppID(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	for scanner := bufio.NewScanner(file); scanner.Scan(); {
+		fields := quotedFields(strings.TrimSpace(scanner.Text()))
+		if len(fields) == 2 && fields[0] == "appid" && validUint(fields[1], 32) {
+			return fields[1]
+		}
+	}
+	return ""
+}
+
 func ReadInstalled(path string) (ManifestSnapshot, error) {
 	file, err := os.Open(path)
 	if err != nil {

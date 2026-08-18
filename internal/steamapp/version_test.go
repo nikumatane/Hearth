@@ -2,9 +2,21 @@ package steamapp
 
 import (
 	"bufio"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestReadAppIDHandlesSteamManifestWhitespace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "appmanifest_343050.acf")
+	if err := os.WriteFile(path, []byte("\"AppState\"\n{\n\t\"appid\"\t\t\"343050\"\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadAppID(path); got != "343050" {
+		t.Fatalf("ReadAppID() = %q", got)
+	}
+}
 
 func TestParseAndCompareSteamAppManifests(t *testing.T) {
 	installed, err := ParseInstalled(bufio.NewScanner(strings.NewReader(`"AppState"

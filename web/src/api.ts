@@ -293,6 +293,16 @@ export type ManagedGame = {
   canAdopt: boolean;
   candidates?: GameCandidate[];
   activeTaskId?: string;
+  suggestedClusterDir?: string;
+};
+
+export type InstallGameOptions = {
+  steamCmdRoot: string;
+  dst?: {
+    clusterDir: string;
+    clusterName: string;
+    clusterToken?: string;
+  };
 };
 
 export type SystemSettings = {
@@ -462,10 +472,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ candidateId, confirm: true })
     }),
-  installGame: (id: string, steamCmdRoot: string) =>
+  installGame: (id: string, options: InstallGameOptions) =>
     request<Activity>(`/api/v1/system/games/${encodeURIComponent(id)}/install`, {
       method: "POST",
-      body: JSON.stringify({ steamCmdRoot, confirm: true })
+      body: JSON.stringify({ ...options, confirm: true })
     }),
   updateDSTToken: (token: string) =>
     request<ManagedGame>("/api/v1/system/games/dont-starve-together/cluster-token", {

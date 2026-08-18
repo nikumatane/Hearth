@@ -105,10 +105,11 @@ The installer does not:
   App `2394010`; the server remains stopped afterward.
 - SteamCMD is downloaded and extracted into an isolated same-volume staging directory. ZIP paths and
   expanded size are checked before activation, so an interrupted download is not treated as valid.
-- The first 1.3.0 DST phase discovers and explicitly adopts an existing Dedicated Server and cluster,
-  and manages Master/Caves lifecycle. Administrators can write the token from Game Management; it is
-  written only to `cluster_token.txt`, never persisted in Hearth configuration, API responses, or audit
-  data. Administrator-confirmed one-click installation, mod updates, and backup/restore remain later phases.
+- DST can discover and explicitly adopt an existing Dedicated Server and cluster, or perform an
+  administrator-confirmed App `343050` installation and atomically create a fresh Master/Caves cluster.
+  The token is written only to `cluster_token.txt`, never Hearth configuration, API responses, or audit.
+  Mod management and in-panel backup restore remain unavailable. See the
+  [Windows DST deployment guide](windows-dst.en.md) for the complete flow.
 
 Backend settings use a revision and reject concurrent overwrites. A successful save retains
 `config.json.previous`. Runtime security changes are marked as requiring a Hearth restart and never

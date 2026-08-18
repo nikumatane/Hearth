@@ -121,8 +121,40 @@ try {
     if ($dontStarveTogether.support -ne $expectedDSTSupport) {
         throw "Unexpected Don't Starve Together support state for $ExpectedVersion (expected $expectedDSTSupport): $($dontStarveTogether | ConvertTo-Json -Compress)"
     }
-    if ($expectedDSTSupport -eq "available" -and ($dontStarveTogether.state -ne "not_installed" -or $dontStarveTogether.canInstall -or $dontStarveTogether.canAdopt)) {
+    if ($expectedDSTSupport -eq "available" -and ($dontStarveTogether.state -ne "not_installed" -or -not $dontStarveTogether.canInstall -or $dontStarveTogether.canAdopt)) {
         throw "Unexpected Don't Starve Together first-start state: $($dontStarveTogether | ConvertTo-Json -Compress)"
+    }
+
+    $clusterParent = Join-Path $env:RUNNER_TEMP ("hearth-dst-cluster-" + [guid]::NewGuid().ToString("N"))
+    $existingCluster = Join-Path $clusterParent "ExistingCluster"
+    [void](New-Item -ItemType Directory -Path $existingCluster -Force)
+    $dstInstallBody = @{
+        steamCmdRoot = (Join-Path $env:RUNNER_TEMP ("hearth-dst-steamcmd-" + [guid]::NewGuid().ToString("N")))
+        confirm = $true
+        dst = @{
+            clusterDir = $existingCluster
+            clusterName = "Smoke Test"
+        }
+    } | ConvertTo-Json -Depth 4
+    $installRejected = $false
+    try {
+        Invoke-RestMethod `
+            -Method Post `
+            -Uri "$baseUrl/api/v1/system/games/dont-starve-together/install" `
+            -ContentType "application/json" `
+            -Body $dstInstallBody `
+            -WebSession $webSession
+    }
+    catch {
+        if ($_.Exception.Response.StatusCode.value__ -eq 400) {
+            $installRejected = $true
+        }
+        else {
+            throw
+        }
+    }
+    if (-not $installRejected) {
+        throw "DST installation accepted an existing cluster target"
     }
 
     $panelUpdate = Invoke-RestMethod `

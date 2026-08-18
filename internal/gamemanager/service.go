@@ -31,19 +31,23 @@ type dstTokenUpdater interface {
 }
 
 type Service struct {
-	mu           sync.RWMutex
-	config       config.Config
-	configPath   string
-	delegate     panel.Service
-	dstDelegate  panel.Service
-	initError    error
-	dstInitError error
-	candidates   map[string][]panel.GameCandidate
-	activities   []panel.Activity
-	logPaths     map[string]string
-	installing   bool
-	activeTask   string
-	factory      serviceFactory
+	mu                     sync.RWMutex
+	config                 config.Config
+	configPath             string
+	delegate               panel.Service
+	dstDelegate            panel.Service
+	initError              error
+	dstInitError           error
+	candidates             map[string][]panel.GameCandidate
+	activities             []panel.Activity
+	logPaths               map[string]string
+	installing             bool
+	installingGameID       string
+	activeTask             string
+	factory                serviceFactory
+	dstFactory             serviceFactory
+	saveConfig             func(string, config.Config) error
+	dstSuggestedClusterDir string
 
 	host hostMonitor
 
@@ -62,12 +66,16 @@ func New(cfg config.Config, configPath string) (*Service, error) {
 		factory: func(gameConfig config.GameConfig) (panel.Service, error) {
 			return palworld.NewService(gameConfig)
 		},
+		dstFactory: func(gameConfig config.GameConfig) (panel.Service, error) {
+			return dst.NewService(gameConfig)
+		},
+		saveConfig: config.Save,
 	}
 	if cfg.Games.Palworld.Enabled {
 		manager.delegate, manager.initError = manager.factory(cfg.Games.Palworld)
 	}
 	if cfg.Games.DontStarveTogether.Enabled {
-		manager.dstDelegate, manager.dstInitError = dst.NewService(cfg.Games.DontStarveTogether)
+		manager.dstDelegate, manager.dstInitError = manager.dstFactory(cfg.Games.DontStarveTogether)
 	}
 	historyPath := taskHistoryPath(cfg, configPath)
 	history, removed, historyErr := openTaskHistory(historyPath, time.Now())
@@ -369,6 +377,12 @@ func (s *Service) RefreshDiscovery() (panel.Management, error) {
 }
 
 func (s *Service) managementLocked() panel.Management {
+	palworldTaskID, dstTaskID := "", ""
+	if s.installingGameID == palworldID {
+		palworldTaskID = s.activeTask
+	} else if s.installingGameID == dstID {
+		dstTaskID = s.activeTask
+	}
 	palworldState := "not_installed"
 	palworldDetail := "未发现 Palworld Dedicated Server"
 	if len(s.candidates[palworldID]) > 0 {
@@ -386,7 +400,7 @@ func (s *Service) managementLocked() panel.Management {
 		palworldState = "managed"
 		palworldDetail = "已由 Hearth 管理"
 	}
-	if s.installing {
+	if s.installing && s.installingGameID == palworldID {
 		palworldState = "installing"
 		palworldDetail = "管理员已确认安装，任务正在执行"
 	}
@@ -408,6 +422,9 @@ func (s *Service) managementLocked() panel.Management {
 			}
 		}
 	}
+	if s.installing && s.installingGameID == dstID {
+		dstState, dstDetailText = "installing", "管理员已确认安装，任务正在执行"
+	}
 
 	settings := s.systemSettingsLocked(false)
 	return panel.Management{
@@ -419,7 +436,7 @@ func (s *Service) managementLocked() panel.Management {
 				SteamCmd:   s.config.Games.Palworld.SteamCmd,
 				CanInstall: !s.installing && s.delegate == nil,
 				CanAdopt:   !s.installing && s.delegate == nil && hasAdoptableCandidate(s.candidates[palworldID]),
-				Candidates: cloneCandidates(s.candidates[palworldID]), ActiveTaskID: s.activeTask,
+				Candidates: cloneCandidates(s.candidates[palworldID]), ActiveTaskID: palworldTaskID,
 			},
 			{
 				ID: dstID, Name: "饥荒联机版", ShortName: "DST", Support: "available",
@@ -428,7 +445,10 @@ func (s *Service) managementLocked() panel.Management {
 				ClusterDir:             s.config.Games.DontStarveTogether.ClusterDir,
 				SteamCmd:               s.config.Games.DontStarveTogether.SteamCmd,
 				ClusterTokenConfigured: dstClusterTokenPresent(s.config.Games.DontStarveTogether.ClusterDir),
-				CanAdopt:               s.dstDelegate == nil && hasAdoptableCandidate(s.candidates[dstID]),
+				CanInstall:             !s.installing && s.dstDelegate == nil,
+				CanAdopt:               !s.installing && s.dstDelegate == nil && hasAdoptableCandidate(s.candidates[dstID]),
+				SuggestedClusterDir:    s.dstSuggestedClusterDir,
+				ActiveTaskID:           dstTaskID,
 			},
 		},
 		Settings: settings,
@@ -523,16 +543,30 @@ func (s *Service) adoptDST(request panel.AdoptGameRequest) (panel.ManagedGame, e
 	next := s.config
 	next.Games.DontStarveTogether = dstConfig(candidate.InstallDir, candidate.SteamCmd, candidate.ClusterDir, next.Games.DontStarveTogether)
 	next.Games.DontStarveTogether.Enabled = true
-	delegate, err := dst.NewService(next.Games.DontStarveTogether)
+	delegate, err := s.newDSTService(next.Games.DontStarveTogether)
 	if err != nil {
 		return panel.ManagedGame{}, err
 	}
-	if err := config.Save(s.configPath, next); err != nil {
+	if err := s.persistConfig(next); err != nil {
 		closeService(delegate)
 		return panel.ManagedGame{}, err
 	}
 	s.config, s.dstDelegate, s.dstInitError = next, delegate, nil
 	return s.managementLocked().Games[1], nil
+}
+
+func (s *Service) newDSTService(gameConfig config.GameConfig) (panel.Service, error) {
+	if s.dstFactory != nil {
+		return s.dstFactory(gameConfig)
+	}
+	return dst.NewService(gameConfig)
+}
+
+func (s *Service) persistConfig(next config.Config) error {
+	if s.saveConfig != nil {
+		return s.saveConfig(s.configPath, next)
+	}
+	return config.Save(s.configPath, next)
 }
 
 func (s *Service) UpdateDSTToken(token string) (panel.ManagedGame, error) {
@@ -723,10 +757,13 @@ func candidateState(candidates []panel.GameCandidate) string {
 }
 
 func dstDetail(candidates []panel.GameCandidate) string {
-	if len(candidates) > 0 {
+	if hasAdoptableCandidate(candidates) {
 		return "发现现有 DST 文件；可确认接管有效 cluster 并管理 Master/Caves"
 	}
-	return "未发现 DST Dedicated Server；1.3.0 暂不提供自动安装"
+	if len(candidates) > 0 {
+		return "已发现 DST Dedicated Server，但没有可接管的完整 cluster；可由管理员确认创建全新集群"
+	}
+	return "未发现 DST Dedicated Server；可由管理员确认安装 App 343050 并创建全新集群"
 }
 
 func cloneCandidates(candidates []panel.GameCandidate) []panel.GameCandidate {

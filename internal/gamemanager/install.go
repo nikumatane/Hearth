@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"hearth/internal/config"
 	"hearth/internal/palworld"
 	"hearth/internal/panel"
+	"hearth/internal/steamapp"
 )
 
 const (
@@ -24,30 +24,46 @@ const (
 )
 
 func (s *Service) InstallGame(id string, request panel.InstallGameRequest) (panel.Activity, error) {
-	if id != palworldID {
+	if id != palworldID && id != dstID {
 		return panel.Activity{}, panel.ErrNotFound
 	}
 	if !request.Confirm {
 		return panel.Activity{}, fmt.Errorf("%w: 安装需要管理员明确确认", panel.ErrInvalid)
 	}
-	steamCmdRoot := filepath.Clean(strings.TrimSpace(request.SteamCmdRoot))
-	if err := validateInstallPaths(steamCmdRoot, s.configPath); err != nil {
-		return panel.Activity{}, err
-	}
-	installDir := palworldInstallDir(steamCmdRoot)
-	if err := requireEmptyInstallDirectory(installDir); err != nil {
-		return panel.Activity{}, err
+	plan := gameInstallPlan{gameID: id}
+	if id == palworldID {
+		if request.DST != nil {
+			return panel.Activity{}, fmt.Errorf("%w: Palworld 安装不接受 DST 集群参数", panel.ErrInvalid)
+		}
+		plan.steamCmdRoot = filepath.Clean(strings.TrimSpace(request.SteamCmdRoot))
+		if err := validateInstallPaths(plan.steamCmdRoot, s.configPath); err != nil {
+			return panel.Activity{}, err
+		}
+		plan.installDir = palworldInstallDir(plan.steamCmdRoot)
+		if err := requireEmptyInstallDirectory(plan.installDir); err != nil {
+			return panel.Activity{}, err
+		}
+	} else {
+		dstPlan, err := newDSTInstallPlan(request, s.configPath)
+		if err != nil {
+			return panel.Activity{}, err
+		}
+		plan.steamCmdRoot, plan.installDir, plan.dst = dstPlan.steamCmdRoot, dstPlan.installDir, &dstPlan
 	}
 
 	s.mu.Lock()
-	if s.delegate != nil || s.installing {
+	if s.installing || (id == palworldID && s.delegate != nil) || (id == dstID && s.dstDelegate != nil) {
 		s.mu.Unlock()
 		return panel.Activity{}, panel.ErrBusy
 	}
 	now := time.Now()
+	title := "安装 Palworld Dedicated Server"
+	if id == dstID {
+		title = "安装 Don't Starve Together Dedicated Server"
+	}
 	activity := panel.Activity{
-		ID: fmt.Sprintf("install-%d", now.UnixNano()), GameID: palworldID, Action: "install",
-		Title: "安装 Palworld Dedicated Server", Detail: "管理员已确认 SteamCMD 目录，任务准备开始",
+		ID: fmt.Sprintf("install-%d", now.UnixNano()), GameID: id, Action: "install",
+		Title: title, Detail: "管理员已确认安装目录和写入范围，任务准备开始",
 		Status: "running", Stage: "准备目录", Progress: 5, CreatedAt: now, UpdatedAt: now,
 	}
 	s.activities = append([]panel.Activity{activity}, s.activities...)
@@ -55,15 +71,23 @@ func (s *Service) InstallGame(id string, request panel.InstallGameRequest) (pane
 		s.activities = s.activities[:20]
 	}
 	s.installing = true
+	s.installingGameID = id
 	s.activeTask = activity.ID
 	s.mu.Unlock()
 
 	s.signalHistorySync()
-	go s.runInstall(activity.ID, installDir, steamCmdRoot)
+	go s.runInstall(activity.ID, plan)
 	return activity, nil
 }
 
-func (s *Service) runInstall(activityID, installDir, steamCmdRoot string) {
+type gameInstallPlan struct {
+	gameID       string
+	installDir   string
+	steamCmdRoot string
+	dst          *dstInstallPlan
+}
+
+func (s *Service) runInstall(activityID string, plan gameInstallPlan) {
 	report := func(stage string, progress int, detail string) {
 		s.updateInstallActivity(activityID, stage, progress, detail)
 	}
@@ -72,15 +96,15 @@ func (s *Service) runInstall(activityID, installDir, steamCmdRoot string) {
 	}
 
 	report("准备目录", 8, "正在准备 SteamCMD 目录")
-	if err := os.MkdirAll(steamCmdRoot, 0o700); err != nil {
+	if err := os.MkdirAll(plan.steamCmdRoot, 0o700); err != nil {
 		fail(fmt.Errorf("create SteamCMD directory: %w", err))
 		return
 	}
-	steamCmd := filepath.Join(steamCmdRoot, "steamcmd.exe")
+	steamCmd := filepath.Join(plan.steamCmdRoot, "steamcmd.exe")
 	if !fileExists(steamCmd) {
 		report("下载 SteamCMD", 10, "正在从 Valve 官方地址下载 SteamCMD")
 		var err error
-		steamCmd, err = downloadSteamCMD(steamCmdRoot, report)
+		steamCmd, err = downloadSteamCMD(plan.steamCmdRoot, report)
 		if err != nil {
 			fail(err)
 			return
@@ -89,30 +113,59 @@ func (s *Service) runInstall(activityID, installDir, steamCmdRoot string) {
 		report("检查 SteamCMD", 12, "使用管理员确认目录中的现有 steamcmd.exe")
 	}
 
-	logDirectory := filepath.Join(steamCmdRoot, "hearth-logs")
-	if err := os.MkdirAll(logDirectory, 0o700); err != nil {
-		fail(fmt.Errorf("create installation log directory: %w", err))
-		return
+	needsSteamInstall := plan.gameID == palworldID || !dstInstallReady(plan.steamCmdRoot, plan.installDir)
+	logPath := ""
+	if needsSteamInstall {
+		logDirectory := filepath.Join(plan.steamCmdRoot, "hearth-logs")
+		if err := os.MkdirAll(logDirectory, 0o700); err != nil {
+			fail(fmt.Errorf("create installation log directory: %w", err))
+			return
+		}
+		logName := "steamcmd-install-" + time.Now().Format("20060102-150405.000000000") + ".log"
+		logPath = filepath.Join(logDirectory, logName)
+		logLabel := "Palworld 安装日志"
+		if plan.gameID == dstID {
+			logLabel = "DST 安装日志"
+		}
+		s.addInstallLog(activityID, logName, logLabel, logPath)
 	}
-	logName := "steamcmd-install-" + time.Now().Format("20060102-150405.000000000") + ".log"
-	logPath := filepath.Join(logDirectory, logName)
-	s.addInstallLog(activityID, logName, "Palworld 安装日志", logPath)
 
 	s.mu.RLock()
-	noProgressMinutes := defaultInt(s.config.Games.Palworld.SteamCmdNoProgressMinutes, 30)
+	gameConfig := s.config.Games.Palworld
+	if plan.gameID == dstID {
+		gameConfig = s.config.Games.DontStarveTogether
+	}
+	noProgressMinutes := defaultInt(gameConfig.SteamCmdNoProgressMinutes, 30)
 	s.mu.RUnlock()
-	if err := palworld.InstallDedicatedServer(
-		steamCmd, logPath, time.Duration(noProgressMinutes)*time.Minute,
-		func(stage string, progress int, detail string) { report(stage, progress, detail) },
-	); err != nil {
-		fail(fmt.Errorf("install Palworld with SteamCMD: %w", err))
+	if plan.gameID == palworldID {
+		if err := palworld.InstallDedicatedServer(
+			steamCmd, logPath, time.Duration(noProgressMinutes)*time.Minute,
+			func(stage string, progress int, detail string) { report(stage, progress, detail) },
+		); err != nil {
+			fail(fmt.Errorf("install Palworld with SteamCMD: %w", err))
+			return
+		}
+	} else if needsSteamInstall {
+		if err := steamapp.InstallDedicatedServer(
+			steamCmd, logPath, time.Duration(noProgressMinutes)*time.Minute,
+			steamapp.InstallSpec{AppID: dstSteamAppID, ProductName: dstSteamProductName},
+			steamapp.InstallProgress(report),
+		); err != nil {
+			fail(fmt.Errorf("install DST with SteamCMD: %w", err))
+			return
+		}
+	} else {
+		report("校验现有安装", 88, "已确认 SteamCMD App 343050，可继续初始化全新集群")
+	}
+	if plan.gameID == dstID {
+		s.finishDSTInstall(activityID, plan, steamCmd, report, fail)
 		return
 	}
 
 	report("初始化配置", 91, "仅在配置不存在时从官方默认文件创建 PalWorldSettings.ini")
-	settingsPath := filepath.Join(installDir, "Pal", "Saved", "Config", "WindowsServer", "PalWorldSettings.ini")
+	settingsPath := filepath.Join(plan.installDir, "Pal", "Saved", "Config", "WindowsServer", "PalWorldSettings.ini")
 	if !fileExists(settingsPath) {
-		if err := initializePalworldSettings(filepath.Join(installDir, "DefaultPalWorldSettings.ini"), settingsPath); err != nil {
+		if err := initializePalworldSettings(filepath.Join(plan.installDir, "DefaultPalWorldSettings.ini"), settingsPath); err != nil {
 			fail(err)
 			return
 		}
@@ -120,13 +173,13 @@ func (s *Service) runInstall(activityID, installDir, steamCmdRoot string) {
 
 	s.mu.Lock()
 	next := s.config
-	next.Management.InstallRoot = filepath.Dir(installDir)
-	next.Management.SteamCmdRoot = steamCmdRoot
-	next.Games.Palworld = palworldConfig(installDir, steamCmd, next.Games.Palworld)
+	next.Management.InstallRoot = filepath.Dir(plan.installDir)
+	next.Management.SteamCmdRoot = plan.steamCmdRoot
+	next.Games.Palworld = palworldConfig(plan.installDir, steamCmd, next.Games.Palworld)
 	next.Games.Palworld.Enabled = true
 	delegate, err := s.factory(next.Games.Palworld)
 	if err == nil {
-		err = config.Save(s.configPath, next)
+		err = s.persistConfig(next)
 	}
 	if err != nil && delegate != nil {
 		closeService(delegate)
@@ -144,6 +197,59 @@ func (s *Service) runInstall(activityID, installDir, steamCmdRoot string) {
 	}
 	report("健康检查", 98, "安装文件和管理路径已校验；Hearth 不会自动启动游戏")
 	s.finishInstallActivity(activityID, true, "安装完成", "Palworld 已安装并接入 Hearth，服务器保持停止状态")
+}
+
+func dstInstallReady(steamCmdRoot, installDir string) bool {
+	executable := filepath.Join(installDir, "bin64", "dontstarve_dedicated_server_nullrenderer_x64.exe")
+	manifest := filepath.Join(steamCmdRoot, "steamapps", "appmanifest_"+dstSteamAppID+".acf")
+	return fileExists(executable) && validSteamManifest(manifest, dstSteamAppID)
+}
+
+func (s *Service) finishDSTInstall(
+	activityID string,
+	plan gameInstallPlan,
+	steamCmd string,
+	report func(string, int, string),
+	fail func(error),
+) {
+	if plan.dst == nil || !dstInstallReady(plan.steamCmdRoot, plan.installDir) {
+		fail(errors.New("SteamCMD completed but DST executable or App 343050 manifest is unavailable"))
+		return
+	}
+	report("初始化集群", 91, "正在原子写入 cluster.ini 与 Master/Caves 配置；不会启动服务器")
+	rollbackCluster, err := createDSTCluster(*plan.dst)
+	if err != nil {
+		fail(err)
+		return
+	}
+	s.mu.Lock()
+	next := s.config
+	next.Management.InstallRoot = filepath.Dir(plan.installDir)
+	next.Management.SteamCmdRoot = plan.steamCmdRoot
+	next.Games.DontStarveTogether = dstConfig(plan.installDir, steamCmd, plan.dst.clusterDir, next.Games.DontStarveTogether)
+	next.Games.DontStarveTogether.Enabled = true
+	delegate, err := s.newDSTService(next.Games.DontStarveTogether)
+	if err == nil {
+		err = s.persistConfig(next)
+	}
+	if err != nil && delegate != nil {
+		closeService(delegate)
+	}
+	if err == nil {
+		s.config, s.dstDelegate, s.dstInitError = next, delegate, nil
+		s.discoverLocked()
+	}
+	s.mu.Unlock()
+	if err != nil {
+		activationErr := fmt.Errorf("activate installed DST adapter: %w", err)
+		if rollbackErr := rollbackCluster(); rollbackErr != nil {
+			activationErr = fmt.Errorf("%w; remove newly created DST cluster: %v", activationErr, rollbackErr)
+		}
+		fail(activationErr)
+		return
+	}
+	report("健康检查", 98, "安装文件、集群配置和管理路径已校验；Hearth 不会自动启动游戏")
+	s.finishInstallActivity(activityID, true, "安装完成", "DST 已安装并接入 Hearth，Master/Caves 保持停止状态")
 }
 
 func (s *Service) updateInstallActivity(id, stage string, progress int, detail string) {
@@ -192,6 +298,7 @@ func (s *Service) finishInstallActivity(id string, success bool, title, detail s
 		}
 	}
 	s.installing = false
+	s.installingGameID = ""
 	s.activeTask = ""
 }
 
@@ -205,6 +312,9 @@ func validateInstallPaths(steamCmdRoot, configPath string) error {
 	}
 	if configPath != "" {
 		configDirectory := filepath.Dir(configPath)
+		if absolute, err := filepath.Abs(configDirectory); err == nil {
+			configDirectory = absolute
+		}
 		if pathContains(steamCmdRoot, configDirectory) || pathContains(configDirectory, steamCmdRoot) {
 			return fmt.Errorf("%w: SteamCMD 目录不能覆盖 Hearth 配置目录", panel.ErrInvalid)
 		}

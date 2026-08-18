@@ -208,6 +208,9 @@ const panelUpdate = ref<PanelUpdateStatus | null>(null);
 const panelUpdateBusy = ref(false);
 const installSteamCmdRoot = ref("");
 const installConsent = ref(false);
+const dstInstallClusterDir = ref("");
+const dstInstallClusterName = ref("Hearth DST Server");
+const dstInstallClusterToken = ref("");
 const discoveryRootsText = ref("");
 const trustedProxyCIDRsText = ref("");
 const currentTime = ref(new Date());
@@ -247,6 +250,19 @@ const steamCmdPalworldPath = computed(() => {
   const root = installSteamCmdRoot.value.trim().replace(/[\\/]+$/, "");
   return root ? `${root}\\steamapps\\common\\PalServer` : "SteamCMD\\steamapps\\common\\PalServer";
 });
+const steamCmdDSTPath = computed(() => {
+  const root = installSteamCmdRoot.value.trim().replace(/[\\/]+$/, "");
+  return root
+    ? `${root}\\steamapps\\common\\Don't Starve Together Dedicated Server`
+    : "SteamCMD\\steamapps\\common\\Don't Starve Together Dedicated Server";
+});
+const activityByID = computed(
+  () => new Map((overview.value?.activities ?? []).map((item) => [item.id, item]))
+);
+
+function managedGameActivity(game: ManagedGame) {
+  return game.activeTaskId ? activityByID.value.get(game.activeTaskId) : undefined;
+}
 
 const hasManagedGames = computed(() => (overview.value?.games.length ?? 0) > 0);
 const palworldManagement = computed(() =>
@@ -724,6 +740,10 @@ function syncManagementInputs(document: Management) {
   installSteamCmdRoot.value = installSteamCmdRoot.value || settings.steamCmdRoot;
   discoveryRootsText.value = (settings.discoveryRoots ?? []).join("\n");
   trustedProxyCIDRsText.value = (settings.trustedProxyCidrs ?? []).join("\n");
+  const dst = document.games.find((game) => game.id === "dont-starve-together");
+  if (!dstInstallClusterDir.value && dst?.suggestedClusterDir) {
+    dstInstallClusterDir.value = dst.suggestedClusterDir;
+  }
 }
 
 async function loadManagement(silent = false) {
@@ -758,7 +778,7 @@ async function adoptManagedGame(game: ManagedGame, candidateId: string) {
   managementSaving.value = true;
   try {
     await api.adoptGame(game.id, candidateId);
-    showToast("success", "现有 Palworld 已接管；没有修改存档或游戏配置");
+    showToast("success", `现有${game.name}已接管；没有修改存档或游戏配置`);
     await Promise.all([refresh(true), loadManagement(true)]);
   } catch (error) {
     showToast("error", error instanceof Error ? error.message : "接管失败");
@@ -772,11 +792,27 @@ async function installManagedGame(game: ManagedGame) {
     showToast("error", "请先确认安装会联网下载并写入 SteamCMD 目录");
     return;
   }
+  if (game.id === "dont-starve-together" && (!dstInstallClusterDir.value.trim() || !dstInstallClusterName.value.trim())) {
+    showToast("error", "请填写全新的 DST 集群目录和服务器名称");
+    return;
+  }
   managementSaving.value = true;
   try {
-    await api.installGame(game.id, installSteamCmdRoot.value);
+    await api.installGame(game.id, {
+      steamCmdRoot: installSteamCmdRoot.value,
+      ...(game.id === "dont-starve-together"
+        ? {
+            dst: {
+              clusterDir: dstInstallClusterDir.value,
+              clusterName: dstInstallClusterName.value,
+              clusterToken: dstInstallClusterToken.value || undefined
+            }
+          }
+        : {})
+    });
     showToast("success", "安装任务已开始；完成后不会自动启动游戏");
     installConsent.value = false;
+    dstInstallClusterToken.value = "";
     await Promise.all([refresh(true), loadManagement(true)]);
     schedulePolling(1000);
   } catch (error) {
@@ -2427,6 +2463,17 @@ function gameAccent(id: string) {
                 <span v-if="game.support === 'planned'" class="planned-chip">1.3.0</span>
               </header>
 
+              <div v-if="managedGameActivity(game)" class="management-task-progress">
+                <div>
+                  <span>{{ managedGameActivity(game)?.stage || "处理中" }}</span>
+                  <strong>{{ managedGameActivity(game)?.progress ?? 0 }}%</strong>
+                </div>
+                <div class="activity-progress-track">
+                  <i :style="{ width: `${managedGameActivity(game)?.progress ?? 0}%` }"></i>
+                </div>
+                <small>{{ managedGameActivity(game)?.detail }}</small>
+              </div>
+
               <div v-if="game.state === 'managed'" class="managed-paths">
                 <label><span>游戏目录</span><code>{{ game.installDir }}</code></label>
                 <label v-if="game.clusterDir"><span>Cluster 目录</span><code>{{ game.clusterDir }}</code></label>
@@ -2484,15 +2531,38 @@ function gameAccent(id: string) {
                 <label>
                   <span>SteamCMD 目录</span>
                   <input v-model="installSteamCmdRoot" autocomplete="off" placeholder="C:\SteamCMD" />
-                  <small>目录中已有 steamcmd.exe 时直接使用；空目录会从 Valve 官方地址下载。Palworld 固定安装到 <code>{{ steamCmdPalworldPath }}</code>。</small>
+                  <small>
+                    目录中已有 steamcmd.exe 时直接使用；空目录会从 Valve 官方地址下载。
+                    {{ game.id === "dont-starve-together" ? "DST" : "Palworld" }} 固定安装到
+                    <code>{{ game.id === "dont-starve-together" ? steamCmdDSTPath : steamCmdPalworldPath }}</code>。
+                  </small>
                 </label>
+                <template v-if="game.id === 'dont-starve-together'">
+                  <label>
+                    <span>全新集群目录</span>
+                    <input v-model="dstInstallClusterDir" autocomplete="off" placeholder="C:\Users\Administrator\Documents\Klei\DoNotStarveTogether\HearthCluster" />
+                    <small>必须是父目录已存在、但自身尚不存在的绝对路径。现有集群请使用上方“确认接管”，安装不会覆盖或合并存档。</small>
+                  </label>
+                  <label>
+                    <span>服务器名称</span>
+                    <input v-model="dstInstallClusterName" maxlength="128" autocomplete="off" />
+                  </label>
+                  <label>
+                    <span>Cluster Token（可选）</span>
+                    <input v-model="dstInstallClusterToken" type="password" maxlength="4096" autocomplete="new-password" placeholder="可稍后在托管卡片中配置" />
+                    <small>只会写入新集群的 <code>cluster_token.txt</code>，不会保存到 Hearth 配置、接口响应或审计记录。</small>
+                  </label>
+                </template>
                 <label class="install-consent">
                   <input v-model="installConsent" type="checkbox" />
-                  <span>我确认联网下载，并向 SteamCMD 目录及其 steamapps 子目录写入文件。</span>
+                  <span>
+                    我确认联网下载，并向 SteamCMD 目录及其 steamapps 子目录写入文件；
+                    <template v-if="game.id === 'dont-starve-together'">同时在上述全新路径创建 Master/Caves 集群配置。</template>
+                  </span>
                 </label>
                 <button
                   class="button primary"
-                  :disabled="managementSaving || game.state === 'installing' || !installSteamCmdRoot || !installConsent"
+                  :disabled="managementSaving || game.state === 'installing' || !installSteamCmdRoot || !installConsent || (game.id === 'dont-starve-together' && (!dstInstallClusterDir.trim() || !dstInstallClusterName.trim()))"
                 >
                   <LoaderCircle v-if="game.state === 'installing'" class="spin" :size="16" />
                   <Download v-else :size="16" />
@@ -2502,9 +2572,6 @@ function gameAccent(id: string) {
 
               <div v-if="game.support === 'planned'" class="planned-note">
                 <Clock3 :size="17" />当前只展示探测结果，不提供安装或接管，避免产生无法管理的半成品服务器。
-              </div>
-              <div v-else-if="game.id === 'dont-starve-together' && !game.canInstall" class="planned-note">
-                <Clock3 :size="17" />当前支持接管现有 cluster、Master/Caves 生命周期、版本检查、备份与安全更新；自动安装、模组和面板内恢复将在后续阶段开放。
               </div>
             </article>
           </section>

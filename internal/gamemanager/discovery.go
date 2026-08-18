@@ -20,6 +20,7 @@ const (
 )
 
 func (s *Service) discoverLocked() {
+	s.dstSuggestedClusterDir = suggestedDSTClusterDir(s.config.Management.DiscoveryRoots)
 	roots := s.discoveryRootsLocked()
 	steamCommands := discoverSteamCommands(roots, s.config.Management.SteamCmdRoot, s.config.Games.Palworld.SteamCmd)
 	palworldDirectories := make(map[string]string)
@@ -138,11 +139,18 @@ func (s *Service) discoveryRootsLocked() []string {
 	for _, value := range []string{
 		s.config.Management.InstallRoot,
 		s.config.Management.SteamCmdRoot,
-		s.config.Games.Palworld.InstallDir,
-		filepath.Dir(s.config.Games.Palworld.InstallDir),
 	} {
 		if strings.TrimSpace(value) != "" {
 			roots = append(roots, value)
+		}
+	}
+	for _, value := range []string{
+		s.config.Games.Palworld.InstallDir,
+		s.config.Games.DontStarveTogether.InstallDir,
+		s.config.Games.DontStarveTogether.ClusterDir,
+	} {
+		if strings.TrimSpace(value) != "" {
+			roots = append(roots, value, filepath.Dir(value))
 		}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
@@ -222,6 +230,9 @@ func validDSTCluster(directory string) bool {
 }
 
 func dstClusterTokenPresent(directory string) bool {
+	if strings.TrimSpace(directory) == "" || !filepath.IsAbs(directory) {
+		return false
+	}
 	return fileExists(filepath.Join(directory, "cluster_token.txt"))
 }
 
