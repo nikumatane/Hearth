@@ -71,7 +71,7 @@ Status: complete on Windows.
 
 ## 1.4.0 · Explicit DST installation and shared mod foundations
 
-Status: in development.
+Status: complete on Windows.
 
 - Rename the ambiguous “automatic DST installation” capability to “administrator-confirmed one-click installation.”
   Hearth never installs a game during startup, discovery, or update; SteamCMD runs only after an administrator chooses

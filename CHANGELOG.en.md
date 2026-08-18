@@ -9,6 +9,10 @@ Unreleased and moves to a version section when a formal package is built.
 
 ## Unreleased
 
+Future releases are tracked in the [roadmap](ROADMAP.en.md).
+
+## 1.4.0 - 2026-08-18
+
 - Add administrator-confirmed one-click DST installation using SteamCMD's standard App `343050` library,
   existing task stages, no-progress timeout, and per-run logs. A new Master/Caves cluster is attached to
   Hearth after installation but remains stopped.
@@ -24,8 +28,6 @@ Unreleased and moves to a version section when a formal package is built.
 - Add an internal-only cross-game mod foundation for source, version, enabled state, dependency warnings,
   ownership, change plans, and rollback records. There is no mod API or UI yet, and the planner refuses to
   remove externally owned mods Hearth has not adopted.
-
-Future releases are tracked in the [roadmap](ROADMAP.en.md).
 
 ## 1.3.3 - 2026-08-17
 
