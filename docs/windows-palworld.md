@@ -292,6 +292,21 @@ Palworld 下载进度。
 末尾 128 KiB，且接口只接受操作记录明确引用的日志文件。当前选中日志约每 0.75 秒刷新一次，
 因此启动任务完成后仍可继续查看 Palworld 或 DST 分片的控制台输出。
 
+## 1.4.1 开发中的官方模组清单
+
+Palworld [官方服务器指南](https://docs.palworldgame.com/settings-and-operation/mod/) 规定 Windows
+服务端从 PalServer 根目录的 `Mods\Workshop\<目录>\Info.json` 识别官方格式模组，并以
+`Mods\PalModSettings.ini` 中重复出现的 `ActiveModList=<PackageName>` 判断启用项。模组需要完整
+重启服务端后才由游戏自身部署。
+
+1.4.1 当前只增加管理员 API `GET /api/v1/games/palworld/mods`，有界扫描默认 Workshop 目录，
+展示 PackageName、版本、启用状态、`IsServer` 兼容性和可识别依赖。扫描不执行 JSON 中的规则、
+不跟随符号链接、不读取超限文件，也不会复制、重命名或删除任何模组。检测到
+`WorkshopRootDir` 时只提示尚未纳入当前清单，不会越过默认 PalServer 目录继续探测。
+
+这一只读阶段用于先用真实官方包确认元数据兼容性。上传/接管、启用/停用和移除必须继续满足
+停服、存档与配置备份、计划预览、重启验证及原文件回退后才会开放。
+
 ## 安全更新流程
 
 面板的更新顺序固定为：

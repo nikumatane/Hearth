@@ -25,24 +25,35 @@ const (
 	OwnershipExternal Ownership = "external"
 )
 
+type Compatibility string
+
+const (
+	CompatibilitySupported   Compatibility = "supported"
+	CompatibilityUnsupported Compatibility = "unsupported"
+	CompatibilityUnknown     Compatibility = "unknown"
+)
+
 type Descriptor struct {
-	ID              string
-	GameID          string
-	Name            string
-	Source          Source
-	SourceReference string
-	Version         string
-	Enabled         bool
-	Ownership       Ownership
-	Dependencies    []string
+	ID              string        `json:"id"`
+	GameID          string        `json:"gameId"`
+	Name            string        `json:"name"`
+	Source          Source        `json:"source"`
+	SourceReference string        `json:"sourceReference"`
+	Version         string        `json:"version,omitempty"`
+	Enabled         bool          `json:"enabled"`
+	Ownership       Ownership     `json:"ownership"`
+	Compatibility   Compatibility `json:"compatibility"`
+	Dependencies    []string      `json:"dependencies"`
+	Warnings        []string      `json:"warnings"`
 }
 
 type Inventory struct {
-	GameID    string
-	Revision  string
-	Managed   bool
-	Mods      []Descriptor
-	ScannedAt time.Time
+	GameID    string       `json:"gameId"`
+	Revision  string       `json:"revision"`
+	Managed   bool         `json:"managed"`
+	Mods      []Descriptor `json:"mods"`
+	Warnings  []string     `json:"warnings"`
+	ScannedAt time.Time    `json:"scannedAt"`
 }
 
 type Action string

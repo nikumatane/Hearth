@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"hearth/internal/config"
+	"hearth/internal/mods"
 	"hearth/internal/panel"
 )
 
@@ -26,6 +27,26 @@ type updateTestService struct {
 type dstWorldSettingsTestService struct {
 	*panel.DemoService
 	patch panel.DSTWorldSettingsPatch
+}
+
+type modInventoryTestService struct {
+	*panel.DemoService
+}
+
+func (s *modInventoryTestService) ModInventory(gameID string) (mods.Inventory, error) {
+	if gameID != "palworld" {
+		return mods.Inventory{}, panel.ErrNotFound
+	}
+	return mods.Inventory{
+		GameID: "palworld", Revision: "mods-revision", Managed: true,
+		Mods: []mods.Descriptor{{
+			ID: "ServerTools", GameID: "palworld", Name: "Server Tools",
+			Source: mods.SourceOfficialPackage, SourceReference: "Mods/Workshop/1",
+			Version: "2.1.0", Enabled: true, Ownership: mods.OwnershipExternal,
+			Compatibility: mods.CompatibilitySupported, Dependencies: []string{}, Warnings: []string{},
+		}},
+		Warnings: []string{}, ScannedAt: time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC),
+	}, nil
 }
 
 func (s *dstWorldSettingsTestService) DSTWorldSettings() (panel.DSTWorldSettings, error) {
@@ -238,6 +259,29 @@ func TestGameManagementIsAdminAuthenticatedAndShowsDST(t *testing.T) {
 		!strings.Contains(body, `"id":"dont-starve-together"`) ||
 		!strings.Contains(body, `"support":"available"`) {
 		t.Fatalf("management body = %s", body)
+	}
+}
+
+func TestPalworldModInventoryIsAdminOnlyAndReadOnly(t *testing.T) {
+	service := &modInventoryTestService{DemoService: panel.NewDemoService()}
+	handler, err := New(config.Config{AdminPassword: "correct"}, service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthorized := requestForTest(t, handler, http.MethodGet, "/api/v1/games/palworld/mods", "", nil)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous mod inventory status = %d", unauthorized.Code)
+	}
+	cookie := loginTestHandler(t, handler)
+	response := requestForTest(t, handler, http.MethodGet, "/api/v1/games/palworld/mods", "", cookie)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"revision":"mods-revision"`) ||
+		!strings.Contains(response.Body.String(), `"compatibility":"supported"`) ||
+		!strings.Contains(response.Body.String(), `"warnings":[]`) {
+		t.Fatalf("mod inventory = %d %s", response.Code, response.Body.String())
+	}
+	unsupported := requestForTest(t, handler, http.MethodGet, "/api/v1/games/dont-starve-together/mods", "", cookie)
+	if unsupported.Code != http.StatusNotFound {
+		t.Fatalf("DST mod inventory status = %d body = %s", unsupported.Code, unsupported.Body.String())
 	}
 }
 

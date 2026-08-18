@@ -89,6 +89,7 @@ func NewWithUpdates(cfg config.Config, service panel.Service, updates panel.Pane
 	mux.HandleFunc("DELETE /api/v1/session", s.logout)
 	mux.HandleFunc("GET /api/v1/overview", s.auth(s.overview))
 	mux.HandleFunc("GET /api/v1/games/{id}", s.auth(s.game))
+	mux.HandleFunc("GET /api/v1/games/{id}/mods", s.admin(s.modInventory))
 	mux.HandleFunc("POST /api/v1/games/{id}/actions", s.auth(s.gameAction))
 	mux.HandleFunc(
 		"GET /api/v1/games/palworld/settings",
@@ -534,6 +535,20 @@ func (s *server) game(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, game)
+}
+
+func (s *server) modInventory(w http.ResponseWriter, r *http.Request) {
+	provider, ok := s.service.(panel.ModInventoryService)
+	if !ok {
+		writeServiceError(w, fmt.Errorf("%w: mod inventory is unavailable", panel.ErrNotFound))
+		return
+	}
+	inventory, err := provider.ModInventory(r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, inventory)
 }
 
 func (s *server) gameAction(w http.ResponseWriter, r *http.Request) {

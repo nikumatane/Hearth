@@ -15,6 +15,7 @@ import (
 
 	"hearth/internal/config"
 	"hearth/internal/dst"
+	"hearth/internal/mods"
 	"hearth/internal/palworld"
 	"hearth/internal/panel"
 )
@@ -271,6 +272,22 @@ func (s *Service) PalworldSettings() (panel.PalworldSettings, error) {
 		return panel.PalworldSettings{}, panel.ErrNotFound
 	}
 	return delegate.PalworldSettings()
+}
+
+func (s *Service) ModInventory(gameID string) (mods.Inventory, error) {
+	if gameID != palworldID {
+		return mods.Inventory{}, panel.ErrNotFound
+	}
+	s.mu.RLock()
+	delegate := s.delegate
+	s.mu.RUnlock()
+	provider, ok := delegate.(interface {
+		ModInventory() (mods.Inventory, error)
+	})
+	if !ok {
+		return mods.Inventory{}, panel.ErrNotFound
+	}
+	return provider.ModInventory()
 }
 
 func (s *Service) UpdatePalworldSettings(patch panel.PalworldSettingsPatch) (panel.PalworldSettings, error) {
@@ -896,4 +913,5 @@ func validateSystemSettingsPatch(patch panel.SystemSettingsPatch) error {
 
 var _ panel.Service = (*Service)(nil)
 var _ panel.ManagementService = (*Service)(nil)
+var _ panel.ModInventoryService = (*Service)(nil)
 var _ panel.TaskLogLocator = (*Service)(nil)

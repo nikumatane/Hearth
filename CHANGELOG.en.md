@@ -11,6 +11,16 @@ Unreleased and moves to a version section when a formal package is built.
 
 Future releases are tracked in the [roadmap](ROADMAP.en.md).
 
+### 1.4.1 in development
+
+- Add an administrator-only, read-only inventory API for Palworld's official mod format. It scans the bounded
+  default `Mods/Workshop/*/Info.json` tree and combines `Mods/PalModSettings.ini` to report PackageName,
+  version, enabled state, server compatibility, dependency hints, and source directory. Members cannot access it.
+- Never follow symlinks, execute mod content, or modify files during a scan; bound both file sizes and direct
+  child count. Report malformed metadata, duplicate PackageName values, configured-but-missing mods, and an
+  external `WorkshopRootDir` without hiding other valid entries. Upload, copy, enable, disable, and removal APIs
+  remain unavailable in this slice.
+
 ## 1.4.0 - 2026-08-18
 
 - Add administrator-confirmed one-click DST installation using SteamCMD's standard App `343050` library,

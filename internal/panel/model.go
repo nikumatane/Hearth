@@ -3,6 +3,8 @@ package panel
 import (
 	"context"
 	"time"
+
+	"hearth/internal/mods"
 )
 
 type MetricPoint struct {
@@ -339,6 +341,10 @@ type ManagementService interface {
 	InstallGame(id string, request InstallGameRequest) (Activity, error)
 	UpdateDSTToken(token string) (ManagedGame, error)
 	UpdateSystemSettings(patch SystemSettingsPatch) (SystemSettings, error)
+}
+
+type ModInventoryService interface {
+	ModInventory(gameID string) (mods.Inventory, error)
 }
 
 type TaskLogLocator interface {

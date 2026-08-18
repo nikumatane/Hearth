@@ -324,6 +324,23 @@ separate console output show no View log action. Each request reads at most the 
 API accepts only files explicitly referenced by task history. The selected log refreshes about every
 0.75 seconds, including game-console output that continues after a launch task completes.
 
+## Official mod inventory under development for 1.4.1
+
+The [official Palworld server guide](https://docs.palworldgame.com/settings-and-operation/mod/) defines
+the Windows server layout as `Mods\Workshop\<directory>\Info.json` beside PalServer and uses repeated
+`ActiveModList=<PackageName>` entries in `Mods\PalModSettings.ini` for enabled mods. Palworld itself deploys
+the declared files only after a full server restart.
+
+The current 1.4.1 slice adds only the administrator endpoint `GET /api/v1/games/palworld/mods`. It performs
+a bounded scan of the default Workshop directory and reports PackageName, version, configured enabled state,
+recognizable `IsServer` compatibility, and dependency hints. The scan never executes rules from JSON, follows
+symlinks, reads oversized files, or copies, renames, and deletes mod content. An external `WorkshopRootDir`
+is reported but is not traversed in this first slice.
+
+This read-only phase lets real official packages validate the metadata model first. Upload/adoption, enable or
+disable, and removal stay hidden until stopped-server enforcement, save and configuration backup, plan preview,
+restart verification, and original-file rollback are complete.
+
 ## Safe update flow
 
 The update sequence is fixed:

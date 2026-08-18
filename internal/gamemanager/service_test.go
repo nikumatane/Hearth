@@ -10,8 +10,28 @@ import (
 	"testing"
 
 	"hearth/internal/config"
+	"hearth/internal/mods"
 	"hearth/internal/panel"
 )
+
+type modInventoryDelegate struct {
+	*panel.DemoService
+}
+
+func (d *modInventoryDelegate) ModInventory() (mods.Inventory, error) {
+	return mods.Inventory{GameID: palworldID, Revision: "revision", Managed: true, Mods: []mods.Descriptor{}, Warnings: []string{}}, nil
+}
+
+func TestModInventoryDelegatesOnlyForManagedPalworld(t *testing.T) {
+	manager := &Service{delegate: &modInventoryDelegate{DemoService: panel.NewDemoService()}}
+	inventory, err := manager.ModInventory(palworldID)
+	if err != nil || inventory.Revision != "revision" {
+		t.Fatalf("ModInventory() = %#v, %v", inventory, err)
+	}
+	if _, err := manager.ModInventory(dstID); !errors.Is(err, panel.ErrNotFound) {
+		t.Fatalf("DST ModInventory() error = %v", err)
+	}
+}
 
 func TestDiscoveryAndExplicitAdoption(t *testing.T) {
 	root := t.TempDir()

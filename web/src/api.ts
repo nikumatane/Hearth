@@ -37,6 +37,29 @@ export type Game = {
   restAvailable: boolean;
 };
 
+export type ModDescriptor = {
+  id: string;
+  gameId: string;
+  name: string;
+  source: "official_package" | "steam_workshop" | "existing";
+  sourceReference: string;
+  version?: string;
+  enabled: boolean;
+  ownership: "hearth" | "external";
+  compatibility: "supported" | "unsupported" | "unknown";
+  dependencies: string[];
+  warnings: string[];
+};
+
+export type ModInventory = {
+  gameId: string;
+  revision: string;
+  managed: boolean;
+  mods: ModDescriptor[];
+  warnings: string[];
+  scannedAt: string;
+};
+
 export type Activity = {
   id: string;
   gameId?: string;
@@ -377,6 +400,8 @@ export const api = {
   logout: () => request<void>("/api/v1/session", { method: "DELETE" }),
   overview: () => request<Overview>("/api/v1/overview"),
   game: (id: string) => request<Game>(`/api/v1/games/${id}`),
+  modInventory: (id: string) =>
+    request<ModInventory>(`/api/v1/games/${encodeURIComponent(id)}/mods`),
   action: (id: string, action: string, allowUnsafe = false) =>
     request<Activity>(`/api/v1/games/${id}/actions`, {
       method: "POST",
