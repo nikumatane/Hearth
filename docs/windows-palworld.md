@@ -299,8 +299,9 @@ Palworld [官方服务器指南](https://docs.palworldgame.com/settings-and-oper
 `Mods\PalModSettings.ini` 中重复出现的 `ActiveModList=<PackageName>` 判断启用项。模组需要完整
 重启服务端后才由游戏自身部署。
 
-1.4.1 当前只增加管理员 API `GET /api/v1/games/palworld/mods`，有界扫描默认 Workshop 目录，
-展示 PackageName、版本、启用状态、`IsServer` 兼容性和可识别依赖。扫描不执行 JSON 中的规则、
+1.4.1 当前提供管理员“帕鲁模组”只读页面及 API `GET /api/v1/games/palworld/mods`，有界扫描默认
+Workshop 目录，展示 PackageName、版本、启用状态、`IsServer` 兼容性和可识别依赖。没有安装模组时
+页面显示正常空状态。扫描不执行 JSON 中的规则、
 不跟随符号链接、不读取超限文件，也不会复制、重命名或删除任何模组。检测到
 `WorkshopRootDir` 时只提示尚未纳入当前清单，不会越过默认 PalServer 目录继续探测。
 

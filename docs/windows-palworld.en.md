@@ -331,9 +331,10 @@ the Windows server layout as `Mods\Workshop\<directory>\Info.json` beside PalSer
 `ActiveModList=<PackageName>` entries in `Mods\PalModSettings.ini` for enabled mods. Palworld itself deploys
 the declared files only after a full server restart.
 
-The current 1.4.1 slice adds only the administrator endpoint `GET /api/v1/games/palworld/mods`. It performs
-a bounded scan of the default Workshop directory and reports PackageName, version, configured enabled state,
-recognizable `IsServer` compatibility, and dependency hints. The scan never executes rules from JSON, follows
+The current 1.4.1 slice provides an administrator-only Palworld Mods page and the endpoint
+`GET /api/v1/games/palworld/mods`. It performs a bounded scan of the default Workshop directory and reports
+PackageName, version, configured enabled state, recognizable `IsServer` compatibility, and dependency hints.
+A server with no installed mods shows a healthy empty state. The scan never executes rules from JSON, follows
 symlinks, reads oversized files, or copies, renames, and deletes mod content. An external `WorkshopRootDir`
 is reported but is not traversed in this first slice.
 

@@ -11,6 +11,32 @@ import (
 	modmodel "hearth/internal/mods"
 )
 
+func TestScanPalworldModsReturnsStableEmptyInventory(t *testing.T) {
+	root := t.TempDir()
+	before, err := directorySnapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
+	inventory, err := scanPalworldMods(root, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := directorySnapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatalf("empty mod scan changed the install directory\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if inventory.GameID != palworldID || !inventory.Managed || inventory.ScannedAt != now || inventory.Revision == "" {
+		t.Fatalf("inventory identity = %#v", inventory)
+	}
+	if len(inventory.Mods) != 0 || inventory.Mods == nil || len(inventory.Warnings) != 0 || inventory.Warnings == nil {
+		t.Fatalf("empty inventory = %#v", inventory)
+	}
+}
+
 func TestScanPalworldModsReadsOfficialLayoutWithoutMutatingFiles(t *testing.T) {
 	root := t.TempDir()
 	modsRoot := filepath.Join(root, "Mods")

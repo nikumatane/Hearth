@@ -20,6 +20,9 @@ Future releases are tracked in the [roadmap](ROADMAP.en.md).
   child count. Report malformed metadata, duplicate PackageName values, configured-but-missing mods, and an
   external `WorkshopRootDir` without hiding other valid entries. Upload, copy, enable, disable, and removal APIs
   remain unavailable in this slice.
+- Add an administrator Palworld Mods entry in the sidebar and game details. It presents scan summary,
+  compatibility, dependencies, and directory warnings. A server with no mods gets an explicit healthy empty state
+  instead of an error or any suggestion that Hearth installed content automatically.
 
 ## 1.4.0 - 2026-08-18
 

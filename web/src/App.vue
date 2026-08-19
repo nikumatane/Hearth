@@ -25,6 +25,8 @@ import {
   MemoryStick,
   Menu,
   MoreHorizontal,
+  PackageOpen,
+  PackageSearch,
   Play,
   RefreshCw,
   RotateCw,
@@ -57,6 +59,7 @@ import {
   type Management,
   type ManagedGame,
   type MemberCredential,
+  type ModInventory,
   type OperationAuditEntry,
   type Overview,
   type PalworldSettings,
@@ -75,7 +78,7 @@ import {
   type ParsedWorldOption
 } from "./worldOptionCodec";
 
-type Page = "overview" | "game" | "settings" | "logs" | "access" | "system";
+type Page = "overview" | "game" | "mods" | "settings" | "logs" | "access" | "system";
 type ActionName = "start" | "stop" | "restart" | "update" | "backup";
 type SettingsSource = "world" | "ini";
 const minimumPasswordLength = 10;
@@ -164,6 +167,9 @@ const dstConfigDirtyFiles = ref<Set<string>>(new Set());
 const dstConfigDirty = computed(() => dstConfigDirtyFiles.value.size > 0);
 const dstConfigLoading = ref(false);
 const dstConfigSaving = ref(false);
+const modInventory = ref<ModInventory | null>(null);
+const modsLoading = ref(false);
+const modsError = ref("");
 const dstActiveDirty = computed(() => {
   if (dstSettingsMode.value === "advanced") return dstConfigDirty.value;
   if (dstSettingsMode.value === "world") return dstWorldDirty.value;
@@ -354,7 +360,8 @@ const filteredGroups = computed(() => {
 });
 
 const pageTitle = computed(() => {
-	if (page.value === "system") return "系统设置与游戏管理";
+  if (page.value === "system") return "系统设置与游戏管理";
+  if (page.value === "mods") return "帕鲁模组管理";
   if (page.value === "settings") return settingsGameId.value === "dont-starve-together" ? "饥荒联机版配置" : "帕鲁服务器配置";
   if (page.value === "logs") return "任务日志";
   if (page.value === "access") return "访问权限";
@@ -376,6 +383,8 @@ const isAdmin = computed(() => currentRole.value === "admin");
 const canManageSettings = computed(() => hasPermission("palworld.settings.gameplay"));
 const canOpenPalworldSettings = computed(() => canManageSettings.value && !!palworldGame.value);
 const canOpenDSTSettings = computed(() => isAdmin.value && !!dstGame.value);
+const canOpenPalworldMods = computed(() => isAdmin.value && !!palworldGame.value);
+const enabledModCount = computed(() => modInventory.value?.mods.filter((mod) => mod.enabled).length ?? 0);
 
 onMounted(async () => {
   clockTimer = window.setInterval(() => {
@@ -427,6 +436,8 @@ function clearAuthenticatedState() {
   configAuditEntries.value = [];
   ipRules.value = [];
   management.value = null;
+  modInventory.value = null;
+  modsError.value = "";
   panelUpdate.value = null;
   panelUpdateBusy.value = false;
   panelUpdateTrackingEpoch += 1;
@@ -478,6 +489,7 @@ async function enterAuthenticatedSession(session: Session) {
   const resumePanelUpdate = consumePanelUpdateResume();
   if (session.role === "admin") {
     await loadManagement();
+    if (page.value === "mods") await loadModInventory();
     if (resumePanelUpdate.requested) {
       page.value = "system";
       systemTab.value = "updates";
@@ -488,6 +500,8 @@ async function enterAuthenticatedSession(session: Session) {
       panelUpdate.value?.state !== "failed" && panelUpdate.value?.state !== "rolled_back") {
       resumePanelUpdateWait(resumePanelUpdate.target, false);
     }
+  } else if (page.value === "mods") {
+    page.value = "overview";
   }
   startPolling();
 }
@@ -575,7 +589,11 @@ function navigate(next: Page, gameId?: string) {
     }
     settingsGameId.value = target;
   }
-  if (!isAdmin.value && (next === "logs" || next === "access" || next === "system")) {
+  if (next === "mods" && !canOpenPalworldMods.value) {
+    showToast("error", "帕鲁模组管理仅对已托管的管理员开放");
+    return;
+  }
+  if (!isAdmin.value && (next === "mods" || next === "logs" || next === "access" || next === "system")) {
     showToast("error", "仅管理员可以访问该页面");
     return;
   }
@@ -591,11 +609,38 @@ function navigate(next: Page, gameId?: string) {
     if (settingsGameId.value === "dont-starve-together") void loadDSTConfig();
     else if (!settings.value) void loadSettings();
   }
+  if (next === "mods") void loadModInventory();
   if (next === "logs") void loadLogs(enteringLogs);
   if (next === "access") void loadAccess();
   if (next === "system") {
     void loadManagement();
     void refreshPanelUpdateOnEntry();
+  }
+}
+
+async function loadModInventory() {
+  if (!canOpenPalworldMods.value || modsLoading.value) return;
+  modsLoading.value = true;
+  modsError.value = "";
+  try {
+    const inventory = await api.modInventory("palworld");
+    modInventory.value = {
+      ...inventory,
+      mods: (inventory.mods ?? []).map((mod) => ({
+        ...mod,
+        dependencies: mod.dependencies ?? [],
+        warnings: mod.warnings ?? []
+      })),
+      warnings: inventory.warnings ?? []
+    };
+  } catch (error) {
+    if (isUnauthorized(error)) {
+      handleSessionExpired();
+      return;
+    }
+    modsError.value = error instanceof Error ? error.message : "模组清单读取失败";
+  } finally {
+    modsLoading.value = false;
   }
 }
 
@@ -1523,6 +1568,22 @@ function managementStateLabel(state: ManagedGame["state"]) {
   }[state];
 }
 
+function modCompatibilityLabel(compatibility: ModInventory["mods"][number]["compatibility"]) {
+  return {
+    supported: "支持服务端",
+    unsupported: "不支持服务端",
+    unknown: "兼容性未知"
+  }[compatibility];
+}
+
+function modSourceLabel(source: ModInventory["mods"][number]["source"]) {
+  return {
+    official_package: "Palworld 官方包",
+    steam_workshop: "Steam Workshop",
+    existing: "现有文件"
+  }[source];
+}
+
 function versionCheckLabel(game: Game) {
   if (game.versionCheck === "unchecked") return "等待自动检查服务端版本";
   if (game.versionCheck === "checking") return `正在检查${game.name}服务端版本`;
@@ -1847,6 +1908,10 @@ function gameAccent(id: string) {
         <button v-if="canOpenPalworldSettings" :class="{ active: page === 'settings' && settingsGameId === 'palworld' }" @click="navigate('settings', 'palworld')">
           <SlidersHorizontal :size="18" />
           <span>帕鲁配置</span>
+        </button>
+        <button v-if="canOpenPalworldMods" :class="{ active: page === 'mods' }" @click="navigate('mods', 'palworld')">
+          <PackageSearch :size="18" />
+          <span>帕鲁模组</span>
         </button>
         <button v-if="canOpenDSTSettings" :class="{ active: page === 'settings' && settingsGameId === 'dont-starve-together' }" @click="navigate('settings', 'dont-starve-together')">
           <SlidersHorizontal :size="18" />
@@ -2229,6 +2294,9 @@ function gameAccent(id: string) {
                   <button v-if="selectedGame.id === 'palworld' && canOpenPalworldSettings" @click="navigate('settings', 'palworld')">
                     <Settings2 :size="15" />编辑配置
                   </button>
+                  <button v-if="selectedGame.id === 'palworld' && canOpenPalworldMods" @click="navigate('mods', 'palworld')">
+                    <PackageSearch :size="15" />查看模组
+                  </button>
                   <button v-if="selectedGame.id === 'dont-starve-together' && canOpenDSTSettings" @click="navigate('settings', 'dont-starve-together')">
                     <Settings2 :size="15" />编辑配置
                   </button>
@@ -2403,6 +2471,14 @@ function gameAccent(id: string) {
                 <ChevronRight :size="17" />
               </button>
               <button
+                v-if="canOpenPalworldMods && selectedGame.id === 'palworld'"
+                @click="navigate('mods', 'palworld')"
+              >
+                <PackageSearch :size="18" />
+                <span><strong>查看官方模组</strong><small>已安装清单与兼容性检查</small></span>
+                <ChevronRight :size="17" />
+              </button>
+              <button
                 v-if="canOpenDSTSettings && selectedGame.id === 'dont-starve-together'"
                 @click="navigate('settings', 'dont-starve-together')"
               >
@@ -2417,6 +2493,113 @@ function gameAccent(id: string) {
               </button>
             </article>
           </section>
+        </template>
+
+        <template v-else-if="page === 'mods' && isAdmin">
+          <section class="settings-header mods-header">
+            <div>
+              <span class="eyebrow">PALWORLD · OFFICIAL MODS</span>
+              <h1>帕鲁官方模组</h1>
+              <p>读取 PalServer 默认 Workshop 目录与 PalModSettings.ini；当前阶段只检查，不改动任何模组文件。</p>
+            </div>
+            <button class="button secondary" :disabled="modsLoading" @click="loadModInventory">
+              <RefreshCw :size="16" :class="{ spin: modsLoading }" />重新扫描
+            </button>
+          </section>
+
+          <article class="settings-source-warning panel-card mods-readonly-notice">
+            <ShieldCheck :size="18" />
+            <div>
+              <strong>只读验收阶段</strong>
+              <span>这里暂不提供上传、安装、启用、停用或删除；Hearth 不会自动停止服务器，也不会执行模组中的内容。</span>
+            </div>
+          </article>
+
+          <div v-if="modsLoading && !modInventory" class="page-loader">
+            <LoaderCircle class="spin" :size="22" />正在扫描官方模组目录…
+          </div>
+
+          <article v-else-if="modsError" class="settings-source-warning panel-card danger mods-load-error">
+            <AlertTriangle :size="18" />
+            <div>
+              <strong>模组清单读取失败</strong>
+              <span>{{ modsError }}</span>
+            </div>
+            <button class="button secondary" :disabled="modsLoading" @click="loadModInventory">重试</button>
+          </article>
+
+          <template v-else-if="modInventory">
+            <section class="mod-summary-grid" aria-label="模组清单摘要">
+              <article class="panel-card">
+                <span>已识别模组</span>
+                <strong>{{ modInventory.mods.length }}</strong>
+                <small>默认 Workshop 目录</small>
+              </article>
+              <article class="panel-card">
+                <span>当前启用</span>
+                <strong>{{ enabledModCount }}</strong>
+                <small>由 PalModSettings.ini 判断</small>
+              </article>
+              <article class="panel-card">
+                <span>上次扫描</span>
+                <strong class="summary-time">{{ formatDateTime(modInventory.scannedAt) }}</strong>
+                <small>修订 {{ modInventory.revision.slice(0, 12) }}</small>
+              </article>
+            </section>
+
+            <article v-if="modInventory.warnings.length" class="panel-card mod-inventory-warnings">
+              <div class="card-heading">
+                <div><h2>目录检查提示</h2><p>其余合法模组仍会继续展示</p></div>
+                <AlertTriangle :size="19" />
+              </div>
+              <ul>
+                <li v-for="warning in modInventory.warnings" :key="warning">{{ warning }}</li>
+              </ul>
+            </article>
+
+            <section v-if="modInventory.mods.length === 0" class="panel-card mods-empty-state">
+              <span class="mods-empty-icon"><PackageOpen :size="31" /></span>
+              <h2>未发现已安装模组</h2>
+              <p>当前 PalServer 的 <code>Mods\Workshop</code> 默认目录中没有可识别的官方模组。</p>
+              <small>这属于正常状态，不影响服务器运行。后续安装能力上线前仍需按 Palworld 官方流程手动部署。</small>
+              <button class="button secondary" :disabled="modsLoading" @click="loadModInventory">
+                <RefreshCw :size="15" :class="{ spin: modsLoading }" />再次扫描
+              </button>
+            </section>
+
+            <section v-else class="mod-card-grid">
+              <article v-for="mod in modInventory.mods" :key="mod.id" class="panel-card mod-card">
+                <header>
+                  <span class="mod-package-icon"><PackageOpen :size="20" /></span>
+                  <div>
+                    <h2>{{ mod.name }}</h2>
+                    <code>{{ mod.id }}</code>
+                  </div>
+                  <span :class="['mod-enabled-chip', { enabled: mod.enabled }]">
+                    {{ mod.enabled ? "已启用" : "未启用" }}
+                  </span>
+                </header>
+                <div class="mod-chip-row">
+                  <span :class="['mod-compatibility-chip', mod.compatibility]">
+                    {{ modCompatibilityLabel(mod.compatibility) }}
+                  </span>
+                  <span>{{ modSourceLabel(mod.source) }}</span>
+                  <span>{{ mod.ownership === "external" ? "外部文件" : "Hearth 管理" }}</span>
+                </div>
+                <dl>
+                  <div><dt>版本</dt><dd>{{ mod.version || "未声明" }}</dd></div>
+                  <div><dt>来源目录</dt><dd><code>{{ mod.sourceReference }}</code></dd></div>
+                  <div>
+                    <dt>依赖</dt>
+                    <dd>{{ mod.dependencies.length ? mod.dependencies.join("、") : "未声明" }}</dd>
+                  </div>
+                </dl>
+                <ul v-if="mod.warnings.length" class="mod-card-warnings">
+                  <li v-for="warning in mod.warnings" :key="warning"><AlertTriangle :size="13" />{{ warning }}</li>
+                </ul>
+              </article>
+            </section>
+          </template>
         </template>
 
         <template v-else-if="page === 'system' && isAdmin">
