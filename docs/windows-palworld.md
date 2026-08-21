@@ -292,21 +292,42 @@ Palworld 下载进度。
 末尾 128 KiB，且接口只接受操作记录明确引用的日志文件。当前选中日志约每 0.75 秒刷新一次，
 因此启动任务完成后仍可继续查看 Palworld 或 DST 分片的控制台输出。
 
-## 1.4.1 开发中的官方模组清单
+## 1.4.1 开发中的官方模组管理
 
 Palworld [官方服务器指南](https://docs.palworldgame.com/settings-and-operation/mod/) 规定 Windows
 服务端从 PalServer 根目录的 `Mods\Workshop\<目录>\Info.json` 识别官方格式模组，并以
 `Mods\PalModSettings.ini` 中重复出现的 `ActiveModList=<PackageName>` 判断启用项。模组需要完整
 重启服务端后才由游戏自身部署。
 
-1.4.1 当前提供管理员“帕鲁模组”只读页面及 API `GET /api/v1/games/palworld/mods`，有界扫描默认
+1.4.1 提供管理员“帕鲁模组”页面及 API `GET /api/v1/games/palworld/mods`，有界扫描默认
 Workshop 目录，展示 PackageName、版本、启用状态、`IsServer` 兼容性和可识别依赖。没有安装模组时
 页面显示正常空状态。扫描不执行 JSON 中的规则、
 不跟随符号链接、不读取超限文件，也不会复制、重命名或删除任何模组。检测到
 `WorkshopRootDir` 时只提示尚未纳入当前清单，不会越过默认 PalServer 目录继续探测。
 
-这一只读阶段用于先用真实官方包确认元数据兼容性。上传/接管、启用/停用和移除必须继续满足
-停服、存档与配置备份、计划预览、重启验证及原文件回退后才会开放。
+安装采用两段确认：管理员先输入 Workshop ID 或 Steam 详情链接，Hearth 通过固定的 Steam 官方
+`GetPublishedFileDetails` 接口匿名读取名称、更新时间和文件大小；确认目标后，再上传从拥有
+Palworld 的 Steam 客户端 Workshop 缓存取得的完整目录 ZIP。Steam 不向匿名 SteamCMD 提供 Palworld
+Workshop 文件解密密钥，因此 Hearth 不会尝试匿名下载，也不保存 Steam 账号、密码或 Steam Guard。
+详情查询遵循 Go 标准的 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 环境变量；Windows 用户代理不会
+被后台计划任务可靠继承。仅在服务器无法直连 Steam API 时，才应给 Hearth 进程显式配置代理并
+重启任务，不需要在面板保存代理凭据。
+
+上传和安装边界如下：
+
+- Palworld 必须已停止；Hearth 不会为了安装模组自动停服或在完成后自动启动。
+- ZIP 最大 256 MiB，解压后最大 1 GiB、最多 8192 项；拒绝路径穿越、符号链接、特殊文件和大小写
+  重复路径。
+- ZIP 根目录或唯一的直接子目录必须包含 `Info.json`。数字目录名若存在，必须与已确认的 Workshop
+  ID 一致；`PackageName` 不能与现有模组重复，并且 `InstallRules` 必须明确包含 `IsServer=true`。
+- 完整校验在 `Mods/.hearth-staging` 中进行，通过后单次重命名为
+  `Mods/Workshop/<WorkshopID>`；失败只清理本次暂存或新建目录，不覆盖现有目录。
+- 安装成功后写入 `Mods/HearthManagedMods.json` 记录 Hearth 所有权，但不修改
+  `PalModSettings.ini`，所以新模组保持未启用。
+
+接管现有目录、启用、停用、移除和依赖自动安装仍需补齐配置备份、计划预览、重启验证及原文件
+回退后再开放。上传包无法通过 Steam API 加密证明一定对应所填 ID，管理员仍应在 Steam 页面和
+ZIP 内容之间自行核对；Hearth 会独立校验包格式和服务端兼容声明。
 
 ## 安全更新流程
 

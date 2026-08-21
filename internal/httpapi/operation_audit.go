@@ -22,6 +22,7 @@ const (
 	operationEventIPRuleRemoved         = "ip_rule_removed"
 	operationEventGameAdopted           = "game_adopted"
 	operationEventGameInstall           = "game_install_started"
+	operationEventPalworldModInstalled  = "palworld_mod_installed"
 	operationEventDSTTokenUpdated       = "dst_token_updated"
 	operationEventDSTConfigUpdated      = "dst_config_updated"
 	operationEventSystemUpdated         = "system_settings_updated"
@@ -193,6 +194,9 @@ func validOperationAuditEntry(entry operationAuditEntry) bool {
 			(entry.RuleKind == ipRuleAllow || entry.RuleKind == ipRuleDeny)
 	case operationEventGameAdopted, operationEventGameInstall:
 		return entry.TargetType == operationTargetGame && entry.TargetID != ""
+	case operationEventPalworldModInstalled:
+		return entry.ActorRole == roleAdmin && entry.TargetType == operationTargetGame &&
+			entry.TargetID == "palworld" && len(entry.Detail) <= 4096
 	case operationEventDSTTokenUpdated, operationEventDSTConfigUpdated:
 		return entry.ActorRole == roleAdmin && entry.TargetType == operationTargetGame && entry.TargetID == "dont-starve-together"
 	case operationEventSystemUpdated, operationEventPanelUpdateChecked, operationEventPanelUpdateStarted:

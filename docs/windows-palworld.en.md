@@ -324,23 +324,46 @@ separate console output show no View log action. Each request reads at most the 
 API accepts only files explicitly referenced by task history. The selected log refreshes about every
 0.75 seconds, including game-console output that continues after a launch task completes.
 
-## Official mod inventory under development for 1.4.1
+## Official mod management under development for 1.4.1
 
 The [official Palworld server guide](https://docs.palworldgame.com/settings-and-operation/mod/) defines
 the Windows server layout as `Mods\Workshop\<directory>\Info.json` beside PalServer and uses repeated
 `ActiveModList=<PackageName>` entries in `Mods\PalModSettings.ini` for enabled mods. Palworld itself deploys
 the declared files only after a full server restart.
 
-The current 1.4.1 slice provides an administrator-only Palworld Mods page and the endpoint
+The 1.4.1 slice provides an administrator-only Palworld Mods page and the endpoint
 `GET /api/v1/games/palworld/mods`. It performs a bounded scan of the default Workshop directory and reports
 PackageName, version, configured enabled state, recognizable `IsServer` compatibility, and dependency hints.
 A server with no installed mods shows a healthy empty state. The scan never executes rules from JSON, follows
 symlinks, reads oversized files, or copies, renames, and deletes mod content. An external `WorkshopRootDir`
 is reported but is not traversed in this first slice.
 
-This read-only phase lets real official packages validate the metadata model first. Upload/adoption, enable or
-disable, and removal stay hidden until stopped-server enforcement, save and configuration backup, plan preview,
-restart verification, and original-file rollback are complete.
+Installation uses two confirmations. An administrator first enters a Workshop ID or Steam detail URL. Hearth calls
+Steam's fixed, official `GetPublishedFileDetails` endpoint without a key and shows the title, update time, and file
+size. After confirming the target, the administrator uploads a ZIP of the complete directory obtained from a Steam
+client that owns Palworld. Anonymous SteamCMD does not receive the Palworld Workshop decryption key, so Hearth does
+not attempt anonymous file download and stores no Steam account, password, or Steam Guard data.
+Metadata lookup follows Go's standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables. A Windows
+interactive-user proxy is not reliably inherited by a background scheduled task. Only when the server cannot reach
+Steam directly, configure an explicit proxy for the Hearth process and restart the task; no proxy credential needs
+to be stored in the panel.
+
+The upload and installation boundary is deliberately narrow:
+
+- Palworld must be stopped. Hearth neither stops it automatically nor starts it after installation.
+- ZIP input is limited to 256 MiB, 1 GiB extracted data, and 8192 entries. Traversal, symlinks, special files, and
+  case-insensitive duplicate paths are rejected.
+- `Info.json` must be at archive root or in exactly one direct child. A numeric child directory must match the
+  confirmed Workshop ID; PackageName must be new; InstallRules must explicitly include `IsServer=true`.
+- Validation occurs under `Mods/.hearth-staging`, followed by one rename to `Mods/Workshop/<WorkshopID>`. Failure
+  removes only this staging or newly created target and never overwrites an existing directory.
+- A successful package is recorded in `Mods/HearthManagedMods.json` but `PalModSettings.ini` is unchanged, leaving
+  the new mod disabled.
+
+Existing-directory adoption, enable/disable, removal, and dependency installation remain hidden until configuration
+backup, plan preview, restart verification, and original-file rollback are complete. Steam's metadata API cannot
+cryptographically prove that an uploaded ZIP belongs to the entered ID, so the administrator must still compare the
+Steam page and package; Hearth independently validates format and the explicit server-compatibility declaration.
 
 ## Safe update flow
 

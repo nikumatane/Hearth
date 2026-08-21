@@ -4,8 +4,10 @@
 package mods
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
@@ -54,6 +56,37 @@ type Inventory struct {
 	Mods      []Descriptor `json:"mods"`
 	Warnings  []string     `json:"warnings"`
 	ScannedAt time.Time    `json:"scannedAt"`
+}
+
+// WorkshopItem is the public metadata Hearth can resolve without a Steam
+// account. It deliberately excludes HTML descriptions and arbitrary URLs so
+// callers can render a small, stable confirmation surface.
+type WorkshopItem struct {
+	ID          string     `json:"id"`
+	AppID       string     `json:"appId"`
+	Title       string     `json:"title"`
+	CreatorID   string     `json:"creatorId,omitempty"`
+	FileSize    int64      `json:"fileSize"`
+	UpdatedAt   *time.Time `json:"updatedAt,omitempty"`
+	WorkshopURL string     `json:"workshopUrl"`
+}
+
+// PackageInstallRequest carries an administrator-confirmed official Workshop
+// package. Package is streamed and must not be retained by the caller after
+// InstallWorkshopPackage returns.
+type PackageInstallRequest struct {
+	WorkshopID string
+	FileName   string
+	Package    io.Reader
+	Confirm    bool
+}
+
+// ManagementService is the mutation-capable extension of the read-only mod
+// inventory. Implementations must keep metadata lookup read-only and validate
+// package contents before committing files.
+type ManagementService interface {
+	LookupWorkshopItem(context.Context, string, string) (WorkshopItem, error)
+	InstallWorkshopPackage(context.Context, string, PackageInstallRequest) (Inventory, error)
 }
 
 type Action string

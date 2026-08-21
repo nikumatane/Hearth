@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -31,6 +33,9 @@ type dstWorldSettingsTestService struct {
 
 type modInventoryTestService struct {
 	*panel.DemoService
+	lookupReference string
+	installRequest  mods.PackageInstallRequest
+	packageContents string
 }
 
 func (s *modInventoryTestService) ModInventory(gameID string) (mods.Inventory, error) {
@@ -47,6 +52,33 @@ func (s *modInventoryTestService) ModInventory(gameID string) (mods.Inventory, e
 		}},
 		Warnings: []string{}, ScannedAt: time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC),
 	}, nil
+}
+
+func (s *modInventoryTestService) LookupWorkshopItem(_ context.Context, gameID, reference string) (mods.WorkshopItem, error) {
+	if gameID != "palworld" {
+		return mods.WorkshopItem{}, panel.ErrNotFound
+	}
+	s.lookupReference = reference
+	return mods.WorkshopItem{
+		ID: "3625223587", AppID: "1623730", Title: "UE4SS Experimental (Palworld)",
+		WorkshopURL: "https://steamcommunity.com/sharedfiles/filedetails/?id=3625223587",
+	}, nil
+}
+
+func (s *modInventoryTestService) InstallWorkshopPackage(
+	_ context.Context,
+	gameID string,
+	request mods.PackageInstallRequest,
+) (mods.Inventory, error) {
+	if gameID != "palworld" {
+		return mods.Inventory{}, panel.ErrNotFound
+	}
+	data, err := io.ReadAll(request.Package)
+	if err != nil {
+		return mods.Inventory{}, err
+	}
+	s.installRequest, s.packageContents = request, string(data)
+	return s.ModInventory(gameID)
 }
 
 func (s *dstWorldSettingsTestService) DSTWorldSettings() (panel.DSTWorldSettings, error) {
@@ -282,6 +314,60 @@ func TestPalworldModInventoryIsAdminOnlyAndReadOnly(t *testing.T) {
 	unsupported := requestForTest(t, handler, http.MethodGet, "/api/v1/games/dont-starve-together/mods", "", cookie)
 	if unsupported.Code != http.StatusNotFound {
 		t.Fatalf("DST mod inventory status = %d body = %s", unsupported.Code, unsupported.Body.String())
+	}
+}
+
+func TestPalworldWorkshopLookupAndInstallAreAdminOnlyConfirmedAndAudited(t *testing.T) {
+	service := &modInventoryTestService{DemoService: panel.NewDemoService()}
+	handler, err := New(config.Config{AdminPassword: "correct"}, service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthorized := requestForTest(
+		t, handler, http.MethodPost, "/api/v1/games/palworld/mods/workshop/lookup",
+		`{"reference":"3625223587"}`, nil,
+	)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous lookup status = %d", unauthorized.Code)
+	}
+	cookie := loginTestHandler(t, handler)
+	lookup := requestForTest(
+		t, handler, http.MethodPost, "/api/v1/games/palworld/mods/workshop/lookup",
+		`{"reference":"3625223587"}`, cookie,
+	)
+	if lookup.Code != http.StatusOK || service.lookupReference != "3625223587" ||
+		!strings.Contains(lookup.Body.String(), "UE4SS Experimental") {
+		t.Fatalf("lookup = %d %s reference=%q", lookup.Code, lookup.Body.String(), service.lookupReference)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("workshopId", "3625223587")
+	_ = writer.WriteField("confirm", "true")
+	file, err := writer.CreateFormFile("package", "ue4ss.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.Write([]byte("zip-data"))
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(
+		http.MethodPost, "/api/v1/games/palworld/mods/workshop/install", &body,
+	)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || service.installRequest.WorkshopID != "3625223587" ||
+		!service.installRequest.Confirm || service.installRequest.FileName != "ue4ss.zip" ||
+		service.packageContents != "zip-data" {
+		t.Fatalf("install = %d %s request=%#v data=%q", response.Code, response.Body.String(), service.installRequest, service.packageContents)
+	}
+	audit := requestForTest(t, handler, http.MethodGet, "/api/v1/access/operation-audit", "", cookie)
+	if audit.Code != http.StatusOK || !strings.Contains(audit.Body.String(), operationEventPalworldModInstalled) ||
+		!strings.Contains(audit.Body.String(), "3625223587") {
+		t.Fatalf("mod install audit = %d %s", audit.Code, audit.Body.String())
 	}
 }
 

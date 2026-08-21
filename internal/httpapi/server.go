@@ -21,6 +21,7 @@ import (
 
 	"hearth/internal/buildinfo"
 	"hearth/internal/config"
+	"hearth/internal/mods"
 	"hearth/internal/panel"
 	panelweb "hearth/web"
 )
@@ -38,6 +39,8 @@ type server struct {
 	devices         *deviceCookieManager
 	ipRules         *ipRuleStore
 }
+
+const maxWorkshopUploadRequestBytes = (256 << 20) + (1 << 20)
 
 func New(cfg config.Config, service panel.Service) (http.Handler, error) {
 	return NewWithUpdates(cfg, service, nil)
@@ -90,6 +93,8 @@ func NewWithUpdates(cfg config.Config, service panel.Service, updates panel.Pane
 	mux.HandleFunc("GET /api/v1/overview", s.auth(s.overview))
 	mux.HandleFunc("GET /api/v1/games/{id}", s.auth(s.game))
 	mux.HandleFunc("GET /api/v1/games/{id}/mods", s.admin(s.modInventory))
+	mux.HandleFunc("POST /api/v1/games/{id}/mods/workshop/lookup", s.admin(s.lookupWorkshopMod))
+	mux.HandleFunc("POST /api/v1/games/{id}/mods/workshop/install", s.admin(s.installWorkshopMod))
 	mux.HandleFunc("POST /api/v1/games/{id}/actions", s.auth(s.gameAction))
 	mux.HandleFunc(
 		"GET /api/v1/games/palworld/settings",
@@ -353,12 +358,16 @@ func (s *server) updateSystemSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) recordManagementOperation(r *http.Request, event, targetType, targetID string) {
+	s.recordManagementOperationDetail(r, event, targetType, targetID, "")
+}
+
+func (s *server) recordManagementOperationDetail(r *http.Request, event, targetType, targetID, detail string) {
 	identity, _ := principalFromContext(r.Context())
 	recordOperationAudit(s.operationAudits, operationAuditEntry{
 		ID: newAuditID(), Event: event,
 		ActorCredentialID: identity.CredentialID, ActorRole: identity.Role,
 		ActorIP: s.proxy.clientIP(r), TargetType: targetType, TargetID: targetID,
-		Success: true, CreatedAt: time.Now(),
+		Success: true, Detail: detail, CreatedAt: time.Now(),
 	})
 }
 
@@ -549,6 +558,80 @@ func (s *server) modInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, inventory)
+}
+
+func (s *server) modManagementService() (mods.ManagementService, error) {
+	provider, ok := s.service.(mods.ManagementService)
+	if !ok {
+		return nil, fmt.Errorf("%w: mod management is unavailable", panel.ErrNotFound)
+	}
+	return provider, nil
+}
+
+func (s *server) lookupWorkshopMod(w http.ResponseWriter, r *http.Request) {
+	provider, err := s.modManagementService()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	var request struct {
+		Reference string `json:"reference"`
+	}
+	if err := decodeJSONLimit(r, &request, 4<<10); err != nil {
+		writeError(w, http.StatusBadRequest, "Workshop 查询请求格式不正确")
+		return
+	}
+	item, err := provider.LookupWorkshopItem(r.Context(), r.PathValue("id"), request.Reference)
+	if err != nil {
+		slog.Warn("lookup Steam Workshop item", "game", r.PathValue("id"), "error", err)
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (s *server) installWorkshopMod(w http.ResponseWriter, r *http.Request) {
+	provider, err := s.modManagementService()
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxWorkshopUploadRequestBytes)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			writeError(w, http.StatusRequestEntityTooLarge, "模组 ZIP 超过 256 MiB 上传限制")
+		} else {
+			writeError(w, http.StatusBadRequest, "模组上传请求格式不正确")
+		}
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	file, header, err := r.FormFile("package")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "请选择完整 Workshop 模组 ZIP 包")
+		return
+	}
+	defer file.Close()
+	if header.Size <= 0 || header.Size > 256<<20 {
+		writeError(w, http.StatusRequestEntityTooLarge, "模组 ZIP 必须在 1 B 到 256 MiB 之间")
+		return
+	}
+	inventory, err := provider.InstallWorkshopPackage(r.Context(), r.PathValue("id"), mods.PackageInstallRequest{
+		WorkshopID: r.FormValue("workshopId"), FileName: header.Filename,
+		Package: file, Confirm: strings.EqualFold(r.FormValue("confirm"), "true"),
+	})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	s.recordManagementOperationDetail(
+		r, operationEventPalworldModInstalled, operationTargetGame, r.PathValue("id"),
+		"Workshop ID "+r.FormValue("workshopId")+" 已校验并安装；未修改启用配置",
+	)
+	writeJSON(w, http.StatusCreated, inventory)
 }
 
 func (s *server) gameAction(w http.ResponseWriter, r *http.Request) {

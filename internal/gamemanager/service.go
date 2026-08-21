@@ -1,6 +1,7 @@
 package gamemanager
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -288,6 +289,42 @@ func (s *Service) ModInventory(gameID string) (mods.Inventory, error) {
 		return mods.Inventory{}, panel.ErrNotFound
 	}
 	return provider.ModInventory()
+}
+
+func (s *Service) LookupWorkshopItem(ctx context.Context, gameID, reference string) (mods.WorkshopItem, error) {
+	if gameID != palworldID {
+		return mods.WorkshopItem{}, panel.ErrNotFound
+	}
+	s.mu.RLock()
+	delegate := s.delegate
+	s.mu.RUnlock()
+	provider, ok := delegate.(interface {
+		LookupWorkshopItem(context.Context, string) (mods.WorkshopItem, error)
+	})
+	if !ok {
+		return mods.WorkshopItem{}, panel.ErrNotFound
+	}
+	return provider.LookupWorkshopItem(ctx, reference)
+}
+
+func (s *Service) InstallWorkshopPackage(
+	ctx context.Context,
+	gameID string,
+	request mods.PackageInstallRequest,
+) (mods.Inventory, error) {
+	if gameID != palworldID {
+		return mods.Inventory{}, panel.ErrNotFound
+	}
+	s.mu.RLock()
+	delegate := s.delegate
+	s.mu.RUnlock()
+	provider, ok := delegate.(interface {
+		InstallWorkshopPackage(context.Context, mods.PackageInstallRequest) (mods.Inventory, error)
+	})
+	if !ok {
+		return mods.Inventory{}, panel.ErrNotFound
+	}
+	return provider.InstallWorkshopPackage(ctx, request)
 }
 
 func (s *Service) UpdatePalworldSettings(patch panel.PalworldSettingsPatch) (panel.PalworldSettings, error) {

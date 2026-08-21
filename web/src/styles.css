@@ -3286,6 +3286,158 @@ textarea:focus-visible {
   margin-left: auto;
 }
 
+.workshop-installer {
+  margin-top: 18px;
+  padding: 22px;
+}
+
+.workshop-installer > .card-heading {
+  padding: 0;
+}
+
+.workshop-installer > .card-heading svg {
+  color: #91a9ff;
+}
+
+.workshop-lookup-row,
+.workshop-package-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.workshop-lookup-row {
+  margin-top: 20px;
+}
+
+.workshop-lookup-row label,
+.workshop-package-row label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workshop-lookup-row input,
+.workshop-package-row input[type="file"] {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text);
+  background: rgba(8, 13, 22, .62);
+}
+
+.workshop-lookup-row input {
+  padding: 0 13px;
+}
+
+.workshop-package-row input[type="file"] {
+  padding: 8px 10px;
+}
+
+.workshop-package-row input[type="file"]::file-selector-button {
+  margin-right: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: #cbd5e8;
+  background: rgba(255, 255, 255, .045);
+  cursor: pointer;
+}
+
+.workshop-item-preview {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid rgba(120, 152, 255, .2);
+  border-radius: 12px;
+  background: rgba(120, 152, 255, .045);
+}
+
+.workshop-item-preview > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workshop-item-preview h3 {
+  margin: 3px 0 4px;
+  font-size: 17px;
+}
+
+.workshop-item-preview small,
+.workshop-item-preview dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.workshop-item-preview dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 12px;
+}
+
+.workshop-item-preview dl > div {
+  padding: 11px;
+  border: 1px solid rgba(255, 255, 255, .055);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .09);
+}
+
+.workshop-item-preview dd {
+  margin: 5px 0 0;
+  color: #dce3ef;
+  font-size: 12px;
+}
+
+.workshop-item-preview > a {
+  color: #9cb1ff;
+  font-size: 12px;
+}
+
+.workshop-confirm-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 18px 0 14px;
+  padding: 12px;
+  border-radius: 9px;
+  color: #c5cedc;
+  background: rgba(0, 0, 0, .12);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.workshop-confirm-row input {
+  margin-top: 2px;
+}
+
+.workshop-package-row label.disabled {
+  opacity: .55;
+}
+
+.workshop-install-note {
+  display: block;
+  margin-top: 12px;
+  line-height: 1.65;
+}
+
+@media (max-width: 720px) {
+  .workshop-lookup-row,
+  .workshop-package-row,
+  .workshop-item-preview dl {
+    grid-template-columns: 1fr;
+  }
+
+  .workshop-lookup-row .button,
+  .workshop-package-row .button {
+    width: 100%;
+  }
+}
+
 .mod-summary-grid {
   margin-top: 18px;
   display: grid;

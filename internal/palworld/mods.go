@@ -24,6 +24,7 @@ const (
 	maxPalworldWorkshopEntries = 256
 	maxPalworldModInfoBytes    = 1 << 20
 	maxPalworldModSettingsSize = 1 << 20
+	maxPalworldManagedModsSize = 1 << 20
 )
 
 type palworldModInfo struct {
@@ -32,6 +33,16 @@ type palworldModInfo struct {
 	Version      string
 	InstallRules json.RawMessage
 	Dependencies json.RawMessage
+}
+
+type palworldManagedMod struct {
+	PackageName string    `json:"packageName"`
+	InstalledAt time.Time `json:"installedAt"`
+}
+
+type palworldManagedMods struct {
+	Version int                           `json:"version"`
+	Mods    map[string]palworldManagedMod `json:"mods"`
 }
 
 func (s *Service) ModInventory() (modmodel.Inventory, error) {
@@ -46,6 +57,14 @@ func scanPalworldMods(installDir string, now time.Time) (modmodel.Inventory, err
 		GameID: palworldID, Managed: true, Mods: []modmodel.Descriptor{}, Warnings: []string{}, ScannedAt: now,
 	}
 	hash := sha256.New()
+	managedMods, managedData, managedWarning := readPalworldManagedMods(installDir)
+	if len(managedData) > 0 {
+		_, _ = hash.Write([]byte("managed\x00"))
+		_, _ = hash.Write(managedData)
+	}
+	if managedWarning != "" {
+		inventory.Warnings = append(inventory.Warnings, managedWarning)
+	}
 	settingsPath := filepath.Join(installDir, "Mods", "PalModSettings.ini")
 	settingsData, settingsErr := readBoundedModFile(settingsPath, maxPalworldModSettingsSize)
 	globalEnabled, activePackages, externalRoot := false, map[string]string{}, ""
@@ -133,12 +152,16 @@ func scanPalworldMods(installDir string, now time.Time) (modmodel.Inventory, err
 			warnings = append(warnings, dependencyWarning)
 		}
 		_, enabled := activePackages[packageKey]
+		source, ownership := modmodel.SourceOfficialPackage, modmodel.OwnershipExternal
+		if managed, ok := managedMods[entry.Name()]; ok && strings.EqualFold(managed.PackageName, info.PackageName) {
+			source, ownership = modmodel.SourceSteamWorkshop, modmodel.OwnershipHearth
+		}
 		inventory.Mods = append(inventory.Mods, modmodel.Descriptor{
 			ID: info.PackageName, GameID: palworldID, Name: info.Name,
-			Source:          modmodel.SourceOfficialPackage,
+			Source:          source,
 			SourceReference: filepath.ToSlash(filepath.Join("Mods", "Workshop", entry.Name())),
 			Version:         info.Version, Enabled: globalEnabled && enabled,
-			Ownership: modmodel.OwnershipExternal, Compatibility: compatibility,
+			Ownership: ownership, Compatibility: compatibility,
 			Dependencies: dependencies, Warnings: warnings,
 		})
 	}
@@ -148,6 +171,63 @@ func scanPalworldMods(installDir string, now time.Time) (modmodel.Inventory, err
 	appendMissingActiveWarnings(&inventory, activePackages, seenPackages)
 	inventory.Revision = fmt.Sprintf("%x", hash.Sum(nil))
 	return inventory, nil
+}
+
+func palworldManagedModsPath(installDir string) string {
+	return filepath.Join(installDir, "Mods", "HearthManagedMods.json")
+}
+
+func readPalworldManagedMods(installDir string) (map[string]palworldManagedMod, []byte, string) {
+	path := palworldManagedModsPath(installDir)
+	data, err := readBoundedModFile(path, maxPalworldManagedModsSize)
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]palworldManagedMod{}, nil, ""
+	}
+	if err != nil {
+		return map[string]palworldManagedMod{}, nil, "HearthManagedMods.json 无法安全读取，模组按外部文件处理"
+	}
+	var document palworldManagedMods
+	if json.Unmarshal(data, &document) != nil || document.Version != 1 || document.Mods == nil {
+		return map[string]palworldManagedMod{}, data, "HearthManagedMods.json 无效，模组按外部文件处理"
+	}
+	valid := make(map[string]palworldManagedMod, len(document.Mods))
+	invalidEntry := false
+	for id, item := range document.Mods {
+		if !safeWorkshopID(id) || !safePalworldPackageName(item.PackageName) || item.InstalledAt.IsZero() {
+			invalidEntry = true
+			continue
+		}
+		valid[id] = item
+	}
+	if invalidEntry {
+		return valid, data, "HearthManagedMods.json 包含无效接管记录；为避免覆盖，新的模组安装已暂停"
+	}
+	return valid, data, ""
+}
+
+func writePalworldManagedMods(installDir string, managed map[string]palworldManagedMod) error {
+	document := palworldManagedMods{Version: 1, Mods: managed}
+	data, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(palworldManagedModsPath(installDir)), 0o700); err != nil {
+		return err
+	}
+	return atomicWriteFile(palworldManagedModsPath(installDir), data)
+}
+
+func safeWorkshopID(value string) bool {
+	if value == "" || len(value) > 20 {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return value != "0"
 }
 
 func readBoundedModFile(path string, maxBytes int64) ([]byte, error) {

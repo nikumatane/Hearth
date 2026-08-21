@@ -21,11 +21,13 @@ import (
 	"hearth/internal/config"
 	"hearth/internal/panel"
 	"hearth/internal/steamapp"
+	"hearth/internal/steamworkshop"
 )
 
 const (
 	palworldID                              = "palworld"
 	palworldAppID                           = "2394010"
+	palworldWorkshopAppID                   = "1623730"
 	defaultBackupRetentionDays              = 30
 	defaultBackupMaxTotalGB           int64 = 20
 	defaultSteamNoProgressMinutes           = 30
@@ -45,6 +47,7 @@ type Service struct {
 	config   config.GameConfig
 	platform platformAdapter
 	rest     *restClient
+	workshop *steamworkshop.Client
 	ctx      context.Context
 	cancel   context.CancelFunc
 
@@ -93,7 +96,10 @@ func NewService(gameConfig config.GameConfig) (*Service, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	service := &Service{config: gameConfig, platform: nativePlatform{}, ctx: ctx, cancel: cancel}
+	service := &Service{
+		config: gameConfig, platform: nativePlatform{}, workshop: steamworkshop.NewClient(),
+		ctx: ctx, cancel: cancel,
+	}
 	client, err := newRESTClient(gameConfig.RESTURL, gameConfig.RESTUsername, func() (string, error) {
 		return readAdminPassword(gameConfig.SettingsFile)
 	})

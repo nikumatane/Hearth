@@ -13,16 +13,24 @@ Future releases are tracked in the [roadmap](ROADMAP.en.md).
 
 ### 1.4.1 in development
 
-- Add an administrator-only, read-only inventory API for Palworld's official mod format. It scans the bounded
+- Add an administrator-only inventory API for Palworld's official mod format. It scans the bounded
   default `Mods/Workshop/*/Info.json` tree and combines `Mods/PalModSettings.ini` to report PackageName,
   version, enabled state, server compatibility, dependency hints, and source directory. Members cannot access it.
 - Never follow symlinks, execute mod content, or modify files during a scan; bound both file sizes and direct
   child count. Report malformed metadata, duplicate PackageName values, configured-but-missing mods, and an
-  external `WorkshopRootDir` without hiding other valid entries. Upload, copy, enable, disable, and removal APIs
-  remain unavailable in this slice.
+  external `WorkshopRootDir` without hiding other valid entries.
 - Add an administrator Palworld Mods entry in the sidebar and game details. It presents scan summary,
   compatibility, dependencies, and directory warnings. A server with no mods gets an explicit healthy empty state
   instead of an error or any suggestion that Hearth installed content automatically.
+- Accept a Steam Workshop ID or detail URL and use Steam's keyless official details endpoint to show title, update
+  time, and file size before confirmation. The administrator then uploads the complete ZIP obtained by a Steam
+  client. Hearth stores no Steam password and never represents anonymous metadata lookup as anonymous file download.
+- Install only while Palworld is stopped. Limit uploads to 256 MiB and extracted data to 1 GiB; reject traversal,
+  symlinks, duplicate paths, mismatched numeric Workshop directories, invalid `Info.json`, duplicate PackageName,
+  and packages that do not explicitly declare `IsServer=true`. Stage on the same volume and commit with one rename,
+  removing the newly created target on failure.
+- Record a successful package as Hearth-managed but leave it disabled, without changing `PalModSettings.ini` or
+  starting Palworld. Existing-directory adoption, enable, disable, removal, and dependency installation remain hidden.
 
 ## 1.4.0 - 2026-08-18
 

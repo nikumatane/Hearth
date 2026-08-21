@@ -85,8 +85,8 @@ Status: complete on Windows.
 
 ## 1.4.1 · Official Palworld mod management
 
-Status: in development (the bounded default-directory inventory, administrator API, and read-only page are complete;
-mutations remain hidden).
+Status: in development (inventory, anonymous ID confirmation, and stopped-server ZIP installation are complete;
+adoption, enable/disable, and removal remain hidden).
 
 - Support only the official Palworld dedicated-server package and Workshop-directory format. Inspect `Info.json`,
   server compatibility, package name, version, and dependencies instead of supporting legacy loose injectors or

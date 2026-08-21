@@ -13,14 +13,22 @@
 
 ### 1.4.1 开发中
 
-- 新增管理员专属的 Palworld 官方模组只读清单 API：有界扫描 PalServer 默认
+- 新增管理员专属的 Palworld 官方模组清单 API：有界扫描 PalServer 默认
   `Mods/Workshop/*/Info.json`，结合 `Mods/PalModSettings.ini` 展示 PackageName、版本、启用状态、
   服务端兼容标记、依赖提示和来源目录；成员不能访问。
 - 扫描不会跟随符号链接、执行模组内容或修改文件；单文件和直接子目录数量均有限制。格式错误、
   重复 PackageName、配置中启用但未找到的模组及外部 `WorkshopRootDir` 会明确提示，但不会阻塞
-  其余合法清单。当前阶段没有上传、复制、启停或删除接口。
+  其余合法清单。
 - 管理员侧栏和 Palworld 详情页新增“帕鲁模组”入口，展示扫描摘要、兼容性、依赖与目录告警；
   没有安装模组时显示明确的正常空状态，不把空目录误报为读取失败或暗示已自动安装。
+- 支持输入 Steam Workshop ID 或详情链接，使用无需 API Key 的官方详情接口先展示模组名称、
+  更新时间和文件大小，再由管理员确认并上传从 Steam 客户端取得的完整 ZIP。Hearth 不保存 Steam
+  账号密码，也不会把匿名详情查询误报为可以匿名下载 Workshop 文件。
+- 模组安装仅在 Palworld 停服时执行；ZIP 上传限制为 256 MiB，解压总量限制为 1 GiB，并拒绝路径
+  穿越、符号链接、重复路径、错误 Workshop 目录 ID、无效 `Info.json`、重复 PackageName 和未明确
+  声明 `IsServer=true` 的包。通过同卷暂存与单次重命名提交，失败时移除本次新目录。
+- 安装成功的包记录为 Hearth 管理来源但保持未启用，不修改 `PalModSettings.ini`，也不自动启动
+  Palworld。接管现有目录、启用、停用、移除及依赖自动安装仍未开放。
 
 ## 1.4.0 - 2026-08-18
 

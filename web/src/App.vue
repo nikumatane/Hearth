@@ -66,7 +66,8 @@ import {
   type PanelUpdateStatus,
   type Permission,
   type Session,
-  type Setting
+  type Setting,
+  type WorkshopItem
 } from "./api";
 import Sparkline from "./components/Sparkline.vue";
 import {
@@ -170,6 +171,13 @@ const dstConfigSaving = ref(false);
 const modInventory = ref<ModInventory | null>(null);
 const modsLoading = ref(false);
 const modsError = ref("");
+const workshopReference = ref("");
+const workshopItem = ref<WorkshopItem | null>(null);
+const workshopLookupBusy = ref(false);
+const workshopConfirmed = ref(false);
+const workshopPackage = ref<File | null>(null);
+const workshopInstallBusy = ref(false);
+const workshopPackageInputKey = ref(0);
 const dstActiveDirty = computed(() => {
   if (dstSettingsMode.value === "advanced") return dstConfigDirty.value;
   if (dstSettingsMode.value === "world") return dstWorldDirty.value;
@@ -642,6 +650,91 @@ async function loadModInventory() {
   } finally {
     modsLoading.value = false;
   }
+}
+
+function resetWorkshopLookup() {
+  workshopItem.value = null;
+  workshopConfirmed.value = false;
+  workshopPackage.value = null;
+  workshopPackageInputKey.value += 1;
+}
+
+async function lookupWorkshopMod() {
+  const reference = workshopReference.value.trim();
+  if (!reference || workshopLookupBusy.value) return;
+  workshopLookupBusy.value = true;
+  resetWorkshopLookup();
+  try {
+    workshopItem.value = await api.lookupWorkshopMod("palworld", reference);
+  } catch (error) {
+    if (isUnauthorized(error)) {
+      handleSessionExpired();
+      return;
+    }
+    showToast("error", error instanceof Error ? error.message : "Workshop 模组查询失败");
+  } finally {
+    workshopLookupBusy.value = false;
+  }
+}
+
+function selectWorkshopPackage(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0] ?? null;
+  if (!file) {
+    workshopPackage.value = null;
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith(".zip")) {
+    input.value = "";
+    workshopPackage.value = null;
+    showToast("error", "请选择完整 Workshop 模组 ZIP 包");
+    return;
+  }
+  if (file.size <= 0 || file.size > 256 * 1024 * 1024) {
+    input.value = "";
+    workshopPackage.value = null;
+    showToast("error", "模组 ZIP 必须在 1 B 到 256 MiB 之间");
+    return;
+  }
+  workshopPackage.value = file;
+}
+
+async function installWorkshopMod() {
+  if (!workshopItem.value || !workshopConfirmed.value || !workshopPackage.value || workshopInstallBusy.value) return;
+  workshopInstallBusy.value = true;
+  try {
+    const inventory = await api.installWorkshopMod(
+      "palworld",
+      workshopItem.value.id,
+      workshopPackage.value
+    );
+    modInventory.value = {
+      ...inventory,
+      mods: (inventory.mods ?? []).map((mod) => ({
+        ...mod,
+        dependencies: mod.dependencies ?? [],
+        warnings: mod.warnings ?? []
+      })),
+      warnings: inventory.warnings ?? []
+    };
+    showToast("success", `${workshopItem.value.title} 已安装并保持未启用`);
+    workshopReference.value = "";
+    resetWorkshopLookup();
+  } catch (error) {
+    if (isUnauthorized(error)) {
+      handleSessionExpired();
+      return;
+    }
+    showToast("error", error instanceof Error ? error.message : "模组安装失败");
+  } finally {
+    workshopInstallBusy.value = false;
+  }
+}
+
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "Steam 未提供";
+  const mib = bytes / (1024 * 1024);
+  return mib >= 1 ? `${mib.toFixed(mib >= 10 ? 1 : 2)} MiB` : `${Math.ceil(bytes / 1024)} KiB`;
 }
 
 async function loadPanelUpdate(silent = false): Promise<boolean> {
@@ -1750,6 +1843,7 @@ function operationActionLabel(entry: OperationAuditEntry) {
     case "ip_rule_removed": return `删除${entry.ruleKind === "deny" ? "黑" : "白"}名单规则`;
     case "game_adopted": return "接管游戏服务器";
     case "game_install_started": return "启动游戏安装";
+    case "palworld_mod_installed": return "安装 Palworld 模组";
     case "dst_token_updated": return "更新 DST Cluster Token";
     case "system_settings_updated": return "保存后台设置";
     case "panel_update_checked": return "检查面板更新";
@@ -1789,6 +1883,7 @@ function operationDetailLabel(entry: OperationAuditEntry) {
   if (entry.event === "member_deleted") return "成员凭据已删除，原会话已失效";
   if (entry.event === "game_adopted") return "已保存经确认的现有安装路径";
   if (entry.event === "game_install_started") return "安装任务已进入队列，完成后不会自动启动";
+  if (entry.event === "palworld_mod_installed") return entry.detail || "模组包已校验并安装，启用状态未修改";
   if (entry.event === "dst_token_updated") return "Token 已写入 DST cluster_token.txt；审计不保存 Token 内容";
   if (entry.event === "system_settings_updated") return "配置已保存；页面会提示是否需要重启 Hearth";
   if (entry.event === "panel_update_checked") return "已查询固定官方仓库的 Release 元数据";
@@ -2500,7 +2595,7 @@ function gameAccent(id: string) {
             <div>
               <span class="eyebrow">PALWORLD · OFFICIAL MODS</span>
               <h1>帕鲁官方模组</h1>
-              <p>读取 PalServer 默认 Workshop 目录与 PalModSettings.ini；当前阶段只检查，不改动任何模组文件。</p>
+              <p>先核对 Steam Workshop 模组身份，再上传完整官方包；安装与启用保持为两个独立操作。</p>
             </div>
             <button class="button secondary" :disabled="modsLoading" @click="loadModInventory">
               <RefreshCw :size="16" :class="{ spin: modsLoading }" />重新扫描
@@ -2510,10 +2605,88 @@ function gameAccent(id: string) {
           <article class="settings-source-warning panel-card mods-readonly-notice">
             <ShieldCheck :size="18" />
             <div>
-              <strong>只读验收阶段</strong>
-              <span>这里暂不提供上传、安装、启用、停用或删除；Hearth 不会自动停止服务器，也不会执行模组中的内容。</span>
+              <strong>安全安装边界</strong>
+              <span>Steam 不开放 Palworld 模组匿名下载。Hearth 只匿名查询名称；安装前需停止 Palworld 并上传完整 ZIP，且不会自动启用或启动服务器。</span>
             </div>
           </article>
+
+          <section class="panel-card workshop-installer" aria-labelledby="workshop-installer-title">
+            <div class="card-heading">
+              <div>
+                <h2 id="workshop-installer-title">从 Steam Workshop 安装</h2>
+                <p>输入 ID 或详情链接，先确认名称，再上传从 Steam 客户端取得的完整模组目录 ZIP。</p>
+              </div>
+              <PackageSearch :size="20" />
+            </div>
+            <div class="workshop-lookup-row">
+              <label>
+                <span>Workshop ID 或链接</span>
+                <input
+                  v-model="workshopReference"
+                  type="text"
+                  placeholder="例如 3625223587"
+                  :disabled="workshopLookupBusy || workshopInstallBusy"
+                  @input="resetWorkshopLookup"
+                  @keydown.enter.prevent="lookupWorkshopMod"
+                />
+              </label>
+              <button
+                class="button secondary"
+                :disabled="!workshopReference.trim() || workshopLookupBusy || workshopInstallBusy"
+                @click="lookupWorkshopMod"
+              >
+                <LoaderCircle v-if="workshopLookupBusy" class="spin" :size="16" />
+                <Search v-else :size="16" />
+                {{ workshopLookupBusy ? "查询中" : "查询模组" }}
+              </button>
+            </div>
+
+            <article v-if="workshopItem" class="workshop-item-preview">
+              <div>
+                <span class="mod-package-icon"><PackageOpen :size="20" /></span>
+                <div>
+                  <small>已识别 Palworld Workshop 项目</small>
+                  <h3>{{ workshopItem.title }}</h3>
+                  <code>{{ workshopItem.id }}</code>
+                </div>
+              </div>
+              <dl>
+                <div><dt>官方文件大小</dt><dd>{{ formatFileSize(workshopItem.fileSize) }}</dd></div>
+                <div><dt>上次更新</dt><dd>{{ workshopItem.updatedAt ? formatDateTime(workshopItem.updatedAt) : "Steam 未提供" }}</dd></div>
+                <div><dt>所属应用</dt><dd>Palworld · {{ workshopItem.appId }}</dd></div>
+              </dl>
+              <a :href="workshopItem.workshopUrl" target="_blank" rel="noreferrer">在 Steam 中再次核对</a>
+
+              <label class="workshop-confirm-row">
+                <input v-model="workshopConfirmed" type="checkbox" :disabled="workshopInstallBusy" />
+                <span>我已确认名称与 Workshop ID 正确，并理解上传包仍会独立校验 <code>Info.json</code>。</span>
+              </label>
+              <div class="workshop-package-row">
+                <label :class="{ disabled: !workshopConfirmed }">
+                  <span>完整模组 ZIP</span>
+                  <input
+                    :key="workshopPackageInputKey"
+                    type="file"
+                    accept=".zip,application/zip"
+                    :disabled="!workshopConfirmed || workshopInstallBusy"
+                    @change="selectWorkshopPackage"
+                  />
+                </label>
+                <button
+                  class="button primary"
+                  :disabled="!workshopConfirmed || !workshopPackage || workshopInstallBusy"
+                  @click="installWorkshopMod"
+                >
+                  <LoaderCircle v-if="workshopInstallBusy" class="spin" :size="16" />
+                  <PackageOpen v-else :size="16" />
+                  {{ workshopInstallBusy ? "上传并校验中" : "确认安装" }}
+                </button>
+              </div>
+              <small class="workshop-install-note">
+                ZIP 根目录或唯一的直接子目录必须包含 <code>Info.json</code>；最大 256 MiB，解压上限 1 GiB。安装成功后模组保持未启用。
+              </small>
+            </article>
+          </section>
 
           <div v-if="modsLoading && !modInventory" class="page-loader">
             <LoaderCircle class="spin" :size="22" />正在扫描官方模组目录…
@@ -2561,7 +2734,7 @@ function gameAccent(id: string) {
               <span class="mods-empty-icon"><PackageOpen :size="31" /></span>
               <h2>未发现已安装模组</h2>
               <p>当前 PalServer 的 <code>Mods\Workshop</code> 默认目录中没有可识别的官方模组。</p>
-              <small>这属于正常状态，不影响服务器运行。后续安装能力上线前仍需按 Palworld 官方流程手动部署。</small>
+              <small>这属于正常状态，不影响服务器运行。可在上方先查询 Workshop 项目，再上传完整官方包安装。</small>
               <button class="button secondary" :disabled="modsLoading" @click="loadModInventory">
                 <RefreshCw :size="15" :class="{ spin: modsLoading }" />再次扫描
               </button>

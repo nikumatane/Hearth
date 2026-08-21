@@ -60,6 +60,16 @@ export type ModInventory = {
   scannedAt: string;
 };
 
+export type WorkshopItem = {
+  id: string;
+  appId: string;
+  title: string;
+  creatorId?: string;
+  fileSize: number;
+  updatedAt?: string;
+  workshopUrl: string;
+};
+
 export type Activity = {
   id: string;
   gameId?: string;
@@ -178,7 +188,7 @@ export type LoginAuditEntry = {
 export type OperationAuditEntry = {
   id: string;
   event: "member_created" | "member_updated" | "member_deleted" | "ip_rule_added" | "ip_rule_removed" |
-    "game_adopted" | "game_install_started" | "dst_token_updated" | "system_settings_updated" |
+    "game_adopted" | "game_install_started" | "palworld_mod_installed" | "dst_token_updated" | "system_settings_updated" |
     "panel_update_checked" | "panel_update_started" | "panel_update_succeeded" |
     "panel_update_rolled_back" | "panel_update_failed";
   actorCredentialId: string;
@@ -372,11 +382,13 @@ class APIError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const hasBody = init?.body !== undefined && init.body !== null;
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const response = await fetch(path, {
     credentials: "same-origin",
     ...init,
     headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(hasBody && !isFormData ? { "Content-Type": "application/json" } : {}),
       ...init?.headers
     }
   });
@@ -402,6 +414,21 @@ export const api = {
   game: (id: string) => request<Game>(`/api/v1/games/${id}`),
   modInventory: (id: string) =>
     request<ModInventory>(`/api/v1/games/${encodeURIComponent(id)}/mods`),
+  lookupWorkshopMod: (id: string, reference: string) =>
+    request<WorkshopItem>(`/api/v1/games/${encodeURIComponent(id)}/mods/workshop/lookup`, {
+      method: "POST",
+      body: JSON.stringify({ reference })
+    }),
+  installWorkshopMod: (id: string, workshopId: string, packageFile: File) => {
+    const form = new FormData();
+    form.set("workshopId", workshopId);
+    form.set("confirm", "true");
+    form.set("package", packageFile, packageFile.name);
+    return request<ModInventory>(`/api/v1/games/${encodeURIComponent(id)}/mods/workshop/install`, {
+      method: "POST",
+      body: form
+    });
+  },
   action: (id: string, action: string, allowUnsafe = false) =>
     request<Activity>(`/api/v1/games/${id}/actions`, {
       method: "POST",
